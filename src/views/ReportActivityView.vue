@@ -4,7 +4,7 @@
   >
     <!-- Header -->
     <div class="flex w-full">
-      <RouterLink to="/report" class="text-black text-xl hover:text-gray-700 transition" title="Back">
+      <RouterLink to="/reportActivityList" class="text-black text-xl hover:text-gray-700 transition" title="Back">
         <i class="fa-solid fa-arrow-left"></i>
       </RouterLink>
     </div>

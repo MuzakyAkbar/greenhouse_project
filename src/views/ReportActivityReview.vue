@@ -1,22 +1,23 @@
 <template>
-  <div class="min-h-screen bg-[#FFFCA9] flex flex-col items-center p-4 sm:p-6 md:p-10 rounded-2xl">
-    <div class="flex w-full">
+  <div class="min-h-screen bg-[#FFFCA9] flex flex-col items-center p-4 sm:p-6 md:p-10 rounded-2xl relative">
+    <div class="absolute top-6 left-6">
       <RouterLink
-        to="/report"
-        class="text-black text-xl hover:text-gray-700 transition"
-        title="Back"
+        to="/reportActivityList"
+        class="text-black text-2xl hover:text-gray-700 transition"
+        title="Kembali ke Dashboard"
       >
         <i class="fa-solid fa-arrow-left"></i>
       </RouterLink>
     </div>
-    <div class="flex w-full justify-center items-center mb-6">
+
+    <!-- Judul -->
+    <div class="flex w-full justify-center items-center mb-6 mt-6">
       <h1 class="text-3xl sm:text-4xl font-bold text-black">Form</h1>
-      <div class="w-6"></div>
     </div>
 
     <!-- Date Picker -->
     <div class="w-full max-w-3xl mb-6">
-      <div class="flex items-center gap-3 bg-white border border-black rounded-lg px-3 py-2 w-fit">
+      <div class="flex items-center gap-3 bg-white border border-black rounded-lg px-3 py-2 w-fit mx-auto">
         <i class="fa-solid fa-calendar text-lg"></i>
         <span class="font-medium">17/10/2025</span>
       </div>
@@ -85,23 +86,24 @@
     <!-- Action Buttons -->
     <div class="w-full max-w-3xl flex flex-col sm:flex-row gap-4 justify-between mt-8">
       <router-link
-        to="/report"
+        to="/reportActivityList"
         class="w-full sm:w-1/2 bg-[#69A851] hover:bg-[#5B9546] text-white font-semibold py-3 rounded-lg border border-[#4D734D] transition-all shadow-sm text-center"
       >
         Approve
       </router-link>
 
-      <RouterLink to="/report"
+      <router-link
+        to="/reportActivityList"
         class="w-full sm:w-1/2 bg-[#E8473C] hover:bg-[#D43D34] text-white font-semibold py-3 rounded-lg border border-[#A62820] transition-all shadow-sm text-center"
       >
         Revision
-      </RouterLink>
+      </router-link>
     </div>
   </div>
 </template>
 
 <script setup>
-import { RouterLink, RouterView } from 'vue-router'
+import { RouterLink } from 'vue-router'
 </script>
 
 <style scoped>
