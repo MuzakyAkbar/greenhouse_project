@@ -131,7 +131,7 @@ function submitForm() {
           v-model="section.coa"
           type="text"
           placeholder="CoA"
-          class="w-xs px-4 py-2 rounded-lg bg-white text-gray-700 focus:outline-none"
+          class="w-[252px] px-4 py-2 rounded-lg bg-white text-gray-700 focus:outline-none"
         />
 
         <!-- Material Section -->
@@ -156,6 +156,17 @@ function submitForm() {
               placeholder="Qty"
               class="w-full sm:w-1/4 px-4 py-2 rounded-lg bg-gray-100 text-gray-700 focus:outline-none"
             />
+
+             <select
+              v-model="material.materialName"
+              class="flex-1 w-full px-4 py-2 rounded-lg bg-white text-gray-700 focus:outline-none"
+            >
+              <option value="" disabled>-Pilih Satuan-</option>
+              <option>Liter</option>
+              <option>Mililiter</option>
+              <option>Kilogram</option>
+            </select>
+
             <button
               @click="removeMaterialRow(index, matIndex)"
               v-if="section.materials.length > 1"
@@ -170,24 +181,20 @@ function submitForm() {
         <!-- Tombol Tambah Material (untuk menambah baris material baru) -->
         <button
           @click="addMaterialRow(index)"
-          class="min-w-xs bg-white text-gray-700 font-medium px-4 py-2 rounded-lg hover:bg-gray-100 transition"
+          class="flex-1 w-full px-4 py-2 rounded-lg bg-white text-gray-700 focus:outline-none font-medium"
         >
-          + Tambah Baris Material
+          + Tambah Material
         </button>
+        
+        <p class="text-white px-12 font-medium">Jumlah Tenaga Kerja</p>
 
         <!-- Tenaga Kerja Section -->
         <div class="space-y-2">
           <div
             v-for="(worker, workerIndex) in section.workers"
             :key="workerIndex"
-            class="flex flex-col sm:flex-row gap-4 items-center"
+            class="flex flex-col w-[1010px] sm:flex-row gap-4 items-center"
           >
-            <input
-              type="text"
-              v-model="worker.workerName"
-              placeholder="Tenaga Kerja"
-              class="flex-1 w-full px-4 py-2 rounded-lg bg-white text-gray-700 focus:outline-none"
-            />
             <input
               type="number"
               v-model="worker.qty"
@@ -207,6 +214,17 @@ function submitForm() {
       </div>
     </div>
 
+    <div class="w-[750px] flex justify-end mt-6">
+      <button
+        @click="addFormSection"
+        class=" bg-[#B5D78D] hover:bg-[#A1C77D] text-black font-medium px-6 py-2 rounded-lg border border-[#4D734D] shadow-md "
+        title="Tambah Activity"
+      >
+        + Tambah Activity
+      </button>
+    </div>
+    <!-- Floating Add Button (untuk menambah kartu hijau baru) -->
+
     <!-- Submit -->
     <div class="w-full max-w-3xl flex justify-center mt-8">
       <router-link
@@ -217,14 +235,6 @@ function submitForm() {
       </router-link>
     </div>
 
-    <!-- Floating Add Button (untuk menambah kartu hijau baru) -->
-    <button
-      @click="addFormSection"
-      class="fixed bottom-20 right-64 bg-[#B5D78D] hover:bg-[#A1C77D] text-black font-bold w-10 h-10 rounded-full border border-[#4D734D] flex items-center justify-center text-2xl shadow-lg transition"
-      title="Tambah Bagian Form"
-    >
-      +
-    </button>
   </div>
 </template>
 
