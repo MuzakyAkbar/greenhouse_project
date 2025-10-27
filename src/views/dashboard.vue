@@ -1,6 +1,7 @@
 <script setup>
 import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
+import ModalView from '../components/ModalView.vue'
 import {
   Chart,
   LineController,
@@ -14,7 +15,7 @@ import {
   Tooltip,
   Legend,
   BarController,
-  BarElement
+  BarElement,
 } from 'chart.js'
 
 Chart.register(
@@ -29,8 +30,30 @@ Chart.register(
   Tooltip,
   Legend,
   BarController,
-  BarElement
+  BarElement,
 )
+
+import { useAuthStore } from '../stores/auth'
+
+const authStore = useAuthStore()
+const isOpen = ref(false)
+
+const openModal = () => {
+  isOpen.value = true
+}
+
+const closeModal = () => {
+  isOpen.value = false
+}
+
+const logout = async () => {
+  const is_validate = await authStore.logout()
+  if (is_validate) {
+    router.push('/')
+    return
+  }
+  alert('Logout failed. Please try again.')
+}
 
 const router = useRouter()
 
@@ -53,21 +76,21 @@ const summary = ref({
   g2Diproduksi: 950,
   g2Mitra: 500,
   g2Petani: 450,
-  pendapatan: 52500000
+  pendapatan: 52500000,
 })
 
 // Persentase progres
 const progres = ref({
   planletToG0: ((summary.value.planletDitanam / summary.value.totalPlanlet) * 100).toFixed(1),
   G0ToG1: ((summary.value.g1Hidup / summary.value.g0Dirawat) * 100).toFixed(1),
-  G1ToG2: ((summary.value.g2Diproduksi / summary.value.g1Hidup) * 100).toFixed(1)
+  G1ToG2: ((summary.value.g2Diproduksi / summary.value.g1Hidup) * 100).toFixed(1),
 })
 
 // Dummy batch data
 const batchList = ref([
   {
     id: 1,
-    nama: 'Batch Planlet Kentang A',
+    nama: 'Batch Planlet Kentang 1',
     planlet: 500,
     g0: 420,
     g1: 360,
@@ -75,11 +98,11 @@ const batchList = ref([
     sukses: 74,
     terjual: 120,
     pendapatan: 6500000,
-    pengeluaran: 4200000
+    pengeluaran: 4200000,
   },
   {
     id: 2,
-    nama: 'Batch Planlet Kentang B',
+    nama: 'Batch Planlet Stek Kentang ',
     planlet: 600,
     g0: 510,
     g1: 460,
@@ -87,8 +110,8 @@ const batchList = ref([
     sukses: 68,
     terjual: 150,
     pendapatan: 7800000,
-    pengeluaran: 5000000
-  }
+    pengeluaran: 5000000,
+  },
 ])
 
 onMounted(() => {
@@ -104,7 +127,7 @@ onMounted(() => {
           borderColor: '#4C763B',
           backgroundColor: '#CFE9A8',
           tension: 0.3,
-          fill: true
+          fill: true,
         },
         {
           label: 'Batch B',
@@ -112,9 +135,9 @@ onMounted(() => {
           borderColor: '#9AC75E',
           backgroundColor: '#E5F6C3',
           tension: 0.3,
-          fill: true
-        }
-      ]
+          fill: true,
+        },
+      ],
     },
     options: {
       responsive: true,
@@ -123,10 +146,10 @@ onMounted(() => {
         title: {
           display: true,
           text: 'Perkembangan Fase Kentang per Batch',
-          font: { size: 16 }
-        }
-      }
-    }
+          font: { size: 16 },
+        },
+      },
+    },
   })
 
   // Chart pie kepemilikan
@@ -137,9 +160,9 @@ onMounted(() => {
       datasets: [
         {
           data: [summary.value.g2Mitra, summary.value.g2Petani],
-          backgroundColor: ['#4C763B', '#CFE9A8']
-        }
-      ]
+          backgroundColor: ['#4C763B', '#CFE9A8'],
+        },
+      ],
     },
     options: {
       responsive: true,
@@ -148,10 +171,10 @@ onMounted(() => {
         title: {
           display: true,
           text: 'Distribusi Kepemilikan G2 (Kentang)',
-          font: { size: 16 }
-        }
-      }
-    }
+          font: { size: 16 },
+        },
+      },
+    },
   })
 
   // Chart bar pendapatan vs pengeluaran
@@ -163,36 +186,36 @@ onMounted(() => {
         {
           label: 'Pendapatan (Rp)',
           data: batchList.value.map((b) => b.pendapatan),
-          backgroundColor: '#4C763B'
+          backgroundColor: '#4C763B',
         },
         {
           label: 'Pengeluaran (Rp)',
           data: batchList.value.map((b) => b.pengeluaran),
-          backgroundColor: '#E57373'
-        }
-      ]
+          backgroundColor: '#E57373',
+        },
+      ],
     },
     options: {
       responsive: true,
       scales: {
-        y: { beginAtZero: true }
+        y: { beginAtZero: true },
       },
       plugins: {
         legend: { position: 'bottom' },
         title: {
           display: true,
           text: 'Perbandingan Pemasukan & Pengeluaran per Batch Kentang',
-          font: { size: 16 }
+          font: { size: 16 },
         },
         tooltip: {
           callbacks: {
             label: function (context) {
               return `${context.dataset.label}: Rp ${context.parsed.y.toLocaleString('id-ID')}`
-            }
-          }
-        }
-      }
-    }
+            },
+          },
+        },
+      },
+    },
   })
 })
 </script>
@@ -200,54 +223,68 @@ onMounted(() => {
 <template>
   <div class="min-h-screen bg-[#FFFD8F] px-6 py-10 text-[#2F5320]">
     <!-- Header -->
-        <div class="flex flex-col md:flex-row justify-between items-center mb-10">
-        <!-- Judul -->
-        <h1 class="text-[42px] sm:text-[56px] font-extrabold text-[#2F5320] leading-tight text-center md:text-left">
-            Dashboard Kentang<br class="sm:hidden" /> GreenHouse
-        </h1>
+    <div class="w-full flex justify-end mb-4 relative z-50">
+      <button
+        @click="logout"
+        class="flex items-center gap-2 text-[#2F5320] bg-[#CFE9A8] hover:bg-[#b9d48f] px-4 py-2 rounded-lg shadow font-semibold border border-[#4C763B] transition"
+      >
+        <svg class="w-5" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+          <path
+            d="M505 273c9.4-9.4 9.4-24.6 0-33.9L361 95c-6.9-6.9-17.2-8.9-26.2-5.2S320 102.3 320 112l0 80-112 0c-26.5 0-48 21.5-48 48l0 32c0 26.5 21.5 48 48 48l112 0 0 80c0 9.7 5.8 18.5 14.8 22.2s19.3 1.7 26.2-5.2L505 273zM160 96c17.7 0 32-14.3 32-32s-14.3-32-32-32L96 32C43 32 0 75 0 128L0 384c0 53 43 96 96 96l64 0c17.7 0 32-14.3 32-32s-14.3-32-32-32l-64 0c-17.7 0-32-14.3-32-32l0-256c0-17.7 14.3-32 32-32l64 0z"
+          />
+        </svg>
+      </button>
+    </div>
+    <div class="flex flex-col md:flex-row justify-between items-center mb-10">
+      <!-- Judul -->
+      <h1
+        class="text-[42px] sm:text-[56px] font-extrabold text-[#2F5320] leading-tight text-center md:text-left"
+      >
+        Dashboard Kentang<br class="sm:hidden" />
+        GreenHouse
+      </h1>
 
-        <!-- Tombol Aksi -->
-        <div class="flex flex-wrap justify-center md:justify-end gap-3 mt-6 md:mt-0">
-            <!-- Tombol Isi Form Aktivitas -->
-            <button
-            @click="bukaFormActivity"
-            class="bg-[#4C763B] hover:bg-[#3b5c2f] text-white font-semibold px-5 py-2 rounded-lg shadow transition"
-            >
-            📝 Isi Form Aktivitas
-            </button>
+      <!-- Tombol Aksi -->
+      <div class="flex flex-wrap justify-center md:justify-end gap-3 mt-6 md:mt-0">
+        <!-- Tombol Isi Form Aktivitas -->
+        <button
+          @click="bukaFormActivity"
+          class="bg-[#4C763B] hover:bg-[#3b5c2f] text-white font-semibold px-5 py-2 rounded-lg shadow transition"
+        >
+          📝 Isi Form Aktivitas
+        </button>
 
-            <!-- Tombol Lihat Laporan Aktivitas -->
-            <button
-            @click="bukaLaporanActivity"
-            class="bg-[#CFE9A8] hover:bg-[#b9d48f] text-[#2F5320] font-semibold px-5 py-2 rounded-lg shadow border border-[#4C763B] transition"
-            >
-            📋 Lihat Laporan
-            </button>
+        <!-- Tombol Lihat Laporan Aktivitas -->
+        <button
+          @click="bukaLaporanActivity"
+          class="bg-[#CFE9A8] hover:bg-[#b9d48f] text-[#2F5320] font-semibold px-5 py-2 rounded-lg shadow border border-[#4C763B] transition"
+        >
+          📋 Lihat Laporan
+        </button>
 
-            <router-link
-            to="/report-production"
-            class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-md"
-            >
-            + Laporan Produksi
-            </router-link>
+        <router-link
+          to="/report-production"
+          class="bg-[#4C763B] hover:bg-[#3b5c2f] text-white font-semibold px-5 py-2 rounded-lg shadow transition"
+        >
+          + Laporan Produksi
+        </router-link>
 
-
-            <!-- Tombol Tambah Batch -->
-            <router-link
-            to="/add-batch"
-            class="bg-[#4C763B] text-white px-5 py-2 rounded-lg hover:bg-[#3b5c2f] transition font-semibold shadow"
-            >
-            ➕ Tambah Batch
-            </router-link>
-        </div>
+        <!-- Tombol Tambah Batch -->
+        <router-link
+          to="/add-batch"
+          class="bg-[#CFE9A8] hover:bg-[#b9d48f] text-[#2F5320] font-semibold px-5 py-2 rounded-lg shadow border border-[#4C763B] transition"
+        >
+          ➕ Tambah Batch
+        </router-link>
+      </div>
     </div>
 
     <!-- Statistik -->
     <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
-      <div class="bg-[#4C763B] text-white rounded-xl p-4 text-center">
+      <button @click="openModal" class="bg-[#4C763B] text-white rounded-xl p-4 text-center">
         <p class="text-sm">Total Planlet</p>
         <h2 class="text-2xl font-bold">{{ summary.totalPlanlet }}</h2>
-      </div>
+      </button>
       <div class="bg-[#CFE9A8] text-[#2F5320] rounded-xl p-4 text-center">
         <p class="text-sm">Total G2 Diproduksi</p>
         <h2 class="text-2xl font-bold">{{ summary.g2Diproduksi }}</h2>
@@ -258,9 +295,7 @@ onMounted(() => {
       </div>
       <div class="bg-[#CFE9A8] text-[#2F5320] rounded-xl p-4 text-center">
         <p class="text-sm">Pendapatan Total</p>
-        <h2 class="text-2xl font-bold">
-          Rp {{ summary.pendapatan.toLocaleString('id-ID') }}
-        </h2>
+        <h2 class="text-2xl font-bold">Rp {{ summary.pendapatan.toLocaleString('id-ID') }}</h2>
       </div>
     </div>
 
@@ -323,4 +358,5 @@ onMounted(() => {
       </div>
     </div>
   </div>
+  <ModalView :isOpen="isOpen" @close="closeModal" />
 </template>

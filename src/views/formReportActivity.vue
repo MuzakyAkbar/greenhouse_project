@@ -1,6 +1,22 @@
 <script setup>
-import { ref } from 'vue'
+import { ref, onMounted } from 'vue'
 import { RouterLink } from 'vue-router'
+
+const selectedDate = ref('')
+
+// Fungsi untuk format tanggal ke YYYY-MM-DD
+const formatDate = (date) => {
+  const d = new Date(date)
+  const year = d.getFullYear()
+  const month = String(d.getMonth() + 1).padStart(2, '0')
+  const day = String(d.getDate()).padStart(2, '0')
+  return `${year}-${month}-${day}`
+}
+
+// Saat halaman pertama kali dimuat, isi otomatis tanggal hari ini
+onMounted(() => {
+  selectedDate.value = formatDate(new Date())
+})
 
 const formSections = ref([
   {
@@ -67,8 +83,7 @@ function submitForm() {
     <!-- Date Picker -->
     <div class="w-full max-w-3xl mb-4 flex justify-center">
       <div class="flex items-center gap-3 bg-white border border-black rounded-lg px-4 py-2">
-        <i class="fa-solid fa-calendar text-lg"></i>
-        <span class="font-medium">17/10/2025</span>
+        <input type="date" disabled v-model="selectedDate" />
       </div>
     </div>
 
@@ -86,6 +101,39 @@ function submitForm() {
         <option>Batch 1</option>
         <option>Batch 2</option>
       </select>
+    </div>
+
+    <!-- Jenis Kerusakan Tanaman -->
+    <div
+      class="w-full max-w-3xl bg-[#B5D78D] border border-[#4C763B] rounded-xl shadow-md p-6 mb-8"
+    >
+      <h2 class="text-lg font-bold text-[#2F5320] mb-4 text-center">Jenis Kerusakan Tanaman</h2>
+      <div class="flex flex-col items-center justify-center w-full gap-y-5">
+        <div class="flex items-center justify-between w-60">
+          <label class="font-semibold text-[#2F5320]">Kuning</label>
+          <input
+            type="number"
+            placeholder="Qty"
+            class="w-28 bg-gray-100 text-center border border-gray-300 rounded-lg py-2 text-gray-700 focus:outline-none focus:ring-2 focus:ring-[#4C763B]"
+          />
+        </div>
+        <div class="flex items-center justify-between w-60">
+          <label class="font-semibold text-[#2F5320]">Kutilang</label>
+          <input
+            type="number"
+            placeholder="Qty"
+            class="w-28 bg-gray-100 text-center border border-gray-300 rounded-lg py-2 text-gray-700 focus:outline-none focus:ring-2 focus:ring-[#4C763B]"
+          />
+        </div>
+        <div class="flex items-center justify-between w-60">
+          <label class="font-semibold text-[#2F5320]">Busuk</label>
+          <input
+            type="number"
+            placeholder="Qty"
+            class="w-28 bg-gray-100 text-center border border-gray-300 rounded-lg py-2 text-gray-700 focus:outline-none focus:ring-2 focus:ring-[#4C763B]"
+          />
+        </div>
+      </div>
     </div>
 
     <!-- Form Sections -->
@@ -136,9 +184,9 @@ function submitForm() {
               class="flex-1 px-4 py-2 rounded-lg bg-white text-gray-700 focus:outline-none"
             >
               <option value="" disabled>-Pilih Material-</option>
-              <option>Semen</option>
-              <option>Pasir</option>
-              <option>Besi</option>
+              <option>Pestisida selektif</option>
+              <option>Nutrisi NPK cair</option>
+              <option>Kalium nitrat (KNO₃)</option>
             </select>
 
             <input
@@ -148,16 +196,12 @@ function submitForm() {
               class="w-full sm:w-1/4 px-4 py-2 rounded-lg bg-gray-100 text-gray-700 focus:outline-none"
             />
 
-            <select
-              v-model="material.unit"
-              class="w-full sm:w-1/4 px-4 py-2 rounded-lg bg-white text-gray-700 focus:outline-none"
-            >
-              <option value="" disabled>-Satuan-</option>
-              <option>Liter</option>
-              <option>Mililiter</option>
-              <option>Kilogram</option>
-            </select>
-
+            <input
+              v-model="section.satuan"
+              type="text"
+              placeholder="Satuan"
+              class="w-full sm:w-1/4 px-4 py-2 rounded-lg bg-gray-100 text-gray-700 focus:outline-none"
+            />
             <button
               @click="removeMaterialRow(index, matIndex)"
               v-if="section.materials.length > 1"
@@ -216,7 +260,7 @@ function submitForm() {
     <!-- Submit -->
     <div class="w-full max-w-3xl flex justify-center mt-8">
       <router-link
-        to="/report"
+        to="/reportActivityList"
         class="w-full sm:w-1/2 bg-[#4D734D] hover:bg-[#3C5C3B] text-white font-semibold py-3 rounded-lg border border-[#3A5737] transition-all shadow-sm text-center"
       >
         Submit
