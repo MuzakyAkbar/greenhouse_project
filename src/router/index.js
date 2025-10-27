@@ -1,7 +1,6 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import { useAuthStore } from '../stores/auth'
 
-// 🔹 Import tambahan untuk halaman AddBatch
 import AddBatch from '../views/AddBatch.vue'
 
 const router = createRouter({
@@ -44,7 +43,7 @@ const router = createRouter({
     },
     {
       path: '/batchdetail/:id',
-      name: 'batchDetail',
+      name: 'BatchDetail',
       component: () => import('../views/BatchDetail.vue'),
     },
     {
