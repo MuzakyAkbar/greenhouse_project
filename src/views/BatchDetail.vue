@@ -45,12 +45,22 @@ const batch = ref({
   terjual: 120,
   pendapatan: 6500000,
   pengeluaran: 4200000,
+  totalPlanlet: 2500,
   g0Terjual: 200,
+  g0Diproduksi: 400,
+  g2Diproduksi: 300,
+  g2Terjual: 150,
   g0Dirawat: 220,
   g1Hidup: 180,
   g1Mati: 40,
   g2Mitra: 180,
   g2Petani: 130
+})
+
+const progres = ref({
+  planletToG0: ((batch.value.planletDitanam / batch.value.totalPlanlet) * 100).toFixed(1),
+  G0ToG1: ((batch.value.g1Hidup / batch.value.g0Dirawat) * 100).toFixed(1),
+  G1ToG2: ((batch.value.g2Diproduksi / batch.value.g1Hidup) * 100).toFixed(1),
 })
 
 const activityReport = ref([
@@ -215,27 +225,65 @@ async function exportToPDF() {
       </div>
 
       <!-- 🔹 Statistik -->
-      <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-10">
-        <div class="bg-[#4C763B] text-white rounded-xl p-4 text-center">
-          <p>Keberhasilan</p>
-          <h2 class="text-2xl font-bold">{{ batch.sukses }}%</h2>
-        </div>
-        <div class="bg-[#CFE9A8] rounded-xl text-center p-4">
-          <p>Planlet → G0</p>
-          <h2 class="text-2xl font-bold">{{ ((batch.g0 / batch.planlet) * 100).toFixed(1) }}%</h2>
-          <p class="text-sm mt-1 text-gray-700">{{ batch.g0 }} / {{ batch.planlet }}</p>
-        </div>
-        <div class="bg-[#4C763B] text-white rounded-xl text-center p-4">
-          <p>G0 → G1</p>
-          <h2 class="text-2xl font-bold">{{ ((batch.g1 / batch.g0) * 100).toFixed(1) }}%</h2>
-          <p class="text-sm mt-1 text-gray-200">{{ batch.g1 }} / {{ batch.g0 }}</p>
-        </div>
-        <div class="bg-[#CFE9A8] rounded-xl text-center p-4">
-          <p>G1 → G2</p>
-          <h2 class="text-2xl font-bold">{{ ((batch.g2 / batch.g1) * 100).toFixed(1) }}%</h2>
-          <p class="text-sm mt-1 text-gray-700">{{ batch.g2 }} / {{ batch.g1 }}</p>
-        </div>
-      </div>
+<div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-10">
+  <!-- Baris 1 -->
+  <div class="bg-[#4C763B] text-white rounded-xl p-4 text-center shadow">
+    <p class="text-sm">Total Planlet</p>
+    <h2 class="text-2xl font-bold">{{ batch.totalPlanlet }}</h2>
+  </div>
+
+  <div class="bg-[#4C763B] text-white rounded-xl p-4 text-center shadow">
+    <p class="text-sm">G0 Terjual</p>
+    <h2 class="text-2xl font-bold">{{ batch.g0Terjual }}</h2>
+  </div>
+
+  <div class="bg-[#4C763B] text-white rounded-xl p-4 text-center shadow">
+    <p class="text-sm">G0 Diproduksi</p>
+    <h2 class="text-2xl font-bold">{{ batch.g0Diproduksi }}</h2>
+  </div>
+
+  <!-- Baris 2 -->
+  <div class="bg-[#CFE9A8] text-[#2F5320] rounded-xl p-4 text-center shadow">
+    <p class="text-sm">Total G2 Diproduksi</p>
+    <h2 class="text-2xl font-bold">{{ batch.g2Diproduksi }}</h2>
+  </div>
+
+  <div class="bg-[#CFE9A8] text-[#2F5320] rounded-xl p-4 text-center shadow">
+    <p class="text-sm">Total G2 Diterjual</p>
+    <h2 class="text-2xl font-bold">{{ batch.g2Terjual }}</h2>
+  </div>
+
+  <div class="bg-[#CFE9A8] text-[#2F5320] rounded-xl p-4 text-center shadow">
+    <p class="text-sm">Keberhasilan</p>
+    <h2 class="text-2xl font-bold">{{ batch.sukses }}%</h2>
+  </div>
+
+  <!-- Baris 3 -->
+  <div class="bg-[#CFE9A8] rounded-xl text-center p-4 shadow">
+    <p>Planlet → G0</p>
+    <h2 class="text-2xl font-bold">
+      {{ ((batch.g0 / batch.planlet) * 100).toFixed(1) }}%
+    </h2>
+    <p class="text-sm mt-1 text-gray-700">{{ batch.g0 }} / {{ batch.planlet }}</p>
+  </div>
+
+  <div class="bg-[#4C763B] text-white rounded-xl text-center p-4 shadow">
+    <p>G0 → G1</p>
+    <h2 class="text-2xl font-bold">
+      {{ ((batch.g1 / batch.g0) * 100).toFixed(1) }}%
+    </h2>
+    <p class="text-sm mt-1 text-gray-200">{{ batch.g1 }} / {{ batch.g0 }}</p>
+  </div>
+
+  <div class="bg-[#CFE9A8] rounded-xl text-center p-4 shadow">
+    <p>G1 → G2</p>
+    <h2 class="text-2xl font-bold">
+      {{ ((batch.g2 / batch.g1) * 100).toFixed(1) }}%
+    </h2>
+    <p class="text-sm mt-1 text-gray-700">{{ batch.g2 }} / {{ batch.g1 }}</p>
+  </div>
+</div>
+
 
       <!-- 🔹 Grafik -->
       <div class="grid grid-cols-1 lg:grid-cols-3 gap-8 mb-10">
