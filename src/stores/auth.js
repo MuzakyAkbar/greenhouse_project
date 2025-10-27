@@ -52,9 +52,14 @@ export const useAuthStore = defineStore("auth", {
     },
 
     async logout() {
-      await supabase.auth.signOut();
+      const validate = await supabase.auth.signOut();
+      if (validate.error) {
+        console.error("Logout error:", validate.error);
+        return false;
+      }
       this.user = null;
       localStorage.removeItem("user");
+      return true;
     },
   },
 });
