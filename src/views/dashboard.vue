@@ -58,7 +58,7 @@ const logout = async () => {
 const router = useRouter()
 
 // Navigasi halaman
-const goToDetail = (batchId) => router.push(`/batch/${batchId}`)
+const goToDetail = (batchId) => router.push(`/batchdetail/${batchId}`)
 const tambahBatch = () => router.push('/tambah-batch')
 const bukaFormActivity = () => router.push('/formReportActivity')
 const bukaLaporanActivity = () => router.push('/reportActivityList')
