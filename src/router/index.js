@@ -45,6 +45,7 @@ const router = createRouter({
       path: '/batchdetail/:id',
       name: 'BatchDetail',
       component: () => import('../views/BatchDetail.vue'),
+      meta: { requiresAuth: true },
     },
     {
       path: '/add-batch',          
