@@ -1,5 +1,5 @@
 <template>
-  <div class="min-h-screen bg-[#FFFCA9] flex flex-col items-center px-4 py-6">
+  <div class="min-h-screen bg-[#FFFD8F] flex flex-col items-center px-4 py-6">
     <!-- Header -->
     <div class="flex justify-start w-full mb-2">
       <router-link
@@ -152,6 +152,13 @@
         Simpan Laporan
       </button>
     </div>
+
+     <!-- 🔹 Footer -->
+    <footer class="bg-[#FFFD8F] text-center py-6 mt-12">
+      <p class="text-[#2F5320] font-semibold text-lg">
+        © GREENHOUSE 2025
+      </p>
+    </footer>
   </div>
 </template>
 

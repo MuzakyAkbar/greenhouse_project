@@ -54,7 +54,7 @@ const productionSalesList = ref([
 </script>
 
 <template>
-  <div class="min-h-screen bg-[#FFFCA9] mx-auto flex flex-col items-center relative p-6">
+  <div class="min-h-screen bg-[#FFFD8F] mx-auto flex flex-col items-center relative p-6">
 
     <!-- Tombol Back ke Dashboard -->
     <div class="absolute top-6 left-6">
@@ -177,7 +177,12 @@ const productionSalesList = ref([
         </RouterLink>
       </div>
     </div>
-
+     <!-- 🔹 Footer -->
+    <footer class="bg-[#FFFD8F] text-center py-6 mt-12">
+      <p class="text-[#2F5320] font-semibold text-lg">
+        © GREENHOUSE 2025
+      </p>
+    </footer>
   </div>
 </template>
 

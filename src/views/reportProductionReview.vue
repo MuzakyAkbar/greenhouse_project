@@ -42,7 +42,7 @@ const productionData = ref([
 </script>
 
 <template>
-  <div class="min-h-screen bg-[#FFFCA9] flex flex-col items-center p-4 sm:p-6 md:p-10 rounded-2xl relative">
+  <div class="min-h-screen bg-[#FFFD8F] flex flex-col items-center p-4 sm:p-6 md:p-10 rounded-2xl relative">
 
     <!-- Back -->
     <div class="absolute top-6 left-6">
@@ -109,6 +109,12 @@ const productionData = ref([
           </router-link>
         </div>
 
+         <!-- 🔹 Footer -->
+        <footer class="bg-[#FFFD8F] text-center py-6 mt-12">
+          <p class="text-[#2F5320] font-semibold text-lg">
+            © GREENHOUSE 2025
+          </p>
+        </footer>
       </div>
     </div>
 
