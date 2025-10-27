@@ -254,29 +254,34 @@ async function exportToPDF() {
       <!-- 🔹 Activity -->
       <div class="bg-white rounded-2xl shadow-lg p-6 mb-8">
         <h2 class="text-xl font-bold mb-4">📋 Activity Report</h2>
-        <table class="w-full border border-[#4C763B] text-left">
-          <thead class="bg-[#CFE9A8]">
-            <tr>
-              <th class="p-2 border border-[#4C763B]">Lokasi</th>
-              <th class="p-2 border border-[#4C763B]">Aktivitas</th>
-              <th class="p-2 border border-[#4C763B]">Material</th>
-              <th class="p-2 border border-[#4C763B]">Qty</th>
-              <th class="p-2 border border-[#4C763B]">UoM</th>
-              <th class="p-2 border border-[#4C763B]">Manpower</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr v-for="item in activityReport" :key="item.report_id" class="hover:bg-[#F8FBEF]">
-              <td class="p-2 border border-[#4C763B]">{{ item.location }}</td>
-              <td class="p-2 border border-[#4C763B]">{{ item.Activity }}</td>
-              <td class="p-2 border border-[#4C763B]">{{ item.material_name }}</td>
-              <td class="p-2 border border-[#4C763B]">{{ item.Qty }}</td>
-              <td class="p-2 border border-[#4C763B]">{{ item.UoM }}</td>
-              <td class="p-2 border border-[#4C763B]">{{ item.manpower }}</td>
-            </tr>
-          </tbody>
-        </table>
+
+        <!-- ✅ Tambahkan wrapper scroll -->
+        <div class="overflow-x-auto">
+          <table class="min-w-full border border-[#4C763B] text-left text-sm md:text-base">
+            <thead class="bg-[#CFE9A8]">
+              <tr>
+                <th class="p-2 border border-[#4C763B] whitespace-nowrap">Lokasi</th>
+                <th class="p-2 border border-[#4C763B] whitespace-nowrap">Aktivitas</th>
+                <th class="p-2 border border-[#4C763B] whitespace-nowrap">Material</th>
+                <th class="p-2 border border-[#4C763B] whitespace-nowrap">Qty</th>
+                <th class="p-2 border border-[#4C763B] whitespace-nowrap">UoM</th>
+                <th class="p-2 border border-[#4C763B] whitespace-nowrap">Manpower</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="item in activityReport" :key="item.report_id" class="hover:bg-[#F8FBEF]">
+                <td class="p-2 border border-[#4C763B]">{{ item.location }}</td>
+                <td class="p-2 border border-[#4C763B]">{{ item.Activity }}</td>
+                <td class="p-2 border border-[#4C763B]">{{ item.material_name }}</td>
+                <td class="p-2 border border-[#4C763B]">{{ item.Qty }}</td>
+                <td class="p-2 border border-[#4C763B]">{{ item.UoM }}</td>
+                <td class="p-2 border border-[#4C763B]">{{ item.manpower }}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
       </div>
+
 
       <!-- 🔹 Material -->
       <div class="bg-white rounded-2xl shadow-lg p-6 mb-10">
