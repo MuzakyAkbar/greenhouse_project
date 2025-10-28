@@ -2,6 +2,7 @@ import { createRouter, createWebHistory } from 'vue-router'
 import { useAuthStore } from '../stores/auth'
 
 import AddBatch from '../views/AddBatch.vue'
+import Location from '../views/location.vue' // ✅ Import halaman Location
 
 const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
@@ -15,6 +16,24 @@ const router = createRouter({
       path: '/dashboard',
       name: 'dashboard',
       component: () => import('../views/dashboard.vue'),
+      meta: { requiresAuth: true },
+    },
+    {
+      path: '/location', // ✅ Rute baru untuk halaman lokasi
+      name: 'location',
+      component: Location,
+      meta: { requiresAuth: true },
+    },
+    {
+      path: '/add-batch', // ✅ Rute tambah batch (dari tombol di Location)
+      name: 'AddBatch',
+      component: AddBatch,
+      meta: { requiresAuth: true },
+    },
+    {
+      path: '/batchdetail/:id',
+      name: 'BatchDetail',
+      component: () => import('../views/BatchDetail.vue'),
       meta: { requiresAuth: true },
     },
     {
@@ -41,19 +60,6 @@ const router = createRouter({
       component: () => import('../views/ReportActivityView.vue'),
       meta: { requiresAuth: true },
     },
-    {
-      path: '/batchdetail/:id',
-      name: 'BatchDetail',
-      component: () => import('../views/BatchDetail.vue'),
-      meta: { requiresAuth: true },
-    },
-    {
-      path: '/add-batch',          
-      name: 'AddBatch',
-      component: AddBatch,         
-      meta: { requiresAuth: true },
-    },
-
     // 🔹 Routing Production & Sales
     {
       path: '/reportProductionReview',

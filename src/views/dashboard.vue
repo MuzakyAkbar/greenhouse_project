@@ -271,12 +271,12 @@ onMounted(() => {
           + Laporan Produksi
         </router-link>
 
-        <!-- Tombol Tambah Batch -->
+        <!-- 🔹 Tombol baru: Add Location & Batch -->
         <router-link
-          to="/add-batch"
-          class="bg-[#CFE9A8] hover:bg-[#b9d48f] text-[#2F5320] font-semibold px-5 py-2 rounded-lg shadow border border-[#4C763B] transition"
+          to="/location"
+          class="bg-[#CFE9A8] hover:bg-[#b9d48f] text-[#2F5320] font-bold text-lg px-6 py-3 rounded-lg shadow border-2 border-[#4C763B] transition transform hover:scale-105"
         >
-          ➕ Tambah Batch
+          ➕ Add Location & Batch
         </router-link>
       </div>
     </div>
