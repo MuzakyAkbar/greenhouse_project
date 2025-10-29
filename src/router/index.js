@@ -2,7 +2,8 @@ import { createRouter, createWebHistory } from 'vue-router'
 import { useAuthStore } from '../stores/auth'
 
 import AddBatch from '../views/AddBatch.vue'
-import Location from '../views/location.vue' // ✅ Import halaman Location
+import Location from '../views/location.vue'
+import AddLocation from '../views/addlocation.vue' // ✅ Tambahkan import baru
 
 const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
@@ -19,13 +20,19 @@ const router = createRouter({
       meta: { requiresAuth: true },
     },
     {
-      path: '/location', // ✅ Rute baru untuk halaman lokasi
+      path: '/location',
       name: 'location',
       component: Location,
       meta: { requiresAuth: true },
     },
     {
-      path: '/add-batch', // ✅ Rute tambah batch (dari tombol di Location)
+      path: '/add-location', // ✅ Rute baru untuk halaman tambah lokasi
+      name: 'AddLocation',
+      component: AddLocation,
+      meta: { requiresAuth: true },
+    },
+    {
+      path: '/add-batch',
       name: 'AddBatch',
       component: AddBatch,
       meta: { requiresAuth: true },
