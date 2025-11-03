@@ -27,7 +27,7 @@ const productionSalesList = ref([
   {
     date: '2025-10-23',
     batch: 'Batch 1',
-    status: 'Waiting', // Waiting / Approved / Revision
+    status: 'Waiting',
     production: [
       { category: 'Planlet G0', owner: 'Petani', quantity: 100 },
       { category: 'Planlet G1', owner: 'Mitra', quantity: 50 },
@@ -54,144 +54,306 @@ const productionSalesList = ref([
 </script>
 
 <template>
-  <div class="min-h-screen bg-[#FFFD8F] mx-auto flex flex-col items-center relative p-6">
+  <div class="min-h-screen bg-gradient-to-br from-gray-50 to-white">
+    <!-- Header Bar -->
+    <div class="bg-white border-b border-gray-200 shadow-sm sticky top-0 z-40">
+      <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-5">
+        <div class="flex items-center justify-between">
+          <div class="flex items-center gap-4">
+            <RouterLink 
+              to="/dashboard"
+              class="flex items-center justify-center w-10 h-10 bg-gray-100 hover:bg-gray-200 rounded-lg transition"
+            >
+              <svg class="w-5 h-5 text-gray-700" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512" fill="currentColor">
+                <path d="M9.4 233.4c-12.5 12.5-12.5 32.8 0 45.3l160 160c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L109.2 288 416 288c17.7 0 32-14.3 32-32s-14.3-32-32-32l-306.7 0L214.6 118.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0l-160 160z"/>
+              </svg>
+            </RouterLink>
+            <div>
+              <h1 class="text-2xl font-bold text-gray-900 flex items-center gap-3">
+                <span class="w-10 h-10 bg-gradient-to-br from-[#0071f3] to-[#8FABD4] rounded-lg flex items-center justify-center text-white text-lg">
+                  📊
+                </span>
+                Report List GreenHouse
+              </h1>
+              <p class="text-sm text-gray-500 mt-1 ml-13">Laporan Aktivitas & Produksi</p>
+            </div>
+          </div>
 
-    <!-- Tombol Back ke Dashboard -->
-    <div class="absolute top-6 left-6">
-      <RouterLink to="/dashboard" class="text-black text-2xl hover:text-gray-700 transition" title="Kembali ke Dashboard">
-        <i class="fa-solid fa-arrow-left"></i>
-      </RouterLink>
+          <!-- Toggle Buttons Desktop -->
+          <div class="hidden md:flex gap-3">
+            <button 
+              @click="selectedReport = 'activity'"
+              :class="selectedReport === 'activity' 
+                ? 'bg-gradient-to-r from-[#0071f3] to-[#0060d1] text-white shadow-md' 
+                : 'bg-white text-gray-700 border-2 border-gray-200 hover:border-[#0071f3]'"
+              class="px-5 py-2.5 rounded-lg font-semibold transition-all text-sm hover:shadow"
+            >
+              📋 Activity
+            </button>
+            <button 
+              @click="selectedReport = 'production'"
+              :class="selectedReport === 'production' 
+                ? 'bg-gradient-to-r from-[#0071f3] to-[#0060d1] text-white shadow-md' 
+                : 'bg-white text-gray-700 border-2 border-gray-200 hover:border-[#0071f3]'"
+              class="px-5 py-2.5 rounded-lg font-semibold transition-all text-sm hover:shadow"
+            >
+              📈 Production & Sales
+            </button>
+          </div>
+        </div>
+
+        <!-- Toggle Buttons Mobile -->
+        <div class="flex md:hidden gap-3 mt-4">
+          <button 
+            @click="selectedReport = 'activity'"
+            :class="selectedReport === 'activity' 
+              ? 'bg-gradient-to-r from-[#0071f3] to-[#0060d1] text-white shadow-md' 
+              : 'bg-white text-gray-700 border-2 border-gray-200'"
+            class="flex-1 px-4 py-2.5 rounded-lg font-semibold transition-all text-sm"
+          >
+            📋 Activity
+          </button>
+          <button 
+            @click="selectedReport = 'production'"
+            :class="selectedReport === 'production' 
+              ? 'bg-gradient-to-r from-[#0071f3] to-[#0060d1] text-white shadow-md' 
+              : 'bg-white text-gray-700 border-2 border-gray-200'"
+            class="flex-1 px-4 py-2.5 rounded-lg font-semibold transition-all text-sm"
+          >
+            📈 Production
+          </button>
+        </div>
+      </div>
     </div>
 
-    <!-- Judul -->
-    <h1 class="text-[40px] font-bold text-black text-center mb-6">Report</h1>
+    <!-- Main Content -->
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+      
+      <!-- Report Activity List -->
+      <div v-if="selectedReport === 'activity'">
+        <!-- Filter & Action Bar -->
+        <div class="mb-8">
+          <h2 class="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-3">Filter & Actions</h2>
+          <div class="bg-white rounded-2xl border-2 border-gray-100 shadow-sm p-5">
+            <div class="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+              <!-- Date Filter -->
+              <div class="flex items-center gap-3">
+                <label class="text-sm font-semibold text-gray-700">Filter Tanggal:</label>
+                <div class="flex items-center gap-2 px-4 py-2 border-2 border-[#0071f3] rounded-lg bg-gray-50">
+                  <svg class="w-5 h-5 text-[#0071f3]" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512" fill="currentColor">
+                    <path d="M128 0c17.7 0 32 14.3 32 32l0 32 128 0 0-32c0-17.7 14.3-32 32-32s32 14.3 32 32l0 32 48 0c26.5 0 48 21.5 48 48l0 48L0 160l0-48C0 85.5 21.5 64 48 64l48 0 0-32c0-17.7 14.3-32 32-32zM0 192l448 0 0 272c0 26.5-21.5 48-48 48L48 512c-26.5 0-48-21.5-48-48L0 192z"/>
+                  </svg>
+                  <input type="date" class="outline-none text-gray-700 bg-transparent font-medium" />
+                </div>
+              </div>
 
-    <!-- Toggle Buttons -->
-    <div class="flex gap-4 mb-6">
-      <button @click="selectedReport = 'activity'"
-        :class="selectedReport === 'activity' ? 'bg-[#4D734D] text-white' : 'bg-white text-black border border-black'"
-        class="px-6 py-2 rounded-lg font-semibold transition">
-        Report Activity
-      </button>
-      <button @click="selectedReport = 'production'"
-        :class="selectedReport === 'production' ? 'bg-[#4D734D] text-white' : 'bg-white text-black border border-black'"
-        class="px-6 py-2 rounded-lg font-semibold transition">
-        Report Production & Sales
-      </button>
-    </div>
+              <!-- Add New Button -->
+              <router-link 
+                to="/formReportActivity"
+                class="bg-gradient-to-r from-[#0071f3] to-[#0060d1] hover:from-[#0060d1] hover:to-[#0050b1] text-white font-semibold px-6 py-2.5 rounded-xl transition-all shadow-md hover:shadow-lg transform hover:-translate-y-0.5 flex items-center gap-2 text-sm"
+              >
+                <svg class="w-5 h-5" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512" fill="currentColor">
+                  <path d="M256 80c0-17.7-14.3-32-32-32s-32 14.3-32 32l0 144L48 224c-17.7 0-32 14.3-32 32s14.3 32 32 32l144 0 0 144c0 17.7 14.3 32 32 32s32-14.3 32-32l0-144 144 0c17.7 0 32-14.3 32-32s-14.3-32-32-32l-144 0 0-144z"/>
+                </svg>
+                Tambah Laporan Baru
+              </router-link>
+            </div>
+          </div>
+        </div>
 
-    <!-- Report Activity List -->
-    <div v-if="selectedReport === 'activity'" class="w-full max-w-[1250px] flex flex-col items-center">
-      <!-- Filter Tanggal -->
-      <div class="w-full flex justify-start mb-6">
-        <div class="flex items-center gap-3 bg-white border-2 border-black rounded-lg px-4 py-2">
-          <input type="date" class="outline-none text-gray-700" />
+        <!-- Activity Reports -->
+        <div class="mb-8">
+          <h2 class="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-3">
+            Laporan Aktivitas ({{ activityReports.length }})
+          </h2>
+          <div class="grid grid-cols-1 gap-5">
+            <RouterLink 
+              v-for="(report, index) in activityReports" 
+              :key="index"
+              :to="{
+                Waiting: '/reportActivityReview',
+                Approved: '/reportActivityView',
+                Revision: '/formReportActivity'
+              }[report.status]"
+              class="group"
+            >
+              <div 
+                class="bg-white rounded-2xl border-2 border-gray-100 hover:border-[#0071f3] shadow-sm hover:shadow-xl transition-all p-6 transform hover:-translate-y-1"
+              >
+                <div class="flex flex-col md:flex-row justify-between md:items-start gap-4">
+                  <div class="flex-1 space-y-3">
+                    <div class="flex items-center gap-3">
+                      <div class="w-10 h-10 bg-gradient-to-br from-[#0071f3] to-[#8FABD4] rounded-lg flex items-center justify-center text-white text-lg flex-shrink-0">
+                        📋
+                      </div>
+                      <div>
+                        <p class="font-bold text-gray-900 text-lg">{{ report.activity }}</p>
+                        <p class="text-sm text-gray-500">{{ report.coa }}</p>
+                      </div>
+                    </div>
+
+                    <div class="grid grid-cols-1 sm:grid-cols-3 gap-3 mt-4">
+                      <div class="bg-gray-50 rounded-lg p-3">
+                        <p class="text-xs text-gray-500 font-semibold mb-1">Tanggal</p>
+                        <p class="text-sm font-bold text-gray-900">{{ report.date }}</p>
+                      </div>
+                      <div class="bg-gray-50 rounded-lg p-3">
+                        <p class="text-xs text-gray-500 font-semibold mb-1">Lokasi</p>
+                        <p class="text-sm font-bold text-gray-900">{{ report.location }}</p>
+                      </div>
+                      <div class="bg-gray-50 rounded-lg p-3">
+                        <p class="text-xs text-gray-500 font-semibold mb-1">Batch</p>
+                        <p class="text-sm font-bold text-gray-900">{{ report.batch }}</p>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div class="flex flex-col items-end gap-3">
+                    <span 
+                      class="text-xs font-bold px-4 py-2 rounded-lg whitespace-nowrap"
+                      :class="{
+                        'bg-yellow-100 text-yellow-800': report.status === 'Waiting',
+                        'bg-green-100 text-green-800': report.status === 'Approved',
+                        'bg-red-100 text-red-800': report.status === 'Revision'
+                      }"
+                    >
+                      {{ report.status === 'Waiting' ? '⏳ Waiting Review' : report.status === 'Approved' ? '✅ Approved' : '🔄 Revision' }}
+                    </span>
+                    <svg class="w-5 h-5 text-gray-400 group-hover:text-[#0071f3] transition-colors" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512" fill="currentColor">
+                      <path d="M278.6 233.4c12.5 12.5 12.5 32.8 0 45.3l-160 160c-12.5 12.5-32.8 12.5-45.3 0s-12.5-32.8 0-45.3L210.7 256 73.4 118.6c-12.5-12.5-12.5-32.8 0-45.3s32.8-12.5 45.3 0l160 160z"/>
+                    </svg>
+                  </div>
+                </div>
+              </div>
+            </RouterLink>
+          </div>
         </div>
       </div>
 
-      <!-- Activity Cards -->
-      <div v-for="(report, index) in activityReports" :key="index" class="w-full px-6">
-        <RouterLink :to="{
-          Waiting: '/reportActivityReview',
-          Approved: '/reportActivityView',
-          Revision: '/formReportActivity'
-        }[report.status]">
-          <div class="w-full h-[120px] rounded-[15px] px-[20px] py-[14px] mb-6 flex flex-col justify-between transition hover:shadow-md"
-            :class="{
-              'bg-white border-2 border-black text-black': report.status === 'Waiting',
-              'bg-[#69A851] border-2 border-[#4C763B] text-white': report.status === 'Approved',
-              'bg-[#E8473C] border-2 border-[#9B0F0F] text-white': report.status === 'Revision'
-            }">
-            <div class="flex justify-between items-start">
-              <div class="text-left">
-                <p class="font-semibold text-[16px]">Tanggal: {{ report.date }}</p>
-                <p class="text-[16px]">Lokasi: {{ report.location }}</p>
-                <p class="text-[16px]">Batch: {{ report.batch }}</p>
-                <p class="text-[16px]">CoA - Activity: {{ report.coa }} - {{ report.activity }}</p>
+      <!-- Report Production & Sales List -->
+      <div v-if="selectedReport === 'production'">
+        <!-- Filter Bar -->
+        <div class="mb-8">
+          <h2 class="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-3">Filter</h2>
+          <div class="bg-white rounded-2xl border-2 border-gray-100 shadow-sm p-5">
+            <div class="flex items-center gap-3">
+              <label class="text-sm font-semibold text-gray-700">Filter Tanggal:</label>
+              <div class="flex items-center gap-2 px-4 py-2 border-2 border-[#0071f3] rounded-lg bg-gray-50">
+                <svg class="w-5 h-5 text-[#0071f3]" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512" fill="currentColor">
+                  <path d="M128 0c17.7 0 32 14.3 32 32l0 32 128 0 0-32c0-17.7 14.3-32 32-32s32 14.3 32 32l0 32 48 0c26.5 0 48 21.5 48 48l0 48L0 160l0-48C0 85.5 21.5 64 48 64l48 0 0-32c0-17.7 14.3-32 32-32zM0 192l448 0 0 272c0 26.5-21.5 48-48 48L48 512c-26.5 0-48-21.5-48-48L0 192z"/>
+                </svg>
+                <input type="date" class="outline-none text-gray-700 bg-transparent font-medium" />
               </div>
-              <span class="text-[16px] font-medium">
-                {{ report.status === 'Waiting' ? 'Waiting for review' : report.status }}
-              </span>
             </div>
           </div>
-        </RouterLink>
-      </div>
+        </div>
 
-      <!-- Tombol Form Baru -->
-      <div class="w-full flex justify-end mb-6">
-        <router-link to="/formReportActivity"
-          class="bg-[#B0CE88] hover:bg-[#A1C77D] text-black font-semibold text-[16px] px-[24px] py-[8px] rounded-[15px] border-2 border-[#4C763B] transition-all">
-          + Form
-        </router-link>
-      </div>
-    </div>
+        <!-- Production & Sales Reports -->
+        <div class="mb-8">
+          <h2 class="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-3">
+            Laporan Produksi & Penjualan ({{ productionSalesList.length }})
+          </h2>
+          <div class="grid grid-cols-1 gap-6">
+            <RouterLink 
+              v-for="(item, index) in productionSalesList" 
+              :key="index"
+              :to="{
+                Waiting: '/reportProductionReview',
+                Approved: '/reportProductionView',
+                Revision: '/reportProductionReview'
+              }[item.status]"
+              class="group"
+            >
+              <div class="bg-white rounded-2xl border-2 border-gray-100 hover:border-[#0071f3] shadow-sm hover:shadow-xl transition-all p-6 transform hover:-translate-y-1">
+                <!-- Header -->
+                <div class="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-6 pb-4 border-b-2 border-gray-100">
+                  <div class="flex items-center gap-3">
+                    <div class="w-10 h-10 bg-gradient-to-br from-[#0071f3] to-[#8FABD4] rounded-lg flex items-center justify-center text-white text-lg">
+                      📊
+                    </div>
+                    <div>
+                      <p class="font-bold text-gray-900 text-lg">{{ item.batch }}</p>
+                      <p class="text-sm text-gray-500">{{ item.date }}</p>
+                    </div>
+                  </div>
+                  <div class="flex items-center gap-3">
+                    <span 
+                      class="text-xs font-bold px-4 py-2 rounded-lg"
+                      :class="{
+                        'bg-yellow-100 text-yellow-800': item.status === 'Waiting',
+                        'bg-green-100 text-green-800': item.status === 'Approved',
+                        'bg-red-100 text-red-800': item.status === 'Revision'
+                      }"
+                    >
+                      {{ item.status === 'Waiting' ? '⏳ Waiting' : item.status === 'Approved' ? '✅ Approved' : '🔄 Revision' }}
+                    </span>
+                    <svg class="w-5 h-5 text-gray-400 group-hover:text-[#0071f3] transition-colors" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512" fill="currentColor">
+                      <path d="M278.6 233.4c12.5 12.5 12.5 32.8 0 45.3l-160 160c-12.5 12.5-32.8 12.5-45.3 0s-12.5-32.8 0-45.3L210.7 256 73.4 118.6c-12.5-12.5-12.5-32.8 0-45.3s32.8-12.5 45.3 0l160 160z"/>
+                    </svg>
+                  </div>
+                </div>
 
-    <!-- Report Production & Sales List -->
-    <div v-if="selectedReport === 'production'" class="w-full max-w-[1250px] flex flex-col items-center">
-      <!-- Tanggal Filter -->
-      <div class="w-full flex justify-start mb-6">
-        <div class="flex items-center gap-3 bg-white border-2 border-black rounded-lg px-4 py-2">
-          <input type="date" class="outline-none text-gray-700" />
+                <!-- Content Grid -->
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-5">
+                  <!-- Produksi -->
+                  <div class="bg-gradient-to-br from-[#0071f3] to-[#0060d1] text-white p-5 rounded-xl">
+                    <p class="font-bold text-base mb-4 flex items-center gap-2">
+                      <span class="text-xl">🏭</span>
+                      Produksi
+                    </p>
+                    <ul class="space-y-3">
+                      <li v-for="(p, pi) in item.production" :key="pi" class="text-sm bg-white/10 rounded-lg p-3">
+                        <div class="flex justify-between items-center">
+                          <span>{{ p.category }}</span>
+                          <span class="font-bold text-lg">{{ p.quantity }}</span>
+                        </div>
+                        <p class="text-xs opacity-75 mt-1">{{ p.owner }}</p>
+                      </li>
+                    </ul>
+                  </div>
+
+                  <!-- Penjualan -->
+                  <div class="bg-gradient-to-br from-[#8FABD4] to-[#7a9bc4] text-white p-5 rounded-xl">
+                    <p class="font-bold text-base mb-4 flex items-center gap-2">
+                      <span class="text-xl">💰</span>
+                      Penjualan
+                    </p>
+                    <ul class="space-y-3">
+                      <li v-for="(s, si) in item.sales" :key="si" class="text-sm bg-white/10 rounded-lg p-3">
+                        <div class="flex justify-between items-center mb-1">
+                          <span>{{ s.category }}</span>
+                          <span class="font-bold">{{ s.quantity }} {{ s.unit }}</span>
+                        </div>
+                        <div class="flex justify-between items-center text-xs opacity-90">
+                          <span>@ Rp{{ s.price.toLocaleString() }}</span>
+                          <span class="font-bold text-base">Rp{{ (s.quantity * s.price).toLocaleString() }}</span>
+                        </div>
+                      </li>
+                    </ul>
+                  </div>
+                </div>
+              </div>
+            </RouterLink>
+          </div>
         </div>
       </div>
 
-      <!-- Production & Sales Cards -->
-      <div v-for="(item, index) in productionSalesList" :key="index" class="w-full px-6">
-        <RouterLink :to="{
-          Waiting: '/reportProductionReview',
-          Approved: '/reportProductionView',
-          Revision: '/reportProductionReview'
-        }[item.status]">
-          <div class="w-full bg-white border-2 border-black rounded-[15px] px-[20px] py-[14px] mb-6 shadow-md">
-            <div class="flex justify-between items-center mb-3">
-              <div>
-                <p class="font-semibold text-[16px]">Tanggal: {{ item.date }}</p>
-                <p class="text-[16px]">Batch: {{ item.batch }}</p>
-                <p class="text-[16px] font-semibold">Status: {{ item.status }}</p>
-              </div>
-            </div>
-
-            <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <!-- Produksi -->
-              <div class="bg-[#B5D78D] p-3 rounded-lg">
-                <p class="font-semibold mb-2">Produksi</p>
-                <ul class="text-sm list-disc list-inside">
-                  <li v-for="(p, pi) in item.production" :key="pi">
-                    {{ p.category }} ({{ p.owner }}) — {{ p.quantity }}
-                  </li>
-                </ul>
-              </div>
-
-              <!-- Penjualan -->
-              <div class="bg-[#FFD580] p-3 rounded-lg">
-                <p class="font-semibold mb-2">Penjualan</p>
-                <ul class="text-sm list-disc list-inside">
-                  <li v-for="(s, si) in item.sales" :key="si">
-                    {{ s.category }} — {{ s.quantity }} {{ s.unit }} × Rp{{ s.price.toLocaleString() }} = 
-                    Rp{{ (s.quantity * s.price).toLocaleString() }}
-                  </li>
-                </ul>
-              </div>
-            </div>
-          </div>
-        </RouterLink>
-      </div>
+      <!-- Footer -->
+      <footer class="text-center py-10 mt-8 border-t border-gray-200">
+        <div class="flex items-center justify-center gap-2 mb-2">
+          <span class="text-2xl">🌱</span>
+          <p class="text-gray-400 font-bold text-sm">GREENHOUSE</p>
+        </div>
+        <p class="text-gray-400 text-xs">© 2025 All Rights Reserved</p>
+      </footer>
     </div>
-     <!-- 🔹 Footer -->
-    <footer class="bg-[#FFFD8F] text-center py-6 mt-12">
-      <p class="text-[#2F5320] font-semibold text-lg">
-        © GREENHOUSE 2025
-      </p>
-    </footer>
   </div>
 </template>
 
 <style scoped>
-@import url('https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css');
-
 @media (max-width: 640px) {
-  .text-left p {
-    font-size: 0.9rem;
+  .ml-13 {
+    margin-left: 0;
   }
 }
 </style>

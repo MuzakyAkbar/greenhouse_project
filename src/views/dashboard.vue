@@ -58,7 +58,7 @@ const logout = async () => {
 const router = useRouter()
 
 // Navigasi halaman
-const goToDetail = (batchId) => router.push(`/batchdetail/${batchId}`)
+const goToDetail = (batchId) => router.push(`/batch/${batchId}`)
 const tambahBatch = () => router.push('/tambah-batch')
 const bukaFormActivity = () => router.push('/formReportActivity')
 const bukaLaporanActivity = () => router.push('/reportActivityList')
@@ -126,54 +126,102 @@ onMounted(() => {
         {
           label: 'Batch A',
           data: [500, 420, 360, 310],
-          borderColor: '#4C763B',
-          backgroundColor: '#CFE9A8',
-          tension: 0.3,
+          borderColor: '#0071f3',
+          backgroundColor: 'rgba(0, 113, 243, 0.08)',
+          tension: 0.4,
           fill: true,
+          borderWidth: 3,
+          pointRadius: 5,
+          pointHoverRadius: 7,
+          pointBackgroundColor: '#0071f3',
+          pointBorderColor: '#fff',
+          pointBorderWidth: 2,
         },
         {
           label: 'Batch B',
           data: [600, 510, 460, 410],
-          borderColor: '#9AC75E',
-          backgroundColor: '#E5F6C3',
-          tension: 0.3,
+          borderColor: '#8FABD4',
+          backgroundColor: 'rgba(143, 171, 212, 0.08)',
+          tension: 0.4,
           fill: true,
+          borderWidth: 3,
+          pointRadius: 5,
+          pointHoverRadius: 7,
+          pointBackgroundColor: '#8FABD4',
+          pointBorderColor: '#fff',
+          pointBorderWidth: 2,
         },
       ],
     },
     options: {
       responsive: true,
+      maintainAspectRatio: false,
       plugins: {
-        legend: { position: 'bottom' },
+        legend: { 
+          position: 'bottom',
+          labels: {
+            padding: 15,
+            font: { size: 12, weight: '500' },
+            usePointStyle: true,
+            pointStyle: 'circle'
+          }
+        },
         title: {
           display: true,
           text: 'Perkembangan Fase Kentang per Batch',
-          font: { size: 16 },
+          font: { size: 15, weight: '600' },
+          color: '#1f2937',
+          padding: { bottom: 20 }
         },
       },
+      scales: {
+        y: {
+          beginAtZero: true,
+          grid: { color: '#f3f4f6', drawBorder: false },
+          ticks: { color: '#6b7280', font: { size: 11 } }
+        },
+        x: {
+          grid: { display: false, drawBorder: false },
+          ticks: { color: '#6b7280', font: { size: 11 } }
+        }
+      }
     },
   })
 
   // Chart pie kepemilikan
   new Chart(document.getElementById('kepemilikanChart'), {
-    type: 'pie',
+    type: 'doughnut',
     data: {
       labels: ['Milik Mitra', 'Milik Petani'],
       datasets: [
         {
           data: [summary.value.g2Mitra, summary.value.g2Petani],
-          backgroundColor: ['#4C763B', '#CFE9A8'],
+          backgroundColor: ['#0071f3', '#8FABD4'],
+          borderWidth: 0,
+          hoverOffset: 8,
         },
       ],
     },
     options: {
       responsive: true,
+      maintainAspectRatio: false,
+      cutout: '60%',
       plugins: {
-        legend: { position: 'bottom' },
+        legend: { 
+          position: 'bottom',
+          labels: {
+            padding: 15,
+            font: { size: 12, weight: '500' },
+            usePointStyle: true,
+            pointStyle: 'circle'
+          }
+        },
         title: {
           display: true,
-          text: 'Distribusi Kepemilikan G2 (Kentang)',
-          font: { size: 16 },
+          text: 'Distribusi Kepemilikan G2',
+          font: { size: 15, weight: '600' },
+          color: '#1f2937',
+          padding: { bottom: 20 }
         },
       },
     },
@@ -188,26 +236,49 @@ onMounted(() => {
         {
           label: 'Pendapatan (Rp)',
           data: batchList.value.map((b) => b.pendapatan),
-          backgroundColor: '#4C763B',
+          backgroundColor: '#0071f3',
+          borderRadius: 8,
+          borderSkipped: false,
         },
         {
           label: 'Pengeluaran (Rp)',
           data: batchList.value.map((b) => b.pengeluaran),
-          backgroundColor: '#E57373',
+          backgroundColor: '#374151',
+          borderRadius: 8,
+          borderSkipped: false,
         },
       ],
     },
     options: {
       responsive: true,
+      maintainAspectRatio: false,
       scales: {
-        y: { beginAtZero: true },
+        y: { 
+          beginAtZero: true,
+          grid: { color: '#f3f4f6', drawBorder: false },
+          ticks: { color: '#6b7280', font: { size: 11 } }
+        },
+        x: {
+          grid: { display: false, drawBorder: false },
+          ticks: { color: '#6b7280', font: { size: 11 } }
+        }
       },
       plugins: {
-        legend: { position: 'bottom' },
+        legend: { 
+          position: 'bottom',
+          labels: {
+            padding: 15,
+            font: { size: 12, weight: '500' },
+            usePointStyle: true,
+            pointStyle: 'rect'
+          }
+        },
         title: {
           display: true,
-          text: 'Perbandingan Pemasukan & Pengeluaran per Batch Kentang',
-          font: { size: 16 },
+          text: 'Perbandingan Pemasukan & Pengeluaran per Batch',
+          font: { size: 15, weight: '600' },
+          color: '#1f2937',
+          padding: { bottom: 20 }
         },
         tooltip: {
           callbacks: {
@@ -215,6 +286,9 @@ onMounted(() => {
               return `${context.dataset.label}: Rp ${context.parsed.y.toLocaleString('id-ID')}`
             },
           },
+          backgroundColor: '#1f2937',
+          padding: 12,
+          cornerRadius: 8,
         },
       },
     },
@@ -223,164 +297,257 @@ onMounted(() => {
 </script>
 
 <template>
-  <div class="min-h-screen bg-[#FFFD8F] px-6 py-10 text-[#2F5320]">
-    <!-- Header -->
-    <div class="w-full flex justify-end mb-4 relative z-50">
-      <button
-        @click="logout"
-        class="flex items-center gap-2 text-[#2F5320] bg-[#CFE9A8] hover:bg-[#b9d48f] px-4 py-2 rounded-lg shadow font-semibold border border-[#4C763B] transition"
-      >
-        <svg class="w-5" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
-          <path
-            d="M505 273c9.4-9.4 9.4-24.6 0-33.9L361 95c-6.9-6.9-17.2-8.9-26.2-5.2S320 102.3 320 112l0 80-112 0c-26.5 0-48 21.5-48 48l0 32c0 26.5 21.5 48 48 48l112 0 0 80c0 9.7 5.8 18.5 14.8 22.2s19.3 1.7 26.2-5.2L505 273zM160 96c17.7 0 32-14.3 32-32s-14.3-32-32-32L96 32C43 32 0 75 0 128L0 384c0 53 43 96 96 96l64 0c17.7 0 32-14.3 32-32s-14.3-32-32-32l-64 0c-17.7 0-32-14.3-32-32l0-256c0-17.7 14.3-32 32-32l64 0z"
-          />
-        </svg>
-      </button>
-    </div>
-    <div class="flex flex-col md:flex-row justify-between items-center mb-10">
-      <!-- Judul -->
-      <h1
-        class="text-[42px] sm:text-[56px] font-extrabold text-[#2F5320] leading-tight text-center md:text-left"
-      >
-        Dashboard Kentang<br class="sm:hidden" />
-        GreenHouse
-      </h1>
-
-      <!-- Tombol Aksi -->
-      <div class="flex flex-wrap justify-center md:justify-end gap-3 mt-6 md:mt-0">
-        <!-- Tombol Isi Form Aktivitas -->
-        <button
-          @click="bukaFormActivity"
-          class="bg-[#4C763B] hover:bg-[#3b5c2f] text-white font-semibold px-5 py-2 rounded-lg shadow transition"
-        >
-          📝 Isi Form Aktivitas
-        </button>
-
-        <!-- Tombol Lihat Laporan Aktivitas -->
-        <button
-          @click="bukaLaporanActivity"
-          class="bg-[#CFE9A8] hover:bg-[#b9d48f] text-[#2F5320] font-semibold px-5 py-2 rounded-lg shadow border border-[#4C763B] transition"
-        >
-          📋 Lihat Laporan
-        </button>
-
-        <router-link
-          to="/report-production"
-          class="bg-[#4C763B] hover:bg-[#3b5c2f] text-white font-semibold px-5 py-2 rounded-lg shadow transition"
-        >
-          + Laporan Produksi
-        </router-link>
-
-        <!-- 🔹 Tombol baru: Add Location & Batch -->
-        <router-link
-          to="/location"
-          class="bg-[#CFE9A8] hover:bg-[#b9d48f] text-[#2F5320] font-bold text-lg px-6 py-3 rounded-lg shadow border-2 border-[#4C763B] transition transform hover:scale-105"
-        >
-          ➕ Add Location & Batch
-        </router-link>
-      </div>
-    </div>
-
-    <!-- Statistik -->
-    <div class="w-full bg-white rounded-2xl shadow-lg p-6 mb-10 border border-[#CFE9A8]">
-      <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-6">
-
-        <button @click="openModal" class="bg-[#4C763B] text-white rounded-xl p-6 text-center shadow-md hover:bg-[#3b5c2f] transition">
-          <p class="text-lg font-semibold">Total Planlet</p>
-          <h2 class="text-3xl font-extrabold">{{ summary.totalPlanlet }}</h2>
-        </button>
-
-        <div class="bg-[#4C763B] text-white rounded-xl p-6 text-center shadow-md">
-          <p class="text-lg font-semibold">G0 Terjual</p>
-          <h2 class="text-3xl font-extrabold">{{ summary.g0Terjual }}</h2>
+  <div class="min-h-screen bg-gradient-to-br from-gray-50 to-white">
+    <!-- Header Bar -->
+    <div class="bg-white border-b border-gray-200 shadow-sm sticky top-0 z-40">
+      <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-5">
+        <div class="flex justify-between items-center">
+          <div>
+            <h1 class="text-2xl font-bold text-gray-900 flex items-center gap-3">
+              <span class="w-10 h-10 bg-gradient-to-br from-[#0071f3] to-[#8FABD4] rounded-lg flex items-center justify-center text-white text-lg">
+                🌱
+              </span>
+              Dashboard Kentang GreenHouse
+            </h1>
+            <p class="text-sm text-gray-500 mt-1 ml-13">Monitoring & Analisis Produksi</p>
+          </div>
+          <button
+            @click="logout"
+            class="flex items-center gap-2 bg-white hover:bg-gray-50 text-gray-700 px-4 py-2.5 rounded-lg border border-gray-300 transition font-medium text-sm shadow-sm hover:shadow"
+          >
+            <svg class="w-4 h-4" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" fill="currentColor">
+              <path d="M505 273c9.4-9.4 9.4-24.6 0-33.9L361 95c-6.9-6.9-17.2-8.9-26.2-5.2S320 102.3 320 112l0 80-112 0c-26.5 0-48 21.5-48 48l0 32c0 26.5 21.5 48 48 48l112 0 0 80c0 9.7 5.8 18.5 14.8 22.2s19.3 1.7 26.2-5.2L505 273zM160 96c17.7 0 32-14.3 32-32s-14.3-32-32-32L96 32C43 32 0 75 0 128L0 384c0 53 43 96 96 96l64 0c17.7 0 32-14.3 32-32s-14.3-32-32-32l-64 0c-17.7 0-32-14.3-32-32l0-256c0-17.7 14.3-32 32-32l64 0z"/>
+            </svg>
+            Logout
+          </button>
         </div>
-
-        <div class="bg-[#4C763B] text-white rounded-xl p-6 text-center shadow-md">
-          <p class="text-lg font-semibold">G0 Diproduksi</p>
-          <h2 class="text-3xl font-extrabold">{{ summary.g0Diproduksi }}</h2>
-        </div>
-
-        <div class="bg-[#CFE9A8] text-[#2F5320] rounded-xl p-6 text-center shadow-md">
-          <p class="text-lg font-semibold">Total G2 Diproduksi</p>
-          <h2 class="text-3xl font-extrabold">{{ summary.g2Diproduksi }}</h2>
-        </div>
-
-        <div class="bg-[#CFE9A8] text-[#2F5320] rounded-xl p-6 text-center shadow-md">
-          <p class="text-lg font-semibold">Total G2 Diterjual</p>
-          <h2 class="text-3xl font-extrabold">{{ summary.g2Terjual }}</h2>
-        </div>
-
-        <div class="bg-[#CFE9A8] text-[#2F5320] rounded-xl p-6 text-center shadow-md">
-          <p class="text-lg font-semibold">Pendapatan Total</p>
-          <h2 class="text-3xl font-extrabold">Rp {{ summary.pendapatan.toLocaleString('id-ID') }}</h2>
-        </div>
-
       </div>
     </div>
 
-    <!-- Statistik Progres -->
-    <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-10">
-      <div class="bg-white border-l-4 border-[#4C763B] rounded-lg p-4 shadow">
-        <p class="text-gray-700 font-semibold">Planlet → G0</p>
-        <h2 class="text-2xl font-bold text-[#4C763B]">{{ progres.planletToG0 }}%</h2>
+    <!-- Main Content -->
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+      
+      <!-- Action Buttons -->
+      <div class="mb-8">
+        <h2 class="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-3">Quick Actions</h2>
+        <div class="flex flex-wrap gap-3">
+          <button
+            @click="bukaFormActivity"
+            class="group bg-gradient-to-r from-[#0071f3] to-[#0060d1] hover:from-[#0060d1] hover:to-[#0050b1] text-white font-medium px-5 py-3 rounded-xl transition-all text-sm shadow-md hover:shadow-lg transform hover:-translate-y-0.5"
+          >
+            <span class="flex items-center gap-2">
+              📝 Isi Form Aktivitas
+            </span>
+          </button>
+          <button
+            @click="bukaLaporanActivity"
+            class="bg-white hover:bg-gray-50 text-gray-700 font-medium px-5 py-3 rounded-xl transition-all text-sm border-2 border-gray-200 hover:border-[#0071f3] shadow-sm hover:shadow"
+          >
+            📊 Lihat Laporan
+          </button>
+          <router-link
+            to="/report-production"
+            class="bg-white hover:bg-gray-50 text-gray-700 font-medium px-5 py-3 rounded-xl transition-all text-sm border-2 border-gray-200 hover:border-[#0071f3] shadow-sm hover:shadow inline-flex items-center"
+          >
+            📈 Laporan Produksi
+          </router-link>
+          <router-link
+            to="/location"
+            class="bg-gradient-to-r from-gray-700 to-gray-800 hover:from-gray-800 hover:to-gray-900 text-white font-medium px-5 py-3 rounded-xl transition-all text-sm shadow-md hover:shadow-lg transform hover:-translate-y-0.5 inline-flex items-center"
+          >
+            📍 Add Location & Batch
+          </router-link>
+          <router-link
+            to="/goodmovement"
+            class="bg-white hover:bg-gray-50 text-gray-700 font-medium px-5 py-3 rounded-xl transition-all text-sm border-2 border-gray-200 hover:border-gray-700 shadow-sm hover:shadow inline-flex items-center"
+          >
+            🚚 Good Movement
+          </router-link>
+        </div>
       </div>
-      <div class="bg-white border-l-4 border-[#4C763B] rounded-lg p-4 shadow">
-        <p class="text-gray-700 font-semibold">G0 → G1</p>
-        <h2 class="text-2xl font-bold text-[#4C763B]">{{ progres.G0ToG1 }}%</h2>
-      </div>
-      <div class="bg-white border-l-4 border-[#4C763B] rounded-lg p-4 shadow">
-        <p class="text-gray-700 font-semibold">G1 → G2</p>
-        <h2 class="text-2xl font-bold text-[#4C763B]">{{ progres.G1ToG2 }}%</h2>
-      </div>
-    </div>
 
-    <!-- Chart -->
-    <div class="grid grid-cols-1 lg:grid-cols-3 gap-8 mb-10">
-      <div class="bg-white rounded-2xl shadow-lg p-6 col-span-2">
-        <canvas id="faseChart"></canvas>
-      </div>
-      <div class="bg-white rounded-2xl shadow-lg p-6">
-        <canvas id="kepemilikanChart"></canvas>
-      </div>
-    </div>
+      <!-- Stats Grid -->
+      <div class="mb-8">
+        <h2 class="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-3">Ringkasan Produksi</h2>
+        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
+          <button @click="openModal" class="group bg-gradient-to-br from-[#0071f3] to-[#005dd1] text-white rounded-2xl p-6 text-left hover:shadow-xl transition-all transform hover:scale-105 relative overflow-hidden">
+            <div class="absolute top-0 right-0 w-32 h-32 bg-white opacity-5 rounded-full -mr-16 -mt-16"></div>
+            <div class="relative">
+              <p class="text-sm font-semibold opacity-90 mb-2">Total Planlet</p>
+              <h2 class="text-4xl font-bold mb-1">{{ summary.totalPlanlet.toLocaleString('id-ID') }}</h2>
+              <p class="text-xs opacity-75">🌱 Stok keseluruhan</p>
+            </div>
+          </button>
 
-    <div class="bg-white rounded-2xl shadow-lg p-6 mb-10">
-      <canvas id="penjualanChart"></canvas>
-    </div>
+          <div class="bg-white rounded-2xl p-6 text-left border-2 border-gray-100 hover:border-gray-200 hover:shadow-lg transition-all">
+            <p class="text-sm font-semibold text-gray-500 mb-2">G0 Terjual</p>
+            <h2 class="text-4xl font-bold text-gray-900 mb-1">{{ summary.g0Terjual.toLocaleString('id-ID') }}</h2>
+            <p class="text-xs text-gray-500">💰 Unit terjual</p>
+          </div>
 
-    <!-- Batch Cards -->
-    <h2 class="text-2xl font-bold mb-6">Data Setiap Batch Kentang</h2>
-    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
-      <div
-        v-for="batch in batchList"
-        :key="batch.id"
-        class="bg-[#CFE9A8] rounded-2xl shadow-lg p-6 border-2 border-[#4C763B] hover:shadow-xl transition-all"
-      >
-        <h3 class="text-xl font-bold mb-4">{{ batch.nama }}</h3>
-        <p><strong>Planlet:</strong> {{ batch.planlet }}</p>
-        <p><strong>G0:</strong> {{ batch.g0 }}</p>
-        <p><strong>G1:</strong> {{ batch.g1 }}</p>
-        <p><strong>G2:</strong> {{ batch.g2 }}</p>
-        <p><strong>Terjual:</strong> {{ batch.terjual }}</p>
-        <p><strong>Pendapatan:</strong> Rp {{ batch.pendapatan.toLocaleString('id-ID') }}</p>
-        <p><strong>Pengeluaran:</strong> Rp {{ batch.pengeluaran.toLocaleString('id-ID') }}</p>
-        <p>
-          <strong>Keberhasilan:</strong>
-          <span class="font-semibold text-[#4C763B]">{{ batch.sukses }}%</span>
-        </p>
-        <button
-          class="mt-6 w-full bg-[#4C763B] text-white py-2 rounded-lg font-medium hover:bg-[#3b5c2f] transition"
-          @click="goToDetail(batch.id)"
+          <div class="bg-white rounded-2xl p-6 text-left border-2 border-gray-100 hover:border-gray-200 hover:shadow-lg transition-all">
+            <p class="text-sm font-semibold text-gray-500 mb-2">G0 Diproduksi</p>
+            <h2 class="text-4xl font-bold text-gray-900 mb-1">{{ summary.g0Diproduksi.toLocaleString('id-ID') }}</h2>
+            <p class="text-xs text-gray-500">🏭 Unit produksi</p>
+          </div>
+
+          <div class="bg-white rounded-2xl p-6 text-left border-2 border-gray-100 hover:border-gray-200 hover:shadow-lg transition-all">
+            <p class="text-sm font-semibold text-gray-500 mb-2">Total G2 Diproduksi</p>
+            <h2 class="text-4xl font-bold text-gray-900 mb-1">{{ summary.g2Diproduksi.toLocaleString('id-ID') }}</h2>
+            <p class="text-xs text-gray-500">✅ Produksi akhir</p>
+          </div>
+
+          <div class="bg-white rounded-2xl p-6 text-left border-2 border-gray-100 hover:border-gray-200 hover:shadow-lg transition-all">
+            <p class="text-sm font-semibold text-gray-500 mb-2">Total G2 Terjual</p>
+            <h2 class="text-4xl font-bold text-gray-900 mb-1">{{ summary.g2Terjual.toLocaleString('id-ID') }}</h2>
+            <p class="text-xs text-gray-500">📦 Distribusi selesai</p>
+          </div>
+
+          <div class="bg-gradient-to-br from-[#0071f3] to-[#005dd1] text-white rounded-2xl p-6 text-left hover:shadow-xl transition-all transform hover:scale-105 relative overflow-hidden">
+            <div class="absolute top-0 right-0 w-32 h-32 bg-white opacity-5 rounded-full -mr-16 -mt-16"></div>
+            <div class="relative">
+              <p class="text-sm font-semibold opacity-90 mb-2">Pendapatan Total</p>
+              <h2 class="text-4xl font-bold mb-1">Rp {{ (summary.pendapatan / 1000000).toFixed(1) }}M</h2>
+              <p class="text-xs opacity-75">💵 Revenue keseluruhan</p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Progress Stats -->
+      <div class="mb-8">
+        <h2 class="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-3">Tingkat Keberhasilan</h2>
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-5">
+          <div class="bg-white rounded-2xl p-6 shadow-sm border-2 border-gray-100 hover:shadow-lg transition-all">
+            <div class="flex items-center justify-between mb-3">
+              <p class="text-sm font-semibold text-gray-600">Planlet → G0</p>
+              <span class="text-2xl">🌱</span>
+            </div>
+            <h2 class="text-5xl font-bold text-gray-900 mb-3">{{ progres.planletToG0 }}%</h2>
+            <div class="h-3 bg-gray-100 rounded-full overflow-hidden">
+              <div class="h-full bg-gradient-to-r from-[#0071f3] to-[#8FABD4] rounded-full transition-all duration-500" :style="`width: ${progres.planletToG0}%`"></div>
+            </div>
+          </div>
+          <div class="bg-white rounded-2xl p-6 shadow-sm border-2 border-gray-100 hover:shadow-lg transition-all">
+            <div class="flex items-center justify-between mb-3">
+              <p class="text-sm font-semibold text-gray-600">G0 → G1</p>
+              <span class="text-2xl">🌿</span>
+            </div>
+            <h2 class="text-5xl font-bold text-gray-900 mb-3">{{ progres.G0ToG1 }}%</h2>
+            <div class="h-3 bg-gray-100 rounded-full overflow-hidden">
+              <div class="h-full bg-gradient-to-r from-[#0071f3] to-[#8FABD4] rounded-full transition-all duration-500" :style="`width: ${progres.G0ToG1}%`"></div>
+            </div>
+          </div>
+          <div class="bg-white rounded-2xl p-6 shadow-sm border-2 border-gray-100 hover:shadow-lg transition-all">
+            <div class="flex items-center justify-between mb-3">
+              <p class="text-sm font-semibold text-gray-600">G1 → G2</p>
+              <span class="text-2xl">🥔</span>
+            </div>
+            <h2 class="text-5xl font-bold text-gray-900 mb-3">{{ progres.G1ToG2 }}%</h2>
+            <div class="h-3 bg-gray-100 rounded-full overflow-hidden">
+              <div class="h-full bg-gradient-to-r from-[#0071f3] to-[#8FABD4] rounded-full transition-all duration-500" :style="`width: ${progres.G1ToG2}%`"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Charts -->
+      <div class="mb-8">
+        <h2 class="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-3">Analisis & Visualisasi</h2>
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          <div class="bg-white rounded-2xl border-2 border-gray-100 p-6 col-span-2 shadow-sm hover:shadow-lg transition-all" style="height: 400px;">
+            <canvas id="faseChart"></canvas>
+          </div>
+          <div class="bg-white rounded-2xl border-2 border-gray-100 p-6 shadow-sm hover:shadow-lg transition-all" style="height: 400px;">
+            <canvas id="kepemilikanChart"></canvas>
+          </div>
+        </div>
+      </div>
+
+      <div class="bg-white rounded-2xl border-2 border-gray-100 p-6 mb-8 shadow-sm hover:shadow-lg transition-all" style="height: 400px;">
+        <canvas id="penjualanChart"></canvas>
+      </div>
+
+      <!-- Batch Cards -->
+      <div class="mb-8">
+        <h2 class="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-3">Data Setiap Batch</h2>
+      </div>
+      <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+        <div
+          v-for="batch in batchList"
+          :key="batch.id"
+          class="group bg-white rounded-2xl border-2 border-gray-100 p-6 hover:border-[#0071f3] hover:shadow-xl transition-all transform hover:-translate-y-1"
         >
-          Lihat Detail
-        </button>
+          <div class="flex items-start justify-between mb-4">
+            <h3 class="text-lg font-bold text-gray-900 flex-1">{{ batch.nama }}</h3>
+            <div class="w-12 h-12 bg-gradient-to-br from-[#0071f3] to-[#8FABD4] rounded-xl flex items-center justify-center text-white text-xl flex-shrink-0">
+              🥔
+            </div>
+          </div>
+          
+          <div class="space-y-3 mb-6">
+            <div class="flex items-center justify-between text-sm bg-gray-50 px-3 py-2 rounded-lg">
+              <span class="text-gray-600 font-medium">Planlet</span>
+              <span class="font-bold text-gray-900">{{ batch.planlet }}</span>
+            </div>
+            <div class="grid grid-cols-3 gap-2">
+              <div class="text-center bg-blue-50 px-2 py-2 rounded-lg">
+                <p class="text-xs text-blue-600 font-semibold mb-1">G0</p>
+                <p class="text-lg font-bold text-blue-900">{{ batch.g0 }}</p>
+              </div>
+              <div class="text-center bg-blue-50 px-2 py-2 rounded-lg">
+                <p class="text-xs text-blue-600 font-semibold mb-1">G1</p>
+                <p class="text-lg font-bold text-blue-900">{{ batch.g1 }}</p>
+              </div>
+              <div class="text-center bg-blue-50 px-2 py-2 rounded-lg">
+                <p class="text-xs text-blue-600 font-semibold mb-1">G2</p>
+                <p class="text-lg font-bold text-blue-900">{{ batch.g2 }}</p>
+              </div>
+            </div>
+            <div class="flex items-center justify-between text-sm bg-gray-50 px-3 py-2 rounded-lg">
+              <span class="text-gray-600 font-medium">Terjual</span>
+              <span class="font-bold text-gray-900">{{ batch.terjual }} unit</span>
+            </div>
+            
+            <div class="border-t-2 border-gray-100 pt-3 mt-3 space-y-2">
+              <div class="flex justify-between text-sm">
+                <span class="text-gray-600 font-medium">💰 Pendapatan</span>
+                <span class="font-bold text-green-600">Rp {{ (batch.pendapatan / 1000000).toFixed(1) }}M</span>
+              </div>
+              <div class="flex justify-between text-sm">
+                <span class="text-gray-600 font-medium">💸 Pengeluaran</span>
+                <span class="font-bold text-red-600">Rp {{ (batch.pengeluaran / 1000000).toFixed(1) }}M</span>
+              </div>
+              <div class="flex justify-between items-center pt-2 border-t border-gray-100">
+                <span class="text-sm text-gray-600 font-medium">Keberhasilan</span>
+                <div class="flex items-center gap-2">
+                  <div class="h-2 w-20 bg-gray-100 rounded-full overflow-hidden">
+                    <div class="h-full bg-gradient-to-r from-[#0071f3] to-[#8FABD4]" :style="`width: ${batch.sukses}%`"></div>
+                  </div>
+                  <span class="text-lg font-bold text-[#0071f3]">{{ batch.sukses }}%</span>
+                </div>
+              </div>
+            </div>
+          </div>
+          
+          <button
+            class="w-full bg-gradient-to-r from-[#0071f3] to-[#0060d1] group-hover:from-[#0060d1] group-hover:to-[#0050b1] text-white py-3 rounded-xl font-semibold hover:shadow-lg transition-all text-sm"
+            @click="goToDetail(batch.id)"
+          >
+            Lihat Detail →
+          </button>
+        </div>
       </div>
+
+      <!-- Footer -->
+      <footer class="text-center py-10 mt-16 border-t border-gray-200">
+        <div class="flex items-center justify-center gap-2 mb-2">
+          <span class="text-2xl">🌱</span>
+          <p class="text-gray-400 font-bold text-sm">GREENHOUSE</p>
+        </div>
+        <p class="text-gray-400 text-xs">© 2025 All Rights Reserved</p>
+      </footer>
     </div>
-    <footer class="bg-[#FFFD8F] text-center py-6 mt-12">
-      <p class="text-[#2F5320] font-semibold text-lg">
-        © GREENHOUSE 2025
-      </p>
-    </footer>
   </div>
   <ModalView :isOpen="isOpen" @close="closeModal" />
 </template>

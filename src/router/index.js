@@ -1,9 +1,8 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import { useAuthStore } from '../stores/auth'
 
+// 🔹 Import tambahan untuk halaman AddBatch
 import AddBatch from '../views/AddBatch.vue'
-import Location from '../views/location.vue'
-import AddLocation from '../views/addlocation.vue' // ✅ Tambahkan import baru
 
 const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
@@ -17,30 +16,6 @@ const router = createRouter({
       path: '/dashboard',
       name: 'dashboard',
       component: () => import('../views/dashboard.vue'),
-      meta: { requiresAuth: true },
-    },
-    {
-      path: '/location',
-      name: 'location',
-      component: Location,
-      meta: { requiresAuth: true },
-    },
-    {
-      path: '/add-location', // ✅ Rute baru untuk halaman tambah lokasi
-      name: 'AddLocation',
-      component: AddLocation,
-      meta: { requiresAuth: true },
-    },
-    {
-      path: '/add-batch',
-      name: 'AddBatch',
-      component: AddBatch,
-      meta: { requiresAuth: true },
-    },
-    {
-      path: '/batchdetail/:id',
-      name: 'BatchDetail',
-      component: () => import('../views/BatchDetail.vue'),
       meta: { requiresAuth: true },
     },
     {
@@ -67,6 +42,19 @@ const router = createRouter({
       component: () => import('../views/ReportActivityView.vue'),
       meta: { requiresAuth: true },
     },
+    {
+      path: '/batch/:id',
+      name: 'BatchDetail',
+      component: () => import('../views/batchDetail.vue'),
+      meta: { requiresAuth: true },
+    },
+    {
+      path: '/add-batch',
+      name: 'AddBatch',
+      component: AddBatch,
+      meta: { requiresAuth: true },
+    },
+
     // 🔹 Routing Production & Sales
     {
       path: '/reportProductionReview',
@@ -84,6 +72,36 @@ const router = createRouter({
       path: '/report-production',
       name: 'reportProduction',
       component: () => import('../views/reportProduction.vue'),
+      meta: { requiresAuth: true },
+    },
+    {
+      path: '/goodmovement',
+      name: 'goodmovement',
+      component: () => import('../views/goodmovement.vue'),
+      meta: { requiresAuth: true },
+    },
+    {
+      path: '/addnewgm',
+      name: 'addnewgm',
+      component: () => import('../views/addnewgm.vue'),
+      meta: { requiresAuth: true },
+    },
+    {
+      path: '/detailmovement/:id',
+      name: 'detailmovement',
+      component: () => import('../views/detailmovement.vue'),
+      meta: { requiresAuth: true },
+    },
+    {
+      path: '/add-location',
+      name: 'addlocation',
+      component: () => import('../views/addlocation.vue'),
+      meta: { requiresAuth: true },
+    },
+    {
+      path: '/location',
+      name: 'location',
+      component: () => import('../views/location.vue'),
       meta: { requiresAuth: true },
     },
   ],
