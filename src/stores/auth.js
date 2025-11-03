@@ -10,7 +10,7 @@ export const useAuthStore = defineStore('auth', {
   }),
   getters: {
     isLoggedIn: (state) => !!state.user,
-    role: (state) => state.user?.role || null,
+    role: (state) => state.user?.role || null, // ✅ Sudah ada
   },
   actions: {
     async login(email, password) {

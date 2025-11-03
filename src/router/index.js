@@ -16,7 +16,14 @@ const router = createRouter({
       path: '/dashboard',
       name: 'dashboard',
       component: () => import('../views/dashboard.vue'),
-      meta: { requiresAuth: true },
+      meta: { requiresAuth: true, roles: ['manager', 'admin'] },
+    },
+    // 🔹 Dashboard Staff (NEW)
+    {
+      path: '/dashboard-staff',
+      name: 'dashboardStaff',
+      component: () => import('../views/dashboardstaff.vue'),
+      meta: { requiresAuth: true, roles: ['staff'] },
     },
     {
       path: '/reportActivityList',
@@ -110,14 +117,39 @@ const router = createRouter({
 // 🔒 Middleware auth guard
 router.beforeEach((to, from, next) => {
   const authStore = useAuthStore()
+  const userRole = authStore.user?.role?.toLowerCase()
 
+  // 🔹 Jika butuh auth tapi belum login
   if (to.meta.requiresAuth && !authStore.isLoggedIn) {
     next({ name: 'login' })
-  } else if (to.name === 'login' && authStore.isLoggedIn) {
-    next({ name: 'dashboard' })
-  } else {
-    next()
+    return
   }
+
+  // 🔹 Jika sudah login tapi akses halaman login
+  if (to.name === 'login' && authStore.isLoggedIn) {
+    // Redirect ke dashboard sesuai role
+    if (userRole === 'staff') {
+      next({ name: 'dashboardStaff' })
+    } else {
+      next({ name: 'dashboard' })
+    }
+    return
+  }
+
+  // 🔹 Role-based access control (opsional)
+  if (to.meta.roles && to.meta.roles.length > 0) {
+    if (!to.meta.roles.includes(userRole)) {
+      // Jika role tidak sesuai, redirect ke dashboard yang sesuai
+      if (userRole === 'staff') {
+        next({ name: 'dashboardStaff' })
+      } else {
+        next({ name: 'dashboard' })
+      }
+      return
+    }
+  }
+
+  next()
 })
 
 export default router

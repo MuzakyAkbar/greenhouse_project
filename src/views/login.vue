@@ -1,8 +1,3 @@
-# Login Page - Redesigned Code
-
-Berikut adalah kode Vue.js yang sudah didesain ulang untuk halaman login dengan tampilan yang lebih menarik dan profesional:
-
-```vue
 <script setup>
 import { ref } from 'vue'
 import { useRouter } from 'vue-router'
@@ -18,7 +13,17 @@ const showPassword = ref(false)
 const handleLogin = async () => {
   const success = await authStore.login(email.value, password.value)
   if (success) {
-    router.push('/dashboard')
+    // 🔹 Redirect berdasarkan role
+    const userRole = authStore.user?.role?.toLowerCase() // Pastikan lowercase
+    
+    if (userRole === 'staff') {
+      router.push('/dashboard-staff')
+    } else if (userRole === 'manager' || userRole === 'admin') {
+      router.push('/dashboard')
+    } else {
+      // Default fallback jika role tidak dikenali
+      router.push('/dashboard')
+    }
   } else {
     alert(authStore.error || 'Gagal login. Periksa kembali email dan password.')
   }

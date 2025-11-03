@@ -13,53 +13,120 @@ const emit = defineEmits(['close'])
   <!-- Overlay full screen -->
   <div
     v-if="isOpen"
-    class="fixed inset-0 flex items-center justify-center backdrop-blur-xs backdrop-opacity-75 backdrop-brightness-0 z-50"
+    class="fixed inset-0 flex items-center justify-center bg-black bg-opacity-50 backdrop-blur-sm z-50 p-4 transition-opacity duration-300"
+    @click.self="$emit('close')"
   >
     <!-- Kotak modal -->
     <div
-      class="flex flex-col gap-y-5 justify-center items-center bg-[#b9d48f] rounded-lg shadow-lg p-6 max-w-lg w-full h-auto max-h-[50vh]"
+      class="bg-white rounded-2xl shadow-2xl max-w-lg w-full transform transition-all duration-300 scale-100 border-2 border-gray-100"
     >
-      <div class="w-full flex justify-end">
-        <button @click="$emit('close')" class="w-3 hover:scale-120 transition" title="Close Modal">
-          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 384 512" fill="#fa0000">
-            <path
-              d="M376.6 84.5c11.3-13.6 9.5-33.8-4.1-45.1s-33.8-9.5-45.1 4.1L192 206 56.6 43.5C45.3 29.9 25.1 28.1 11.5 39.4S-3.9 70.9 7.4 84.5L150.3 256 7.4 427.5c-11.3 13.6-9.5 33.8 4.1 45.1s33.8 9.5 45.1-4.1L192 306 327.4 468.5c11.3 13.6 31.5 15.4 45.1 4.1s15.4-31.5 4.1-45.1L233.7 256 376.6 84.5z"
+      <!-- Header Modal -->
+      <div class="bg-gradient-to-r from-[#0071f3] to-[#0060d1] p-6 rounded-t-2xl relative overflow-hidden">
+        <div class="absolute top-0 right-0 w-32 h-32 bg-white opacity-5 rounded-full -mr-16 -mt-16"></div>
+        <div class="flex justify-between items-center relative">
+          <div>
+            <h2 class="text-xl font-bold text-white mb-1">Input Data Produksi</h2>
+            <p class="text-sm text-blue-100">Lengkapi formulir di bawah ini</p>
+          </div>
+          <button 
+            @click="$emit('close')" 
+            class="w-8 h-8 flex items-center justify-center rounded-lg bg-white bg-opacity-20 hover:bg-opacity-30 transition text-white hover:rotate-90 transform duration-300"
+            title="Tutup"
+          >
+            <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
+              <path fill-rule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clip-rule="evenodd"/>
+            </svg>
+          </button>
+        </div>
+      </div>
+
+      <!-- Content Modal -->
+      <div class="p-6 space-y-5">
+        <!-- Input Jenis Produksi -->
+        <div class="space-y-2">
+          <label class="text-sm font-semibold text-gray-700 block">Jenis Produksi</label>
+          <div class="relative">
+            <select class="w-full bg-gray-50 border-2 border-gray-200 rounded-xl py-3 px-4 text-gray-900 font-medium focus:outline-none focus:border-[#0071f3] focus:ring-2 focus:ring-[#0071f3] focus:ring-opacity-20 transition appearance-none cursor-pointer hover:border-gray-300">
+              <option selected>Input Total Planlet/Batch</option>
+              <option>Planlet Stek</option>
+              <option>Benih G0</option>
+              <option>Benih G1</option>
+              <option>Buah G2</option>
+            </select>
+            <div class="absolute right-4 top-1/2 -translate-y-1/2 pointer-events-none text-gray-400">
+              <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
+                <path fill-rule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clip-rule="evenodd"/>
+              </svg>
+            </div>
+          </div>
+        </div>
+
+        <!-- Input Quantity -->
+        <div class="space-y-2">
+          <label class="text-sm font-semibold text-gray-700 block">Jumlah (Qty)</label>
+          <div class="relative">
+            <input
+              type="number"
+              placeholder="Masukkan jumlah"
+              class="w-full bg-gray-50 border-2 border-gray-200 rounded-xl py-3 px-4 text-gray-900 font-medium focus:outline-none focus:border-[#0071f3] focus:ring-2 focus:ring-[#0071f3] focus:ring-opacity-20 transition hover:border-gray-300"
+              min="0"
             />
-          </svg>
+            <div class="absolute right-4 top-1/2 -translate-y-1/2 text-gray-400 text-sm font-semibold">
+              unit
+            </div>
+          </div>
+        </div>
+
+        <!-- Input Kerusakan -->
+        <div class="space-y-2">
+          <label class="text-sm font-semibold text-gray-700 block">Total Kerusakan</label>
+          <div class="relative">
+            <input
+              type="number"
+              placeholder="Masukkan jumlah kerusakan"
+              class="w-full bg-gray-50 border-2 border-gray-200 rounded-xl py-3 px-4 text-gray-900 font-medium focus:outline-none focus:border-[#0071f3] focus:ring-2 focus:ring-[#0071f3] focus:ring-opacity-20 transition hover:border-gray-300"
+              min="0"
+            />
+            <div class="absolute right-4 top-1/2 -translate-y-1/2 text-gray-400 text-sm font-semibold">
+              unit
+            </div>
+          </div>
+        </div>
+
+        <!-- Info Box -->
+        <div class="bg-blue-50 border-2 border-blue-100 rounded-xl p-4 flex items-start gap-3">
+          <div class="flex-shrink-0 w-5 h-5 text-[#0071f3] mt-0.5">
+            <svg fill="currentColor" viewBox="0 0 20 20">
+              <path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd"/>
+            </svg>
+          </div>
+          <div>
+            <p class="text-sm text-gray-700 font-medium">Pastikan data yang diinput sudah benar</p>
+            <p class="text-xs text-gray-500 mt-1">Data akan tersimpan di database produksi</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- Footer Modal -->
+      <div class="bg-gray-50 px-6 py-4 rounded-b-2xl flex justify-end gap-3 border-t-2 border-gray-100">
+        <button
+          @click="$emit('close')"
+          class="bg-white hover:bg-gray-50 text-gray-700 font-medium px-6 py-2.5 rounded-xl transition-all text-sm border-2 border-gray-200 hover:border-gray-300 shadow-sm hover:shadow"
+        >
+          Batal
+        </button>
+        <button
+          @click="$emit('close')"
+          class="bg-gradient-to-r from-[#0071f3] to-[#0060d1] hover:from-[#0060d1] hover:to-[#0050b1] text-white font-medium px-6 py-2.5 rounded-xl transition-all text-sm shadow-md hover:shadow-lg transform hover:-translate-y-0.5"
+        >
+          <span class="flex items-center gap-2">
+            <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
+              <path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"/>
+            </svg>
+            Submit Data
+          </span>
         </button>
       </div>
-      <div class="flex gap-x-10">
-        <select class="font-semibold bg-[#FFFD8F] py-2.5 px-4 rounded-lg text-[#2F5320]">
-          <option>Input Total Planlet/Batch</option>
-          <option>Planlet Stek</option>
-          <option>Benih G0</option>
-          <option>Benih G1</option>
-          <option>Buah G2</option>
-        </select>
-        <input
-          type="number"
-          placeholder="Qty"
-          class="w-28 bg-gray-100 text-center border border-gray-300 rounded-lg py-2 text-gray-700 focus:outline-none focus:ring-2 focus:ring-[#4C763B]"
-        />
-      </div>
-
-      <div class="flex gap-x-10">
-        <label class="font-semibold bg-[#FFFD8F] py-2.5 px-15 rounded-lg text-[#2F5320]">
-          Total Kerusakan
-        </label>
-        <input
-          type="number"
-          placeholder="Qty"
-          class="w-28 bg-gray-100 text-center border border-gray-300 rounded-lg py-2 text-gray-700 focus:outline-none focus:ring-2 focus:ring-[#4C763B]"
-        />
-      </div>
-
-      <button
-      @click="$emit('close')"
-        class="bg-[#4D734D] hover:bg-[#3C5C3B] text-white font-semibold py-2.5 px-5 mt-2 rounded-lg border border-[#3A5737] transition-all shadow-sm text-center"
-      >
-        Submit
-      </button>
     </div>
   </div>
 </template>
