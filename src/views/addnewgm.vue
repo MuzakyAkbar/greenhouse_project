@@ -9,7 +9,9 @@
             class="flex items-center justify-center w-10 h-10 bg-white hover:bg-gray-50 text-gray-700 rounded-lg border border-gray-300 transition shadow-sm hover:shadow"
             aria-label="Kembali"
           >
-            ←
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 640" class="w-5 h-5 fill-current">
+                <path d="M73.4 297.4C60.9 309.9 60.9 330.2 73.4 342.7L233.4 502.7C245.9 515.2 266.2 515.2 278.7 502.7C291.2 490.2 291.2 469.9 278.7 457.4L173.3 352L544 352C561.7 352 576 337.7 576 320C576 302.3 561.7 288 544 288L173.3 288L278.7 182.6C291.2 170.1 291.2 149.8 278.7 137.3C266.2 124.8 245.9 124.8 233.4 137.3L73.4 297.3z"/>
+              </svg>
           </button>
           <div class="flex-1">
             <h1 class="text-2xl font-bold text-gray-900 flex items-center gap-3">
@@ -299,14 +301,15 @@
                 <p class="text-sm text-blue-100 mt-0.5">Dari gudang asal</p>
               </div>
             </div>
-            <button
-              @click="showModal = false"
-              class="w-10 h-10 flex items-center justify-center bg-white/20 hover:bg-white/30 backdrop-blur text-white rounded-lg transition"
-              aria-label="Tutup"
-              title="Tutup"
-            >
-              ✖
-            </button>
+            <button 
+            @click="$emit('close')" 
+            class="w-8 h-8 flex items-center justify-center rounded-lg bg-white bg-opacity-20 hover:bg-opacity-30 transition text-white hover:rotate-90 transform duration-300"
+            title="Tutup"
+          >
+            <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
+              <path fill-rule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clip-rule="evenodd"/>
+            </svg>
+          </button>
           </div>
         </div>
 

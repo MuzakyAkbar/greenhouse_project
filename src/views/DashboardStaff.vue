@@ -67,12 +67,12 @@ const recentActivities = ref([
         <div class="flex justify-between items-center">
           <div>
             <h1 class="text-2xl font-bold text-gray-900 flex items-center gap-3">
-              <span class="w-10 h-10 bg-gradient-to-br from-[#0071f3] to-[#8FABD4] rounded-lg flex items-center justify-center text-white text-lg">
-                👤
+              <span class="w-10 h-10 bg-gradient-to-br from-[#ffffff] to-[#ffffff] rounded-lg flex items-center justify-center text-white text-lg">
+                🌱
               </span>
-              Dashboard Staff
+              Dashboard Kentang GreenHouse
             </h1>
-            <p class="text-sm text-gray-500 mt-1 ml-13">Akses Cepat & Manajemen Aktivitas</p>
+            <p class="text-sm text-gray-500 mt-1 ml-13">Dashboard Staff</p>
           </div>
           <button
             @click="logout"
