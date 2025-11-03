@@ -22,7 +22,7 @@ const router = createRouter({
     {
       path: '/dashboard-staff',
       name: 'dashboardStaff',
-      component: () => import('../views/dashboardstaff.vue'),
+      component: () => import('../views/DashboardStaff.vue'),
       meta: { requiresAuth: true, roles: ['staff'] },
     },
     {
@@ -129,7 +129,7 @@ router.beforeEach((to, from, next) => {
   if (to.name === 'login' && authStore.isLoggedIn) {
     // Redirect ke dashboard sesuai role
     if (userRole === 'staff') {
-      next({ name: 'dashboardStaff' })
+      next({ name: 'DashboardStaff' })
     } else {
       next({ name: 'dashboard' })
     }
