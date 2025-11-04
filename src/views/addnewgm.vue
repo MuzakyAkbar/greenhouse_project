@@ -430,7 +430,7 @@ const formatDate = (date) => {
 }
 const formatNumber = (n) => new Intl.NumberFormat('id-ID').format(n ?? 0)
 const randColor = () => {
-  const palette = ['#0071f3', '#8FABD4', '#CDB4DB', '#BDE0FE', '#FFC8DD', '#A2D2FF', '#CFE9A8', '#FFEE93']
+  const palette = ['#CDB4DB', '#BDE0FE', '#FFC8DD', '#A2D2FF', '#CFE9A8', '#FFEE93']
   return palette[Math.floor(Math.random() * palette.length)]
 }
 
@@ -564,7 +564,6 @@ const filteredItems = computed(() =>
 const openMaterialModal = async () => {
   if (!selectedBinId.value) return
   showModal.value = true
-  searchQuery.value = ''
   await loadMaterialsByBin(selectedBinId.value)
 }
 
@@ -588,6 +587,7 @@ const selectItem = (item) => {
 
 const removeMaterial = (index) => materials.value.splice(index, 1)
 
+// ===== SUBMIT: Header + Lines (sekali klik)
 // ===== SUBMIT: Header + Lines (sekali klik, dinamis per material)
 const submitAll = async () => {
   // Validasi dasar
@@ -651,12 +651,12 @@ const submitAll = async () => {
     // 2) Buat Lines dinamis dari list materials
     const lines = materials.value.map((m) => ({
       _entityName: 'MaterialMgmtInternalMovementLine',
-      movement: createdMovementId,
-      storageBin: selectedBinId.value,
-      newStorageBin: selectedBinIdTo.value,
-      product: m.productId,
-      movementQuantity: m.amount,
-      uOM: m.uomId || undefined,
+      movement: createdMovementId, // id header
+      storageBin: selectedBinId.value, // BIN asal
+      newStorageBin: selectedBinIdTo.value, // BIN tujuan
+      product: m.productId, // id produk
+      movementQuantity: m.amount, // qty dipindahkan
+      uOM: m.uomId || undefined, // id UOM (opsional, tapi disarankan)
     }))
 
     const linePayload = { data: lines }
@@ -667,11 +667,18 @@ const submitAll = async () => {
     )
     const ok = lineRes?.data?.response?.status === 0
     if (!ok) throw new Error('Server mengembalikan status gagal saat membuat lines.')
-    
     clearForm()
     alert('Dokumen (header + lines) berhasil dibuat.')
   } catch (err) {
     console.error('Gagal submit:', err)
+    // (Opsional) rollback header jika lines gagal
+    // if (createdMovementId) {
+    //   try {
+    //     await openbravoApi.delete(
+    //       `/org.openbravo.service.json.jsonrest/MaterialMgmtInternalMovement/${createdMovementId}`
+    //     )
+    //   } catch (e) { console.error('Rollback header gagal:', e) }
+    // }
     alert('Gagal membuat dokumen. Lihat console untuk detail.')
   } finally {
     submitLoading.value = false
@@ -684,10 +691,13 @@ const clearForm = () => {
   toWarehouse.value = ''
   selectedBinId.value = ''
   selectedBinIdTo.value = ''
+
   materials.value = []
   availableItems.value = []
+
   showModal.value = false
   searchQuery.value = ''
+
   movementId.value = ''
   movementName.value = ''
 }
@@ -697,57 +707,11 @@ const goBack = () => window.history.back()
 </script>
 
 <style scoped>
-/* Smooth scrollbar styling */
 ::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
-}
-::-webkit-scrollbar-track {
-  background: #f3f4f6;
-  border-radius: 10px;
+  width: 6px;
 }
 ::-webkit-scrollbar-thumb {
-  background: linear-gradient(to bottom, #0071f3, #8FABD4);
+  background-color: #4c763b;
   border-radius: 10px;
-}
-::-webkit-scrollbar-thumb:hover {
-  background: linear-gradient(to bottom, #0060d1, #7a9bc4);
-}
-
-/* Animation for empty states */
-@keyframes float {
-  0%, 100% { 
-    transform: translateY(0px); 
-  }
-  50% { 
-    transform: translateY(-10px); 
-  }
-}
-
-.animate-float {
-  animation: float 2s ease-in-out infinite;
-}
-
-/* Input number hide arrows */
-input[type="number"]::-webkit-inner-spin-button,
-input[type="number"]::-webkit-outer-spin-button {
-  -webkit-appearance: none;
-  margin: 0;
-}
-input[type="number"] {
-  -moz-appearance: textfield;
-}
-
-/* Smooth transitions */
-* {
-  transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
-}
-
-/* Focus visible for accessibility */
-button:focus-visible,
-input:focus-visible,
-select:focus-visible {
-  outline: 2px solid #0071f3;
-  outline-offset: 2px;
 }
 </style>

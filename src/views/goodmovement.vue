@@ -145,6 +145,19 @@
               </div>
             </div>
           </router-link>
+
+          <!-- Loading More Indicator -->
+          <div 
+            v-if="hasMore && !loading"
+            ref="loadMoreEl"
+            class="bg-white rounded-2xl border-2 border-gray-100 shadow-sm p-6 text-center"
+          >
+            <div v-if="loadingMore" class="flex items-center justify-center gap-3">
+              <div class="animate-spin rounded-full h-5 w-5 border-b-2 border-[#0071f3]"></div>
+              <p class="text-sm text-gray-500">Memuat data...</p>
+            </div>
+            <p v-else class="text-sm text-gray-400">Gulir ke bawah untuk memuat lebih banyak</p>
+          </div>
         </div>
 
         <!-- Empty State -->
@@ -181,14 +194,21 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
-import openbravoApi from '@/lib/openbravo' // axios instance kamu
+import { ref, onMounted, onBeforeUnmount } from 'vue'
+import openbravoApi from '@/lib/openbravo'
 
+// ===== State
 const loading = ref(false)
+const loadingMore = ref(false)
 const errorMessage = ref('')
 const movements = ref([])
 
-const LIMIT = 20 // sesuaikan kalau perlu
+// ===== Pagination
+const PAGE_SIZE = 10
+const nextStartRow = ref(0)
+const hasMore = ref(true)
+const loadMoreEl = ref(null)
+let io = null
 
 // ===== Utils
 const fmtDateTimeID = (isoOrDate) => {
@@ -205,6 +225,7 @@ const fmtDateTimeID = (isoOrDate) => {
     return isoOrDate || '-'
   }
 }
+
 const fmtDateID = (yyyyMmDd) => {
   if (!yyyyMmDd) return '-'
   const [y, m, d] = yyyyMmDd.split('-').map(Number)
@@ -220,21 +241,22 @@ const fmtDateID = (yyyyMmDd) => {
 const computeStatus = (row) => {
   const posted = row.posted
   const processed = !!row.processed
-  // Untuk status 'Approved' jika sudah diproses dan diposting (baik 'D' atau 'Y')
   if (processed && (posted === 'Y' || posted === 'D')) {
     return 'Approved'
   }
   return 'On Review'
 }
 
+// ===== Fetch Locator/Warehouse
 const fetchLocatorWarehouse = async (locatorId) => {
   if (!locatorId) return { warehouseId: null, warehouseName: null }
   const { data } = await openbravoApi.get('/org.openbravo.service.json.jsonrest/Locator', {
     params: {
       _where: `id='${locatorId}'`,
-      _selectedProperties: 'id,warehouse',
+      _selectedProperties: 'id,warehouse,searchKey',
       _startRow: 0,
       _endRow: 1,
+      _noCount: true,
     },
   })
   const row = data?.response?.data?.[0]
@@ -245,12 +267,13 @@ const fetchLocatorWarehouse = async (locatorId) => {
   }
 }
 
-// ===== Lokasi dari Lines (ambil baris pertama)
+// ===== Lokasi dari Lines
 const fetchMovementLines = async (movementId) => {
   const params = {
     _where: `movement='${movementId}'`,
     _startRow: 0,
     _endRow: 1,
+    _noCount: true,
     _selectedProperties: 'storageBin,newStorageBin',
   }
   const { data } = await openbravoApi.get(
@@ -259,82 +282,138 @@ const fetchMovementLines = async (movementId) => {
   )
   const line = data?.response?.data?.[0]
   if (!line) return '-'
+
   const fromid = line['storageBin'] || '-'
   const toid = line['newStorageBin'] || '-'
-  const fromName = line['storageBin$_identifier'] || '-'
-  const toName = line['newStorageBin$_identifier'] || '-'
 
   const [fromRes, toRes] = await Promise.allSettled([
     fetchLocatorWarehouse(fromid),
     fetchLocatorWarehouse(toid),
   ])
 
-  const fromWarehouseId = fromRes.value?.warehouseId ?? null
   const fromWarehouseName = fromRes.value?.warehouseName ?? null
-  const toWarehouseId = toRes.value?.warehouseId ?? null
   const toWarehouseName = toRes.value?.warehouseName ?? null
 
-  return `${fromWarehouseName} → ${toWarehouseName}`
+  if (!fromWarehouseName && !toWarehouseName) return '-'
+  return `${fromWarehouseName || '-'} → ${toWarehouseName || '-'}`
 }
 
 // ===== Router helper
 const detailLink = (mv) => {
-  // contoh route by name dengan param :id
   return { name: 'detailmovement', params: { id: mv.id } }
 }
 
-// ===== Fetch header + resolusi lokasi (lines)
-const fetchMovements = async () => {
-  loading.value = true
-  errorMessage.value = ''
+// ===== Fetch Batch
+const fetchMovementBatch = async () => {
+  const params = {
+    _orderBy: 'creationDate desc',
+    _startRow: nextStartRow.value,
+    _endRow: nextStartRow.value + PAGE_SIZE,
+    _noCount: true,
+    _selectedProperties: [
+      'id',
+      'name',
+      '_identifier',
+      'createdBy',
+      'createdBy$_identifier',
+      'movementDate',
+      'creationDate',
+      'processed',
+      'posted',
+    ].join(','),
+  }
+
+  const { data } = await openbravoApi.get(
+    '/org.openbravo.service.json.jsonrest/MaterialMgmtInternalMovement',
+    { params },
+  )
+
+  const rows = data?.response?.data || []
+  const mapped = rows.map((r) => ({
+    id: r.id,
+    documentNo: r.name || r._identifier || '-',
+    requester: r['createdBy$_identifier'] || '-',
+    movementDateFmt: r.movementDate
+      ? `${fmtDateID(r.movementDate)} ${r.creationDate ? new Date(r.creationDate).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' }) : ''}`.trim()
+      : r.creationDate
+        ? fmtDateTimeID(r.creationDate)
+        : '-',
+    locationText: '-',
+    status: computeStatus(r),
+    raw: r,
+  }))
+
+  nextStartRow.value += rows.length
+  if (rows.length < PAGE_SIZE) hasMore.value = false
+
+  return mapped
+}
+
+// ===== Fetch Movements
+const fetchMovements = async ({ reset = false } = {}) => {
+  if (reset) {
+    loading.value = true
+    errorMessage.value = ''
+    movements.value = []
+    nextStartRow.value = 0
+    hasMore.value = true
+  } else {
+    loadingMore.value = true
+  }
+
   try {
-    // Ambil header movement
-    const { data } = await openbravoApi.get(
-      '/org.openbravo.service.json.jsonrest/MaterialMgmtInternalMovement',
-      {
-        params: {
-          _orderBy: 'creationDate desc',
-        },
-      },
-    )
+    const batch = await fetchMovementBatch()
+    const startIndex = movements.value.length
+    movements.value.push(...batch)
 
-    const rows = data?.response?.data || []
-
-    // Mapping awal (lokasi placeholder '-')
-    movements.value = rows.map((r) => ({
-      id: r.id,
-      documentNo: r.name || r._identifier || '-',
-      requester: r['createdBy$_identifier'] || '-',
-      movementDateFmt: r.movementDate
-        ? `${fmtDateID(r.movementDate)} ${r.creationDate ? new Date(r.creationDate).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' }) : ''}`.trim()
-        : r.creationDate
-          ? fmtDateTimeID(r.creationDate)
-          : '-',
-      locationText: '-',
-      status: computeStatus(r),
-      raw: r,
-    }))
-
-    // Paralel: ambil lokasi dari line per movement
     await Promise.allSettled(
-      movements.value.map(async (mv, i) => {
+      batch.map(async (mv, idx) => {
         try {
           const loc = await fetchMovementLines(mv.id)
-          movements.value[i].locationText = loc
+          const absoluteIndex = startIndex + idx
+          movements.value[absoluteIndex].locationText = loc
         } catch (e) {
-          // biarkan '-' jika gagal
+          // Keep '-' on error
         }
       }),
     )
   } catch (err) {
     console.error('Gagal mengambil data movement:', err)
     errorMessage.value = 'Gagal mengambil data movement. Coba muat ulang atau periksa koneksi.'
+    hasMore.value = false
   } finally {
     loading.value = false
+    loadingMore.value = false
   }
 }
 
-onMounted(fetchMovements)
+// ===== Infinite Scroll
+const setupObserver = () => {
+  if (io) io.disconnect()
+  io = new IntersectionObserver(
+    (entries) => {
+      const entry = entries[0]
+      if (!entry?.isIntersecting) return
+      if (!hasMore.value || loading.value || loadingMore.value) return
+      fetchMovements({ reset: false })
+    },
+    {
+      root: null,
+      rootMargin: '0px 0px 300px 0px',
+      threshold: 0.0,
+    },
+  )
+  if (loadMoreEl.value) io.observe(loadMoreEl.value)
+}
+
+onMounted(async () => {
+  await fetchMovements({ reset: true })
+  setupObserver()
+})
+
+onBeforeUnmount(() => {
+  if (io) io.disconnect()
+})
 
 const goBack = () => window.history.back()
 </script>

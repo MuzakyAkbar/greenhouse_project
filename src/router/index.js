@@ -92,6 +92,7 @@ const router = createRouter({
       name: 'movement-edit',
       component: () => import('@/views/MovementEditView.vue'),
       props: true,
+      meta: { requiresAuth: true },
     },
     {
       path: '/addnewgm',
