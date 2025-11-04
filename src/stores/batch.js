@@ -1,14 +1,18 @@
+//src/stores/batch.js
 import { defineStore } from 'pinia'
-import { supabase } from "../lib/supabase";
+import { supabase } from "../lib/supabase"
 
 export const useBatchStore = defineStore('batch', {
   state: () => ({
-    batches: []
+    batches: [],
+    loading: false,
+    error: null
   }),
 
   actions: {
-    // 🔹 Ambil semua batch
     async getBatches() {
+      this.loading = true
+      this.error = null
       const { data, error } = await supabase
         .from('public.gh_batch')
         .select('*')
@@ -16,14 +20,16 @@ export const useBatchStore = defineStore('batch', {
 
       if (error) {
         console.error('❌ Gagal mengambil batch:', error.message)
+        this.error = error.message
+        this.loading = false
         return []
       }
 
-      this.batches = data
+      this.batches = data || []
+      this.loading = false
       return data
     },
 
-    // 🔹 Tambah batch baru
     async addBatch(batch) {
       try {
         const { data, error } = await supabase
@@ -43,7 +49,6 @@ export const useBatchStore = defineStore('batch', {
       }
     },
 
-    // 🔹 Update batch berdasarkan ID
     async updateBatch(batchId, updatedData) {
       try {
         const { error } = await supabase
@@ -53,7 +58,6 @@ export const useBatchStore = defineStore('batch', {
 
         if (error) throw error
 
-        // Perbarui di state juga
         const index = this.batches.findIndex(b => b.batch_id === batchId)
         if (index !== -1) {
           this.batches[index] = { ...this.batches[index], ...updatedData }
@@ -66,7 +70,6 @@ export const useBatchStore = defineStore('batch', {
       }
     },
 
-    // 🔹 Hapus batch berdasarkan ID
     async deleteBatch(batchId) {
       try {
         const { error } = await supabase

@@ -85,7 +85,7 @@
                 v-model="fromWarehouse"
                 class="w-full border-2 border-gray-200 rounded-lg px-4 py-3 focus:ring-2 focus:ring-[#0071f3] focus:border-[#0071f3] focus:outline-none transition text-gray-900 font-medium bg-white hover:border-gray-300"
               >
-                <option disabled value="">Gudang Asal</option>
+                <option disabled value="">Lokasi Gudang Asal</option>
                 <option v-for="warehouse in warehouses" :key="warehouse.id" :value="warehouse">
                   {{ warehouse.name }}
                 </option>
@@ -108,7 +108,7 @@
                 v-model="toWarehouse"
                 class="w-full border-2 border-gray-200 rounded-lg px-4 py-3 focus:ring-2 focus:ring-[#0071f3] focus:border-[#0071f3] focus:outline-none transition text-gray-900 font-medium bg-white hover:border-gray-300"
               >
-                <option disabled value="">Gudang Tujuan</option>
+                <option disabled value="">Lokasi Gudang Tujuan</option>
                 <option
                   v-for="warehouse in toWarehouseOptions"
                   :key="warehouse.id"
