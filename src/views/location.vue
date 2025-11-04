@@ -41,7 +41,20 @@
       
       <!-- Stats Overview -->
       <div class="mb-8">
-        <h2 class="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-3">Ringkasan</h2>
+        <div class="flex justify-between items-center mb-3">
+          <h2 class="text-sm font-semibold text-gray-500 uppercase tracking-wide">Ringkasan</h2>
+          <button
+            @click="downloadAllQRPDF"
+            :disabled="isGenerating"
+            class="flex items-center gap-2 bg-gradient-to-r from-green-500 to-green-600 hover:from-green-600 hover:to-green-700 text-white px-4 py-2 rounded-lg transition font-medium text-sm shadow-md hover:shadow-lg disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            <svg v-if="!isGenerating" class="w-4 h-4" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 384 512" fill="currentColor">
+              <path d="M64 0C28.7 0 0 28.7 0 64V448c0 35.3 28.7 64 64 64H320c35.3 0 64-28.7 64-64V160H256c-17.7 0-32-14.3-32-32V0H64zM256 0V128H384L256 0zM216 232V334.1l31-31c9.4-9.4 24.6-9.4 33.9 0s9.4 24.6 0 33.9l-72 72c-9.4 9.4-24.6 9.4-33.9 0l-72-72c-9.4-9.4-9.4-24.6 0-33.9s24.6-9.4 33.9 0l31 31V232c0-13.3 10.7-24 24-24s24 10.7 24 24z"/>
+            </svg>
+            <div v-else class="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+            {{ isGenerating ? 'Generating...' : 'Download All QR (PDF)' }}
+          </button>
+        </div>
         <div class="grid grid-cols-1 sm:grid-cols-3 gap-5">
           <div class="bg-white rounded-2xl p-6 text-left border-2 border-gray-100 hover:border-gray-200 hover:shadow-lg transition-all">
             <p class="text-sm font-semibold text-gray-500 mb-2">Total Lokasi</p>
@@ -230,16 +243,30 @@
             </div>
           </div>
           
-          <div class="flex gap-3">
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <button
+              @click="downloadPDF"
+              :disabled="isGenerating"
+              class="bg-gradient-to-r from-red-500 to-red-600 hover:from-red-600 hover:to-red-700 text-white font-semibold py-3 rounded-xl transition shadow-md hover:shadow-lg disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+            >
+              <svg v-if="!isGenerating" class="w-5 h-5" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 384 512" fill="currentColor">
+                <path d="M64 0C28.7 0 0 28.7 0 64V448c0 35.3 28.7 64 64 64H320c35.3 0 64-28.7 64-64V160H256c-17.7 0-32-14.3-32-32V0H64zM256 0V128H384L256 0zM216 232V334.1l31-31c9.4-9.4 24.6-9.4 33.9 0s9.4 24.6 0 33.9l-72 72c-9.4 9.4-24.6 9.4-33.9 0l-72-72c-9.4-9.4-9.4-24.6 0-33.9s24.6-9.4 33.9 0l31 31V232c0-13.3 10.7-24 24-24s24 10.7 24 24z"/>
+              </svg>
+              <div v-else class="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+              {{ isGenerating ? 'Generating...' : 'Download PDF' }}
+            </button>
             <button
               @click="downloadQR"
-              class="flex-1 bg-gradient-to-r from-[#0071f3] to-[#0060d1] hover:from-[#0060d1] hover:to-[#0050b1] text-white font-semibold py-3 rounded-xl transition shadow-md hover:shadow-lg"
+              class="bg-gradient-to-r from-[#0071f3] to-[#0060d1] hover:from-[#0060d1] hover:to-[#0050b1] text-white font-semibold py-3 rounded-xl transition shadow-md hover:shadow-lg flex items-center justify-center gap-2"
             >
-              📥 Download QR
+              <svg class="w-5 h-5" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" fill="currentColor">
+                <path d="M288 32c0-17.7-14.3-32-32-32s-32 14.3-32 32V274.7l-73.4-73.4c-12.5-12.5-32.8-12.5-45.3 0s-12.5 32.8 0 45.3l128 128c12.5 12.5 32.8 12.5 45.3 0l128-128c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0L288 274.7V32zM64 352c-35.3 0-64 28.7-64 64v32c0 35.3 28.7 64 64 64H448c35.3 0 64-28.7 64-64V416c0-35.3-28.7-64-64-64H346.5l-45.3 45.3c-25 25-65.5 25-90.5 0L165.5 352H64zm368 56a24 24 0 1 1 0 48 24 24 0 1 1 0-48z"/>
+              </svg>
+              Download PNG
             </button>
             <button
               @click="showQRModal = false"
-              class="flex-1 bg-gray-100 hover:bg-gray-200 text-gray-700 font-semibold py-3 rounded-xl transition"
+              class="sm:col-span-2 bg-gray-100 hover:bg-gray-200 text-gray-700 font-semibold py-3 rounded-xl transition"
             >
               Tutup
             </button>
@@ -252,8 +279,9 @@
 
 <script setup>
 import { ref, nextTick } from 'vue'
-// Install: npm install qrcode
+// Install: npm install qrcode jspdf
 import QRCode from 'qrcode'
+import jsPDF from 'jspdf'
 
 const batchesKebun1 = ref(['Batch Planlet Kentang A', 'Batch Planlet Stek Kentang'])
 const batchesKebun2 = ref(['Batch Planlet Kentang B', 'Batch Planlet Stek Kentang'])
@@ -262,6 +290,7 @@ const showQRModal = ref(false)
 const qrCanvas = ref(null)
 const qrDataURL = ref('')
 const selectedQRInfo = ref(null)
+const isGenerating = ref(false)
 
 const generateQR = async (location, batch) => {
   selectedQRInfo.value = { location, batch }
@@ -281,7 +310,8 @@ const generateQR = async (location, batch) => {
       color: {
         dark: '#000000',
         light: '#FFFFFF'
-      }
+      },
+      errorCorrectionLevel: 'H' // High error correction
     })
     
     // Simpan sebagai data URL untuk download
@@ -297,5 +327,276 @@ const downloadQR = () => {
   link.download = `QR-${selectedQRInfo.value.location}-${selectedQRInfo.value.batch}.png`
   link.href = qrDataURL.value
   link.click()
+}
+
+const downloadPDF = async () => {
+  if (!selectedQRInfo.value || !qrDataURL.value) return
+  
+  isGenerating.value = true
+  
+  try {
+    const pdf = new jsPDF({
+      orientation: 'portrait',
+      unit: 'mm',
+      format: 'a4'
+    })
+    
+    const pageWidth = pdf.internal.pageSize.getWidth()
+    const pageHeight = pdf.internal.pageSize.getHeight()
+    const margin = 20
+    
+    // Header dengan background biru
+    pdf.setFillColor(0, 113, 243)
+    pdf.rect(0, 0, pageWidth, 45, 'F')
+    
+    // Title
+    pdf.setTextColor(255, 255, 255)
+    pdf.setFontSize(28)
+    pdf.setFont('helvetica', 'bold')
+    pdf.text('GREENHOUSE', pageWidth / 2, 22, { align: 'center' })
+    
+    pdf.setFontSize(11)
+    pdf.setFont('helvetica', 'normal')
+    pdf.text('QR Code Lokasi & Batch', pageWidth / 2, 35, { align: 'center' })
+    
+    // Reset color
+    pdf.setTextColor(0, 0, 0)
+    
+    let yPos = 60
+    
+    // Lokasi Box
+    pdf.setFillColor(240, 245, 255)
+    pdf.roundedRect(margin, yPos, pageWidth - (margin * 2), 20, 3, 3, 'F')
+    
+    pdf.setFontSize(11)
+    pdf.setFont('helvetica', 'bold')
+    pdf.text('Lokasi:', margin + 5, yPos + 8)
+    pdf.setFont('helvetica', 'normal')
+    pdf.text(selectedQRInfo.value.location, margin + 5, yPos + 15)
+    
+    yPos += 25
+    
+    // Batch Box
+    pdf.setFillColor(240, 255, 245)
+    pdf.roundedRect(margin, yPos, pageWidth - (margin * 2), 20, 3, 3, 'F')
+    
+    pdf.setFont('helvetica', 'bold')
+    pdf.text('Batch:', margin + 5, yPos + 8)
+    pdf.setFont('helvetica', 'normal')
+    pdf.text(selectedQRInfo.value.batch, margin + 5, yPos + 15)
+    
+    yPos += 30
+    
+    // QR Code dengan border
+    const qrSize = 100
+    const qrX = (pageWidth - qrSize) / 2
+    
+    pdf.setDrawColor(0, 113, 243)
+    pdf.setLineWidth(1.5)
+    pdf.roundedRect(qrX - 4, yPos - 4, qrSize + 8, qrSize + 8, 3, 3)
+    
+    pdf.addImage(qrDataURL.value, 'PNG', qrX, yPos, qrSize, qrSize)
+    
+    yPos += qrSize + 15
+    
+    // Instructions Box
+    pdf.setFillColor(255, 250, 240)
+    pdf.roundedRect(margin, yPos, pageWidth - (margin * 2), 42, 3, 3, 'F')
+    
+    pdf.setFontSize(10)
+    pdf.setFont('helvetica', 'bold')
+    pdf.text('Cara Menggunakan:', margin + 5, yPos + 8)
+    
+    pdf.setFontSize(9)
+    pdf.setFont('helvetica', 'normal')
+    pdf.text('1. Buka aplikasi GreenHouse', margin + 5, yPos + 16)
+    pdf.text('2. Pilih menu "Form Activity Report"', margin + 5, yPos + 23)
+    pdf.text('3. Klik tombol "Scan QR Code"', margin + 5, yPos + 30)
+    
+    // Footer
+    const footerY = pageHeight - 35
+    
+    pdf.setDrawColor(220, 220, 220)
+    pdf.setLineWidth(0.5)
+    pdf.line(margin, footerY, pageWidth - margin, footerY)
+    
+    pdf.setFontSize(8)
+    pdf.setTextColor(120, 120, 120)
+    pdf.setFont('helvetica', 'italic')
+    
+    const currentDate = new Date().toLocaleDateString('id-ID', {
+      day: 'numeric',
+      month: 'long', 
+      year: 'numeric'
+    })
+    
+    pdf.text(`Generated: ${currentDate}`, pageWidth / 2, footerY + 6, { align: 'center' })
+    pdf.text('GreenHouse Management System © 2025', pageWidth / 2, footerY + 12, { align: 'center' })
+    
+    // Warning Box
+    pdf.setFillColor(255, 240, 240)
+    pdf.roundedRect(margin, footerY + 16, pageWidth - (margin * 2), 14, 3, 3, 'F')
+    
+    pdf.setFontSize(8)
+    pdf.setTextColor(220, 38, 38)
+    pdf.setFont('helvetica', 'bold')
+    pdf.text('PENTING: Jangan lipat atau rusak QR Code ini', pageWidth / 2, footerY + 22, { align: 'center' })
+    pdf.text('Simpan di tempat yang mudah terlihat dan terlindung', pageWidth / 2, footerY + 27, { align: 'center' })
+    
+    // Save PDF
+    const filename = `QR-${selectedQRInfo.value.location}-${selectedQRInfo.value.batch}.pdf`
+    pdf.save(filename)
+    
+    alert('✅ PDF berhasil di-download!')
+    
+  } catch (err) {
+    console.error('Error generating PDF:', err)
+    alert('❌ Gagal generate PDF: ' + err.message)
+  } finally {
+    isGenerating.value = false
+  }
+}
+
+// Batch download all QR codes as single PDF
+const downloadAllQRPDF = async () => {
+  isGenerating.value = true
+  
+  try {
+    const pdf = new jsPDF({
+      orientation: 'portrait',
+      unit: 'mm',
+      format: 'a4'
+    })
+    
+    const allBatches = [
+      ...batchesKebun1.value.map(b => ({ location: 'Kebun 1', batch: b })),
+      ...batchesKebun2.value.map(b => ({ location: 'Kebun 2', batch: b }))
+    ]
+    
+    for (let i = 0; i < allBatches.length; i++) {
+      if (i > 0) pdf.addPage()
+      
+      const { location, batch } = allBatches[i]
+      const qrData = JSON.stringify({ location, batch })
+      
+      // Generate QR Code
+      const tempCanvas = document.createElement('canvas')
+      await QRCode.toCanvas(tempCanvas, qrData, {
+        width: 300,
+        margin: 2,
+        errorCorrectionLevel: 'H'
+      })
+      const qrImage = tempCanvas.toDataURL('image/png')
+      
+      const pageWidth = pdf.internal.pageSize.getWidth()
+      const pageHeight = pdf.internal.pageSize.getHeight()
+      const margin = 20
+      
+      // Header
+      pdf.setFillColor(0, 113, 243)
+      pdf.rect(0, 0, pageWidth, 45, 'F')
+      
+      pdf.setTextColor(255, 255, 255)
+      pdf.setFontSize(28)
+      pdf.setFont('helvetica', 'bold')
+      pdf.text('GREENHOUSE', pageWidth / 2, 22, { align: 'center' })
+      
+      pdf.setFontSize(11)
+      pdf.setFont('helvetica', 'normal')
+      pdf.text('QR Code Lokasi & Batch', pageWidth / 2, 35, { align: 'center' })
+      
+      pdf.setTextColor(0, 0, 0)
+      
+      let yPos = 60
+      
+      // Lokasi Box
+      pdf.setFillColor(240, 245, 255)
+      pdf.roundedRect(margin, yPos, pageWidth - (margin * 2), 20, 3, 3, 'F')
+      
+      pdf.setFontSize(11)
+      pdf.setFont('helvetica', 'bold')
+      pdf.text('Lokasi:', margin + 5, yPos + 8)
+      pdf.setFont('helvetica', 'normal')
+      pdf.text(location, margin + 5, yPos + 15)
+      
+      yPos += 25
+      
+      // Batch Box
+      pdf.setFillColor(240, 255, 245)
+      pdf.roundedRect(margin, yPos, pageWidth - (margin * 2), 20, 3, 3, 'F')
+      
+      pdf.setFont('helvetica', 'bold')
+      pdf.text('Batch:', margin + 5, yPos + 8)
+      pdf.setFont('helvetica', 'normal')
+      pdf.text(batch, margin + 5, yPos + 15)
+      
+      yPos += 30
+      
+      // QR Code
+      const qrSize = 100
+      const qrX = (pageWidth - qrSize) / 2
+      
+      pdf.setDrawColor(0, 113, 243)
+      pdf.setLineWidth(1.5)
+      pdf.roundedRect(qrX - 4, yPos - 4, qrSize + 8, qrSize + 8, 3, 3)
+      
+      pdf.addImage(qrImage, 'PNG', qrX, yPos, qrSize, qrSize)
+      
+      yPos += qrSize + 15
+      
+      // Instructions
+      pdf.setFillColor(255, 250, 240)
+      pdf.roundedRect(margin, yPos, pageWidth - (margin * 2), 42, 3, 3, 'F')
+      
+      pdf.setFontSize(10)
+      pdf.setFont('helvetica', 'bold')
+      pdf.text('Cara Menggunakan:', margin + 5, yPos + 8)
+      
+      pdf.setFontSize(9)
+      pdf.setFont('helvetica', 'normal')
+      pdf.text('1. Buka aplikasi GreenHouse', margin + 5, yPos + 16)
+      pdf.text('2. Pilih menu "Form Activity Report"', margin + 5, yPos + 23)
+      pdf.text('3. Klik tombol "Scan QR Code"', margin + 5, yPos + 30)
+      
+      // Footer
+      const footerY = pageHeight - 35
+      
+      pdf.setDrawColor(220, 220, 220)
+      pdf.setLineWidth(0.5)
+      pdf.line(margin, footerY, pageWidth - margin, footerY)
+      
+      pdf.setFontSize(8)
+      pdf.setTextColor(120, 120, 120)
+      pdf.setFont('helvetica', 'italic')
+      
+      const currentDate = new Date().toLocaleDateString('id-ID', {
+        day: 'numeric',
+        month: 'long',
+        year: 'numeric'
+      })
+      
+      pdf.text(`Generated: ${currentDate}`, pageWidth / 2, footerY + 6, { align: 'center' })
+      pdf.text('GreenHouse Management System © 2025', pageWidth / 2, footerY + 12, { align: 'center' })
+      
+      // Warning
+      pdf.setFillColor(255, 240, 240)
+      pdf.roundedRect(margin, footerY + 16, pageWidth - (margin * 2), 14, 3, 3, 'F')
+      
+      pdf.setFontSize(8)
+      pdf.setTextColor(220, 38, 38)
+      pdf.setFont('helvetica', 'bold')
+      pdf.text('PENTING: Jangan lipat atau rusak QR Code ini', pageWidth / 2, footerY + 22, { align: 'center' })
+      pdf.text('Simpan di tempat yang mudah terlihat dan terlindung', pageWidth / 2, footerY + 27, { align: 'center' })
+    }
+    
+    pdf.save('QR-All-Batches.pdf')
+    alert(`✅ PDF dengan ${allBatches.length} QR Code berhasil di-download!`)
+    
+  } catch (err) {
+    console.error('Error:', err)
+    alert('❌ Gagal generate PDF: ' + err.message)
+  } finally {
+    isGenerating.value = false
+  }
 }
 </script>
