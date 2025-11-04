@@ -113,6 +113,7 @@
                     </div>
                   </div>
                   <button
+                    @click="generateQR('Kebun 1', batch)"
                     class="bg-white hover:bg-gray-700 text-gray-700 hover:text-white border-2 border-gray-200 hover:border-gray-700 font-medium px-6 py-2 rounded-lg transition-all shadow-sm hover:shadow text-sm w-full sm:w-auto flex items-center justify-center gap-2"
                   >
                     <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
@@ -170,6 +171,7 @@
                     </div>
                   </div>
                   <button
+                    @click="generateQR('Kebun 2', batch)"
                     class="bg-white hover:bg-gray-700 text-gray-700 hover:text-white border-2 border-gray-200 hover:border-gray-700 font-medium px-6 py-2 rounded-lg transition-all shadow-sm hover:shadow text-sm w-full sm:w-auto flex items-center justify-center gap-2"
                   >
                     <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
@@ -194,12 +196,106 @@
         <p class="text-gray-400 text-xs">© 2025 All Rights Reserved</p>
       </footer>
     </div>
+
+    <!-- QR Code Modal -->
+    <div
+      v-if="showQRModal"
+      class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4"
+    >
+      <div class="bg-white rounded-2xl max-w-md w-full p-6 relative">
+        <button
+          @click="showQRModal = false"
+          class="absolute top-4 right-4 w-8 h-8 bg-gray-100 hover:bg-gray-200 rounded-lg flex items-center justify-center transition"
+        >
+          <svg class="w-5 h-5 text-gray-600" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 384 512" fill="currentColor">
+            <path d="M342.6 150.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0L192 210.7 86.6 105.4c-12.5-12.5-32.8-12.5-45.3 0s-12.5 32.8 0 45.3L146.7 256 41.4 361.4c-12.5 12.5-12.5 32.8 0 45.3s32.8 12.5 45.3 0L192 301.3 297.4 406.6c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L237.3 256 342.6 150.6z"/>
+          </svg>
+        </button>
+        
+        <div class="text-center">
+          <div class="w-12 h-12 bg-gradient-to-br from-[#0071f3] to-[#0060d1] rounded-xl flex items-center justify-center mx-auto mb-4">
+            <svg class="w-6 h-6 text-white" fill="currentColor" viewBox="0 0 20 20">
+              <path fill-rule="evenodd" d="M3 4a1 1 0 011-1h3a1 1 0 011 1v3a1 1 0 01-1 1H4a1 1 0 01-1-1V4zm2 2V5h1v1H5zM3 13a1 1 0 011-1h3a1 1 0 011 1v3a1 1 0 01-1 1H4a1 1 0 01-1-1v-3zm2 2v-1h1v1H5zM13 3a1 1 0 00-1 1v3a1 1 0 001 1h3a1 1 0 001-1V4a1 1 0 00-1-1h-3zm1 2v1h1V5h-1z" clip-rule="evenodd"/>
+            </svg>
+          </div>
+          
+          <h2 class="text-2xl font-bold text-gray-900 mb-2">QR Code</h2>
+          <p class="text-sm text-gray-500 mb-6">Scan untuk auto-fill lokasi & batch</p>
+          
+          <div class="bg-gray-50 rounded-xl p-6 mb-6">
+            <canvas ref="qrCanvas" class="mx-auto border-4 border-white shadow-lg rounded-lg"></canvas>
+            <div class="mt-4 space-y-1">
+              <p class="text-sm font-semibold text-gray-700">📍 {{ selectedQRInfo?.location }}</p>
+              <p class="text-sm font-semibold text-gray-700">🏷️ {{ selectedQRInfo?.batch }}</p>
+            </div>
+          </div>
+          
+          <div class="flex gap-3">
+            <button
+              @click="downloadQR"
+              class="flex-1 bg-gradient-to-r from-[#0071f3] to-[#0060d1] hover:from-[#0060d1] hover:to-[#0050b1] text-white font-semibold py-3 rounded-xl transition shadow-md hover:shadow-lg"
+            >
+              📥 Download QR
+            </button>
+            <button
+              @click="showQRModal = false"
+              class="flex-1 bg-gray-100 hover:bg-gray-200 text-gray-700 font-semibold py-3 rounded-xl transition"
+            >
+              Tutup
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
 <script setup>
-import { ref } from 'vue'
+import { ref, nextTick } from 'vue'
+// Install: npm install qrcode
+import QRCode from 'qrcode'
 
 const batchesKebun1 = ref(['Batch Planlet Kentang A', 'Batch Planlet Stek Kentang'])
 const batchesKebun2 = ref(['Batch Planlet Kentang B', 'Batch Planlet Stek Kentang'])
+
+const showQRModal = ref(false)
+const qrCanvas = ref(null)
+const qrDataURL = ref('')
+const selectedQRInfo = ref(null)
+
+const generateQR = async (location, batch) => {
+  selectedQRInfo.value = { location, batch }
+  showQRModal.value = true
+  
+  // Tunggu DOM update
+  await nextTick()
+  
+  // Data yang akan di-encode
+  const qrData = JSON.stringify({ location, batch })
+  
+  try {
+    // Generate QR Code ke canvas
+    await QRCode.toCanvas(qrCanvas.value, qrData, {
+      width: 300,
+      margin: 2,
+      color: {
+        dark: '#000000',
+        light: '#FFFFFF'
+      }
+    })
+    
+    // Simpan sebagai data URL untuk download
+    qrDataURL.value = qrCanvas.value.toDataURL('image/png')
+  } catch (err) {
+    console.error('Error generating QR:', err)
+    alert('Gagal generate QR Code')
+  }
+}
+
+const downloadQR = () => {
+  const link = document.createElement('a')
+  link.download = `QR-${selectedQRInfo.value.location}-${selectedQRInfo.value.batch}.png`
+  link.href = qrDataURL.value
+  link.click()
+}
 </script>

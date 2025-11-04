@@ -1,6 +1,8 @@
 <script setup>
-import { ref, onMounted, watch } from "vue";
+import { ref, onMounted, watch, onUnmounted } from "vue";
 import { supabase } from "@/lib/supabase.js";
+// Install: npm install html5-qrcode
+import { Html5Qrcode } from "html5-qrcode";
 
 // ======================
 // STATE
@@ -26,6 +28,11 @@ onMounted(async () => {
   selectedDate.value = new Date().toISOString().split("T")[0];
 });
 
+onUnmounted(() => {
+  // Cleanup QR scanner saat component unmount
+  stopScanner();
+});
+
 const selectedDate = ref("");
 const selectedLocation = ref("");
 const selectedBatch = ref("");
@@ -35,6 +42,11 @@ const typeDamage = ref({
   kutilang: 0,
   busuk: 0,
 });
+
+// QR Scanner
+const showScanner = ref(false);
+const isScanning = ref(false);
+let html5QrCode = null;
 
 // Data master dari database
 const potatoActivities = ref([]); // dari gh_potato_activity
@@ -49,6 +61,71 @@ const formSections = ref([
     workers: [{ qty: "" }],
   },
 ]);
+
+// ======================
+// QR SCANNER FUNCTIONS
+// ======================
+const startScanner = async () => {
+  showScanner.value = true;
+  isScanning.value = true;
+
+  try {
+    html5QrCode = new Html5Qrcode("qr-reader");
+
+    const config = { fps: 10, qrbox: { width: 250, height: 250 } };
+
+    await html5QrCode.start(
+      { facingMode: "environment" },
+      config,
+      onScanSuccess,
+      onScanError
+    );
+  } catch (err) {
+    console.error("Error starting scanner:", err);
+    alert("Gagal membuka kamera. Pastikan izin kamera telah diberikan.");
+    stopScanner();
+  }
+};
+
+const onScanSuccess = (decodedText) => {
+  console.log("QR Code detected:", decodedText);
+
+  try {
+    const data = JSON.parse(decodedText);
+
+    // Auto-fill lokasi dan batch
+    selectedLocation.value = data.location;
+    selectedBatch.value = data.batch;
+
+    alert(`✅ QR Code berhasil di-scan!\n📍 Lokasi: ${data.location}\n🏷️ Batch: ${data.batch}`);
+
+    stopScanner();
+  } catch (err) {
+    console.error("Invalid QR Code data:", err);
+    alert("❌ QR Code tidak valid!");
+  }
+};
+
+const onScanError = (errorMessage) => {
+  // Jangan log setiap error karena akan spam console
+  // console.log("Scan error:", errorMessage);
+};
+
+const stopScanner = () => {
+  if (html5QrCode) {
+    html5QrCode
+      .stop()
+      .then(() => {
+        console.log("Scanner stopped");
+        html5QrCode = null;
+      })
+      .catch((err) => {
+        console.error("Error stopping scanner:", err);
+      });
+  }
+  showScanner.value = false;
+  isScanning.value = false;
+};
 
 // ======================
 // HANDLER
@@ -212,7 +289,18 @@ const submitActivityReport = async () => {
       
       <!-- Date, Location & Batch Section -->
       <div class="mb-8">
-        <h2 class="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-3">Informasi Dasar</h2>
+        <div class="flex justify-between items-center mb-3">
+          <h2 class="text-sm font-semibold text-gray-500 uppercase tracking-wide">Informasi Dasar</h2>
+          <button
+            @click="startScanner"
+            class="flex items-center gap-2 bg-gradient-to-r from-[#0071f3] to-[#0060d1] hover:from-[#0060d1] hover:to-[#0050b1] text-white px-4 py-2 rounded-lg transition font-medium text-sm shadow-md hover:shadow-lg"
+          >
+            <svg class="w-4 h-4" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" fill="currentColor">
+              <path d="M149.1 64.8L138.7 96H64C28.7 96 0 124.7 0 160V416c0 35.3 28.7 64 64 64H448c35.3 0 64-28.7 64-64V160c0-35.3-28.7-64-64-64H373.3L362.9 64.8C356.4 45.2 338.1 32 317.4 32H194.6c-20.7 0-39 13.2-45.5 32.8zM256 192a96 96 0 1 1 0 192 96 96 0 1 1 0-192z"/>
+            </svg>
+            Scan QR Code
+          </button>
+        </div>
         <div class="bg-white rounded-2xl border-2 border-gray-100 shadow-sm hover:shadow-lg transition-all p-6">
           <div class="grid grid-cols-1 md:grid-cols-3 gap-5">
             <!-- Date Picker -->
@@ -242,9 +330,9 @@ const submitActivityReport = async () => {
                 class="px-4 py-3 border-2 border-gray-200 rounded-xl bg-white text-gray-700 font-medium focus:outline-none focus:border-[#0071f3] focus:ring-2 focus:ring-[#0071f3]/20 transition appearance-none cursor-pointer"
               >
                 <option value="" disabled>Pilih Lokasi</option>
-                <option>Lokasi 1</option>
-                <option>Lokasi 2</option>
-                <option>Lokasi 3</option>
+                <option>Kebun 1</option>
+                <option>Kebun 2</option>
+                <option>Kebun 3</option>
               </select>
             </div>
 
@@ -259,10 +347,21 @@ const submitActivityReport = async () => {
                 class="px-4 py-3 border-2 border-gray-200 rounded-xl bg-white text-gray-700 font-medium focus:outline-none focus:border-[#0071f3] focus:ring-2 focus:ring-[#0071f3]/20 transition appearance-none cursor-pointer"
               >
                 <option value="" disabled>Pilih Batch</option>
-                <option>Batch 1</option>
-                <option>Batch 2</option>
+                <option>Batch Planlet Kentang A</option>
+                <option>Batch Planlet Kentang B</option>
+                <option>Batch Planlet Stek Kentang</option>
               </select>
             </div>
+          </div>
+
+          <!-- Success notification after scan -->
+          <div v-if="selectedLocation && selectedBatch" class="mt-4 bg-green-50 border-2 border-green-200 rounded-xl p-3">
+            <p class="text-sm text-green-700 font-semibold flex items-center gap-2">
+              <svg class="w-4 h-4" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" fill="currentColor">
+                <path d="M256 512A256 256 0 1 0 256 0a256 256 0 1 0 0 512zM369 209L241 337c-9.4 9.4-24.6 9.4-33.9 0l-64-64c-9.4-9.4-9.4-24.6 0-33.9s24.6-9.4 33.9 0l47 47L335 175c9.4-9.4 24.6-9.4 33.9 0s9.4 24.6 0 33.9z"/>
+              </svg>
+              Lokasi & Batch telah terisi
+            </p>
           </div>
         </div>
       </div>
@@ -507,6 +606,50 @@ const submitActivityReport = async () => {
         <p class="text-gray-400 text-xs">© 2025 All Rights Reserved</p>
       </footer>
     </div>
+
+    <!-- QR Scanner Modal -->
+    <div
+      v-if="showScanner"
+      class="fixed inset-0 bg-black bg-opacity-90 flex items-center justify-center z-50 p-4"
+    >
+      <div class="bg-white rounded-2xl max-w-md w-full overflow-hidden">
+        <div class="bg-gradient-to-r from-[#0071f3] to-[#0060d1] p-6 text-white">
+          <div class="flex items-center justify-between mb-2">
+            <h2 class="text-xl font-bold">Scan QR Code</h2>
+            <button
+              @click="stopScanner"
+              class="w-8 h-8 bg-white bg-opacity-20 hover:bg-opacity-30 rounded-lg flex items-center justify-center transition"
+            >
+              <svg class="w-5 h-5" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 384 512" fill="currentColor">
+                <path d="M342.6 150.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0L192 210.7 86.6 105.4c-12.5-12.5-32.8-12.5-45.3 0s-12.5 32.8 0 45.3L146.7 256 41.4 361.4c-12.5 12.5-12.5 32.8 0 45.3s32.8 12.5 45.3 0L192 301.3 297.4 406.6c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L237.3 256 342.6 150.6z"/>
+              </svg>
+            </button>
+          </div>
+          <p class="text-sm text-blue-100">Arahkan kamera ke QR Code</p>
+        </div>
+        
+        <div class="p-6">
+          <div class="relative bg-black rounded-xl overflow-hidden mb-4" style="min-height: 300px;">
+            <div id="qr-reader" style="width: 100%;"></div>
+            <div v-if="isScanning" class="absolute top-4 left-4 bg-green-500 text-white px-3 py-1 rounded-full text-xs font-semibold flex items-center gap-2">
+              <div class="w-2 h-2 bg-white rounded-full animate-pulse"></div>
+              Scanning...
+            </div>
+          </div>
+          
+          <button
+            @click="stopScanner"
+            class="w-full bg-gray-100 hover:bg-gray-200 text-gray-700 font-semibold py-3 rounded-xl transition"
+          >
+            Batal
+          </button>
+          
+          <p class="text-xs text-gray-500 text-center mt-3">
+            💡 Pastikan QR Code berada dalam frame dan pencahayaan cukup
+          </p>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -527,5 +670,15 @@ select {
   background-repeat: no-repeat;
   background-size: 1.5em 1.5em;
   padding-right: 2.5rem;
+}
+
+/* QR Scanner styles */
+#qr-reader {
+  border: none;
+}
+
+#qr-reader__dashboard,
+#qr-reader__dashboard_section {
+  display: none !important;
 }
 </style>
