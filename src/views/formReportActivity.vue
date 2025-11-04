@@ -69,10 +69,26 @@ const startScanner = async () => {
   showScanner.value = true;
   isScanning.value = true;
 
+  // Tunggu DOM update dengan nextTick
+  await new Promise(resolve => setTimeout(resolve, 100));
+
   try {
+    // Cek apakah element sudah ada
+    const element = document.getElementById("qr-reader");
+    if (!element) {
+      console.error("Element qr-reader not found in DOM");
+      alert("Error: Scanner element not found");
+      stopScanner();
+      return;
+    }
+
     html5QrCode = new Html5Qrcode("qr-reader");
 
-    const config = { fps: 10, qrbox: { width: 250, height: 250 } };
+    const config = { 
+      fps: 10, 
+      qrbox: { width: 250, height: 250 },
+      aspectRatio: 1.0
+    };
 
     await html5QrCode.start(
       { facingMode: "environment" },
@@ -82,7 +98,7 @@ const startScanner = async () => {
     );
   } catch (err) {
     console.error("Error starting scanner:", err);
-    alert("Gagal membuka kamera. Pastikan izin kamera telah diberikan.");
+    alert("Gagal membuka kamera. Pastikan izin kamera telah diberikan dan gunakan HTTPS atau localhost.");
     stopScanner();
   }
 };
@@ -112,19 +128,25 @@ const onScanError = (errorMessage) => {
 };
 
 const stopScanner = () => {
-  if (html5QrCode) {
+  if (html5QrCode && html5QrCode.isScanning) {
     html5QrCode
       .stop()
       .then(() => {
         console.log("Scanner stopped");
+        html5QrCode.clear();
         html5QrCode = null;
+        showScanner.value = false;
+        isScanning.value = false;
       })
       .catch((err) => {
         console.error("Error stopping scanner:", err);
+        showScanner.value = false;
+        isScanning.value = false;
       });
+  } else {
+    showScanner.value = false;
+    isScanning.value = false;
   }
-  showScanner.value = false;
-  isScanning.value = false;
 };
 
 // ======================
@@ -629,24 +651,34 @@ const submitActivityReport = async () => {
         </div>
         
         <div class="p-6">
-          <div class="relative bg-black rounded-xl overflow-hidden mb-4" style="min-height: 300px;">
-            <div id="qr-reader" style="width: 100%;"></div>
-            <div v-if="isScanning" class="absolute top-4 left-4 bg-green-500 text-white px-3 py-1 rounded-full text-xs font-semibold flex items-center gap-2">
+          <div class="relative bg-black rounded-xl overflow-hidden mb-4" style="min-height: 350px;">
+            <!-- QR Reader Container -->
+            <div id="qr-reader" style="width: 100%; height: 100%;"></div>
+            
+            <!-- Scanning Indicator -->
+            <div v-if="isScanning" class="absolute top-4 left-4 bg-green-500 text-white px-3 py-1.5 rounded-full text-xs font-semibold flex items-center gap-2 z-10">
               <div class="w-2 h-2 bg-white rounded-full animate-pulse"></div>
               Scanning...
             </div>
+            
+            <!-- Scan Frame Overlay -->
+            <div class="absolute inset-0 flex items-center justify-center pointer-events-none">
+              <div class="w-64 h-64 border-4 border-white rounded-2xl opacity-30"></div>
+            </div>
           </div>
           
-          <button
-            @click="stopScanner"
-            class="w-full bg-gray-100 hover:bg-gray-200 text-gray-700 font-semibold py-3 rounded-xl transition"
-          >
-            Batal
-          </button>
-          
-          <p class="text-xs text-gray-500 text-center mt-3">
-            💡 Pastikan QR Code berada dalam frame dan pencahayaan cukup
-          </p>
+          <div class="space-y-2">
+            <button
+              @click="stopScanner"
+              class="w-full bg-gray-100 hover:bg-gray-200 text-gray-700 font-semibold py-3 rounded-xl transition"
+            >
+              ✕ Tutup Scanner
+            </button>
+            
+            <p class="text-xs text-gray-500 text-center">
+              💡 Pastikan QR Code berada dalam frame putih dan pencahayaan cukup
+            </p>
+          </div>
         </div>
       </div>
     </div>
