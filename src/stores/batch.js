@@ -1,4 +1,4 @@
-//src/stores/batch.js
+// /src/stores/batch.js
 import { defineStore } from 'pinia'
 import { supabase } from "../lib/supabase"
 
@@ -13,8 +13,11 @@ export const useBatchStore = defineStore('batch', {
     async getBatches() {
       this.loading = true
       this.error = null
+      
+      console.log('🔍 Fetching batches...')
+      
       const { data, error } = await supabase
-        .from('public.gh_batch')
+        .from('gh_batch')
         .select('*')
         .order('batch_id', { ascending: true })
 
@@ -25,6 +28,7 @@ export const useBatchStore = defineStore('batch', {
         return []
       }
 
+      console.log('✅ Batches fetched:', data)
       this.batches = data || []
       this.loading = false
       return data
@@ -32,9 +36,15 @@ export const useBatchStore = defineStore('batch', {
 
     async addBatch(batch) {
       try {
+        // ✅ Payload sudah sesuai dengan kolom database
         const { data, error } = await supabase
-          .from('public.gh_batch')
-          .insert([batch])
+          .from('gh_batch')
+          .insert([{
+            batch_name: batch.batch_name,
+            location_id: batch.location_id,
+            tanggal_mulai: batch.tanggal_mulai || null,
+            tanggal_selesai: batch.tanggal_selesai || null
+          }])
           .select()
 
         if (error) throw error
@@ -52,8 +62,13 @@ export const useBatchStore = defineStore('batch', {
     async updateBatch(batchId, updatedData) {
       try {
         const { error } = await supabase
-          .from('public.gh_batch')
-          .update(updatedData)
+          .from('gh_batch')
+          .update({
+            batch_name: updatedData.batch_name,
+            location_id: updatedData.location_id,
+            tanggal_mulai: updatedData.tanggal_mulai || null,
+            tanggal_selesai: updatedData.tanggal_selesai || null
+          })
           .eq('batch_id', batchId)
 
         if (error) throw error
@@ -73,7 +88,7 @@ export const useBatchStore = defineStore('batch', {
     async deleteBatch(batchId) {
       try {
         const { error } = await supabase
-          .from('public.gh_batch')
+          .from('gh_batch')
           .delete()
           .eq('batch_id', batchId)
 

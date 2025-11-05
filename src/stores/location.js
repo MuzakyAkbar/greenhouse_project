@@ -11,13 +11,21 @@ export const useLocationStore = defineStore('location', () => {
   async function fetchAll() {
     loading.value = true
     error.value = null
+    
+    console.log('🔍 Fetching locations...')
+    
     const { data, error: err } = await supabase
-      .from('public.gh_location')
+      .from('gh_location') // ✅ Nama tabel benar
       .select('*')
       .order('location_id', { ascending: true })
 
-    if (err) error.value = err
-    else locations.value = data || []
+    if (err) {
+      console.error('❌ Gagal fetch locations:', err)
+      error.value = err
+    } else {
+      console.log('✅ Locations fetched:', data)
+      locations.value = data || []
+    }
 
     loading.value = false
     return { data, error: err }
@@ -25,7 +33,7 @@ export const useLocationStore = defineStore('location', () => {
 
   async function fetchById(id) {
     const { data, error: err } = await supabase
-      .from('public.gh_location')
+      .from('gh_location')
       .select('*')
       .eq('location_id', id)
       .single()
@@ -33,18 +41,30 @@ export const useLocationStore = defineStore('location', () => {
   }
 
   async function create(payload) {
+    // ✅ Mapping: location_name -> location
+    const dbPayload = {
+      location: payload.location_name || payload.location,
+      id_openbravo: payload.id_openbravo || null
+    }
+    
     const { data, error: err } = await supabase
-      .from('public.gh_location')
-      .insert([payload])
+      .from('gh_location')
+      .insert([dbPayload])
       .select()
     if (!err) await fetchAll()
     return { data, error: err }
   }
 
   async function update(id, payload) {
+    // ✅ Mapping: location_name -> location
+    const dbPayload = {
+      location: payload.location_name || payload.location,
+      id_openbravo: payload.id_openbravo || null
+    }
+    
     const { data, error: err } = await supabase
-      .from('public.gh_location')
-      .update(payload)
+      .from('gh_location')
+      .update(dbPayload)
       .eq('location_id', id)
       .select()
     if (!err) await fetchAll()
@@ -53,7 +73,7 @@ export const useLocationStore = defineStore('location', () => {
 
   async function remove(id) {
     const { data, error: err } = await supabase
-      .from('public.gh_location')
+      .from('gh_location')
       .delete()
       .eq('location_id', id)
     if (!err) await fetchAll()
