@@ -302,7 +302,7 @@
               </div>
             </div>
             <button 
-            @click="$emit('close')" 
+            @click="showModal = false" 
             class="w-8 h-8 flex items-center justify-center rounded-lg bg-white bg-opacity-20 hover:bg-opacity-30 transition text-white hover:rotate-90 transform duration-300"
             title="Tutup"
           >
