@@ -270,6 +270,9 @@ const router = useRouter()
 const loading = ref(true)
 const movement = ref(null)
 
+// ===== TAMBAHKAN: User role (sesuaikan dengan auth system Anda)
+const currentUserRole = ref('user') // default 'user', bisa diambil dari store/auth
+
 // ===== Helpers
 const fmtDateID = (yyyyMmDd) => {
   if (!yyyyMmDd) return '-'
@@ -289,11 +292,6 @@ const computeStatus = (row) => {
   if (processed && (posted === 'Y' || posted === 'D')) return 'Approved'
   return 'On Review'
 }
-const statusBadgeClass = (status) => {
-  if (status === 'Approved') return 'bg-[#00c03d] text-white border-[#00c03d]'
-  if (status === 'Rejected') return 'bg-[#ecf2ff] text-[#2465bc] border-[#ecf2ff]'
-  return 'bg-[#004492] text-white border-[#004492] shadow-xl'
-}
 
 // ===== API: Header by movement id
 const fetchMovementById = async (id) => {
@@ -306,9 +304,9 @@ const fetchMovementById = async (id) => {
 
   return {
     id: r.id,
-    noRef: r.name || r._identifier || '-', // name
-    date: r.movementDate ? fmtDateID(r.movementDate) : '-', // movementDate
-    createdBy: r['createdBy$_identifier'] || '-', // createdBy$_identifier
+    noRef: r.name || r._identifier || '-',
+    date: r.movementDate ? fmtDateID(r.movementDate) : '-',
+    createdBy: r['createdBy$_identifier'] || '-',
     status: computeStatus(r),
     processed: !!r.processed,
     posted: (r.posted ?? '').toString().trim().toUpperCase(),
@@ -320,7 +318,7 @@ const fetchMovementById = async (id) => {
   }
 }
 
-// ===== API: Locator -> Warehouse (untuk dapat nama gudang dari locator)
+// ===== API: Locator -> Warehouse
 const fetchLocatorWarehouse = async (locatorId) => {
   if (!locatorId) return { warehouseId: null, warehouseName: null, locatorName: null }
   const { data } = await openbravoApi.get('/org.openbravo.service.json.jsonrest/Locator', {
@@ -339,7 +337,7 @@ const fetchLocatorWarehouse = async (locatorId) => {
   }
 }
 
-// ===== API: Lines (gudang ringkas dari line pertama)
+// ===== API: Lines
 const fetchGudangByMovementId = async (movementId) => {
   const { data } = await openbravoApi.get(
     '/org.openbravo.service.json.jsonrest/MaterialMgmtInternalMovementLine',
@@ -356,12 +354,9 @@ const fetchGudangByMovementId = async (movementId) => {
   )
   const rows = data?.response?.data || []
   return rows.map((r) => ({
-    // —— PRODUCT (tetap, tidak diubah) ——
     name: r['product$_identifier'] || '(Tanpa Nama Produk)',
     amount: r.movementQuantity ?? 0,
     uom: r['uOM$_identifier'] || null,
-
-    // —— Tambahan untuk warehouse ——
     fromId: r['storageBin'] || null,
     toId: r['newStorageBin'] || null,
     from: r['storageBin$_identifier'] || null,
@@ -369,14 +364,13 @@ const fetchGudangByMovementId = async (movementId) => {
   }))
 }
 
-// ===== API: Materials (untuk list material — TIDAK mengubah cara ambil product)
+// ===== API: Materials
 const fetchMaterialByMovementId = async (movementId) => {
   const { data } = await openbravoApi.get(
     '/org.openbravo.service.json.jsonrest/MaterialMgmtInternalMovementLine',
     {
       params: {
         _where: `movement='${movementId}'`,
-        // tidak wajib _selectedProperties; tapi agar efisien:
         _selectedProperties:
           'product,product$_identifier,movementQuantity,uOM,uOM$_identifier,storageBin$_identifier,newStorageBin$_identifier',
       },
@@ -384,12 +378,9 @@ const fetchMaterialByMovementId = async (movementId) => {
   )
   const rows = data?.response?.data || []
   return rows.map((r) => ({
-    // —— PRODUCT (tetap, tidak diubah) ——
     name: r['product$_identifier'] || '(Tanpa Nama Produk)',
     amount: r.movementQuantity ?? 0,
     uom: r['uOM$_identifier'] || null,
-
-    // Opsional: tampilkan bin per item
     from: r['storageBin$_identifier'] || null,
     to: r['newStorageBin$_identifier'] || null,
   }))
@@ -407,7 +398,7 @@ onMounted(async () => {
       return
     }
 
-    // 2) Resolve warehouse (ambil locator dari line pertama)
+    // 2) Resolve warehouse
     const gudang = await fetchGudangByMovementId(movementId)
     const first = gudang[0]
     if (first?.fromId || first?.toId) {
@@ -421,7 +412,7 @@ onMounted(async () => {
       movement.value.toWarehouseName = toWh.warehouseName
     }
 
-    // 3) Materials list (INI yang mengisi tampilan Material)
+    // 3) Materials list
     const materials = await fetchMaterialByMovementId(movementId)
     movement.value.materials = materials
   } catch (e) {
@@ -439,22 +430,32 @@ const isApproved = computed(() => {
   return processed && (posted === 'Y' || posted === 'D')
 })
 
-// Placeholder aksi approve/reject
-const handleApprove = () => {
-  console.log('Approve clicked for', movement.value?.id)
-  // TODO: panggil API Openbravo untuk proses & post dokumen
-}
-
 const isManager = computed(() => {
   return currentUserRole.value?.toLowerCase() === 'manager'
 })
 
+// ===== TAMBAHKAN: Handler reject
+const handleReject = () => {
+  if (confirm('Apakah Anda yakin ingin reject movement ini?')) {
+    console.log('Reject clicked for', movement.value?.id)
+    // TODO: panggil API untuk reject
+    alert('Movement telah di-reject (placeholder)')
+  }
+}
+
+const handleApprove = () => {
+  if (confirm('Apakah Anda yakin ingin approve movement ini?')) {
+    console.log('Approve clicked for', movement.value?.id)
+    // TODO: panggil API Openbravo untuk proses & post dokumen
+    alert('Movement telah di-approve (placeholder)')
+  }
+}
+
 const handleEdit = () => {
   console.log('Edit clicked for', movement.value?.id)
-
   router.push({
-    name: 'movement-edit', // arahkan ke halaman edit
-    params: { id: movement.value?.id }, // kirim ID movement yang dipilih
+    name: 'movement-edit',
+    params: { id: movement.value?.id },
   })
 }
 

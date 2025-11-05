@@ -1,349 +1,362 @@
 <template>
-  <div class="min-h-screen bg-[#FFFFFF] flex flex-col items-center p-4 sm:p-6 relative">
-    <!-- Tombol Kembali -->
-    <button
-      @click="goBack"
-      class="fixed sm:absolute left-4 sm:left-6 top-4 sm:top-6 bg-white border border-black px-4 sm:px-5 py-2 rounded-lg text-gray-700 hover:bg-gray-100 transition shadow-sm z-20"
-      aria-label="Kembali"
-    >
-      ←
-    </button>
+  <div class="min-h-screen bg-gradient-to-br from-gray-50 to-white">
+    <!-- Header Bar -->
+    <div class="bg-white border-b border-gray-200 shadow-sm sticky top-0 z-40">
+      <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-5">
+        <div class="flex items-center gap-4">
+          <button
+            @click="goBack"
+            class="flex items-center justify-center w-10 h-10 rounded-lg hover:bg-gray-100 transition text-gray-700"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 640" class="w-5 h-5 fill-current">
+              <path d="M73.4 297.4C60.9 309.9 60.9 330.2 73.4 342.7L233.4 502.7C245.9 515.2 266.2 515.2 278.7 502.7C291.2 490.2 291.2 469.9 278.7 457.4L173.3 352L544 352C561.7 352 576 337.7 576 320C576 302.3 561.7 288 544 288L173.3 288L278.7 182.6C291.2 170.1 291.2 149.8 278.7 137.3C266.2 124.8 245.9 124.8 233.4 137.3L73.4 297.3z"/>
+            </svg>
+          </button>
+          <div>
+            <h1 class="text-2xl font-bold text-gray-900 flex items-center gap-3">
+              <span class="w-10 h-10 bg-gradient-to-br from-[#0071f3] to-[#8FABD4] rounded-lg flex items-center justify-center text-white text-lg">
+                ✏️
+              </span>
+              Edit Movement
+            </h1>
+            <p class="text-sm text-gray-500 mt-1 ml-13" v-if="createdByName">
+              Dibuat oleh: <span class="font-semibold">{{ createdByName || '-' }}</span>
+            </p>
+          </div>
+        </div>
+      </div>
+    </div>
 
-    <!-- Header spacer (biar jarak sama seperti detail) -->
-    <div class="w-full max-w-5xl text-left mb-4 sm:mb-6 mt-14 sm:mt-16"></div>
+    <!-- Main Content -->
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+      <!-- Alert Messages -->
+      <div v-if="blockedMessage" class="mb-6 rounded-xl border-2 border-yellow-300 bg-yellow-50 p-4">
+        <div class="flex items-start gap-3">
+          <svg class="w-5 h-5 text-yellow-600 flex-shrink-0 mt-0.5" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" fill="currentColor">
+            <path d="M256 512A256 256 0 1 0 256 0a256 256 0 1 0 0 512zm0-384c13.3 0 24 10.7 24 24l0 112c0 13.3-10.7 24-24 24s-24-10.7-24-24l0-112c0-13.3 10.7-24 24-24zM224 352a32 32 0 1 1 64 0 32 32 0 1 1 -64 0z"/>
+          </svg>
+          <p class="text-sm text-yellow-800 font-medium">{{ blockedMessage }}</p>
+        </div>
+      </div>
 
-    <!-- Card Form -->
-    <div class="w-full max-w-5xl bg-white rounded-2xl shadow-xl p-4 sm:p-8">
-      <!-- Header (disamakan dengan Detail Movement) -->
-      <div class="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <h1 class="text-2xl font-bold text-[#2C4A3F]">Edit</h1>
-          <p class="text-sm text-gray-600" v-if="createdByName">
-            Dibuat oleh:
-            <span class="font-medium text-gray-800">{{ createdByName || '-' }}</span>
-          </p>
+      <div v-if="successMsg" class="mb-6 rounded-xl border-2 border-green-300 bg-green-50 p-4">
+        <div class="flex items-start gap-3">
+          <svg class="w-5 h-5 text-green-600 flex-shrink-0 mt-0.5" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" fill="currentColor">
+            <path d="M256 512A256 256 0 1 0 256 0a256 256 0 1 0 0 512zM369 209L241 337c-9.4 9.4-24.6 9.4-33.9 0l-64-64c-9.4-9.4-9.4-24.6 0-33.9s24.6-9.4 33.9 0l47 47L335 175c9.4-9.4 24.6-9.4 33.9 0s9.4 24.6 0 33.9z"/>
+          </svg>
+          <p class="text-sm text-green-800 font-medium">{{ successMsg }}</p>
+        </div>
+      </div>
+
+      <!-- Main Card -->
+      <div class="bg-white rounded-2xl border-2 border-gray-100 shadow-sm p-6 sm:p-8">
+        <!-- Header dengan Status -->
+        <div class="flex flex-col sm:flex-row justify-between items-start gap-4 mb-6">
+          <div>
+            <h2 class="text-xl font-bold text-gray-900">{{ movementName || 'Edit Movement' }}</h2>
+            <p class="text-sm text-gray-500 mt-1">{{ fmtDateID(selectedDate) }}</p>
+          </div>
+          <span 
+            v-if="headerStatusText"
+            class="text-xs font-bold px-4 py-2 rounded-lg whitespace-nowrap"
+            :class="headerStatusText === 'Approved' 
+              ? 'bg-green-100 text-green-800' 
+              : 'bg-yellow-100 text-yellow-800'"
+          >
+            {{ headerStatusText === 'Approved' ? '✅ Approved' : '⏳ On Review' }}
+          </span>
         </div>
 
-        <!-- Status Badge -->
-        <span
-          v-if="headerStatusText"
-          :class="[
-            'px-3 py-1.5 rounded-lg text-sm font-semibold border-2',
-            statusBadgeClass(headerStatusText),
-          ]"
-        >
-          {{ headerStatusText }}
-        </span>
-      </div>
+        <!-- Divider -->
+        <div class="my-6 border-t border-gray-200"></div>
 
-      <!-- Divider -->
-      <div class="my-5 border-t border-dashed"></div>
+        <!-- Loading State -->
+        <div v-if="loading" class="space-y-6">
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div class="h-20 bg-gray-200 rounded-xl animate-pulse"></div>
+            <div class="h-20 bg-gray-200 rounded-xl animate-pulse"></div>
+          </div>
+          <div class="h-40 bg-gray-200 rounded-xl animate-pulse"></div>
+        </div>
 
-      <div
-        v-if="blockedMessage"
-        class="mb-4 rounded-lg border border-yellow-300 bg-yellow-50 text-yellow-800 p-3 text-sm"
-      >
-        {{ blockedMessage }}
-      </div>
+        <template v-else>
+          <!-- Form Grid -->
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-6 mb-6">
+            <!-- Tanggal -->
+            <div class="bg-gray-50 rounded-xl p-4 border border-gray-200">
+              <label class="block text-xs text-gray-500 font-semibold mb-2 flex items-center gap-1">
+                <svg class="w-3.5 h-3.5" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512" fill="currentColor">
+                  <path d="M128 0c17.7 0 32 14.3 32 32l0 32 128 0 0-32c0-17.7 14.3-32 32-32s32 14.3 32 32l0 32 48 0c26.5 0 48 21.5 48 48l0 48L0 160l0-48C0 85.5 21.5 64 48 64l48 0 0-32c0-17.7 14.3-32 32-32zM0 192l448 0 0 272c0 26.5-21.5 48-48 48L48 512c-26.5 0-48-21.5-48-48L0 192z"/>
+                </svg>
+                Tanggal Movement
+              </label>
+              <input
+                type="date"
+                v-model="selectedDate"
+                :disabled="isApproved"
+                class="w-full text-sm font-bold text-gray-900 bg-transparent border-0 focus:outline-none focus:ring-0 disabled:opacity-60 p-0"
+              />
+            </div>
 
-      <div
-        v-if="successMsg"
-        class="mb-4 rounded-lg border border-green-300 bg-green-50 text-green-800 p-3 text-sm"
-      >
-        {{ successMsg }}
-      </div>
-
-      <!-- Loading -->
-      <div v-if="loading" class="space-y-3">
-        <div class="h-5 bg-gray-200 rounded w-1/2 animate-pulse"></div>
-        <div class="h-5 bg-gray-200 rounded w-1/3 animate-pulse"></div>
-        <div class="h-40 bg-gray-200 rounded animate-pulse"></div>
-      </div>
-
-      <template v-else>
-        <!-- Form Grid -->
-        <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 sm:gap-6">
-          <!-- Tanggal -->
-          <div class="col-span-1">
-            <label class="block font-medium text-black mb-2 text-sm sm:text-base">Tanggal</label>
-            <input
-              type="date"
-              readonly
-              v-model="selectedDate"
-              :disabled="isApproved"
-              class="w-full border rounded-lg px-3 py-2 focus:ring-2 focus:ring-[#4C763B] focus:outline-none disabled:bg-gray-100"
-            />
+            <!-- No. Referensi -->
+            <div class="bg-gray-50 rounded-xl p-4 border border-gray-200">
+              <label class="block text-xs text-gray-500 font-semibold mb-2 flex items-center gap-1">
+                <svg class="w-3.5 h-3.5" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 384 512" fill="currentColor">
+                  <path d="M64 0C28.7 0 0 28.7 0 64L0 448c0 35.3 28.7 64 64 64l256 0c35.3 0 64-28.7 64-64l0-288-128 0c-17.7 0-32-14.3-32-32L224 0 64 0zM256 0l0 128 128 0L256 0zM112 256l160 0c8.8 0 16 7.2 16 16s-7.2 16-16 16l-160 0c-8.8 0-16-7.2-16-16s7.2-16 16-16zm0 64l160 0c8.8 0 16 7.2 16 16s-7.2 16-16 16l-160 0c-8.8 0-16-7.2-16-16s7.2-16 16-16zm0 64l160 0c8.8 0 16 7.2 16 16s-7.2 16-16 16l-160 0c-8.8 0-16-7.2-16-16s7.2-16 16-16z"/>
+                </svg>
+                No. Referensi
+              </label>
+              <p class="text-sm font-bold text-gray-900">{{ movementName || '-' }}</p>
+            </div>
           </div>
 
-          <!-- Pilih Gudang -->
-          <div class="col-span-1">
-            <label class="block font-medium text-black mb-2 text-sm sm:text-base"
-              >Pilih Gudang</label
-            >
-
-            <div class="grid grid-cols-1 sm:grid-cols-[1fr_auto_1fr] gap-3 items-center">
+          <!-- Warehouse Selection -->
+          <div class="mb-6">
+            <label class="block text-sm font-semibold text-gray-900 mb-3">Pilih Gudang</label>
+            <div class="grid grid-cols-1 sm:grid-cols-[1fr_auto_1fr] gap-4 items-center">
               <!-- Gudang Asal -->
-              <select
-                v-model="fromWarehouse"
-                :disabled="isApproved"
-                class="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-[#4C763B] focus:outline-none disabled:bg-gray-100"
-              >
-                <option disabled value="">Pilih Gudang Asal</option>
-                <option v-for="warehouse in warehouses" :key="warehouse.id" :value="warehouse">
-                  {{ warehouse.name }}
-                </option>
-              </select>
+              <div class="bg-gray-50 rounded-xl p-4 border-2 border-gray-200">
+                <p class="text-xs text-gray-500 font-semibold mb-2">Gudang Asal</p>
+                <select
+                  v-model="fromWarehouse"
+                  :disabled="isApproved"
+                  class="w-full bg-transparent border-0 text-sm font-bold text-gray-900 focus:outline-none focus:ring-0 disabled:opacity-60 p-0"
+                >
+                  <option disabled value="">Pilih Gudang Asal</option>
+                  <option v-for="warehouse in warehouses" :key="warehouse.id" :value="warehouse">
+                    {{ warehouse.name }}
+                  </option>
+                </select>
+              </div>
 
-              <!-- Arrow -->
-              <span class="hidden sm:inline-block text-2xl text-black text-center">→</span>
+              <!-- Arrow Icon -->
+              <div class="hidden sm:flex items-center justify-center">
+                <svg class="w-6 h-6 text-[#0071f3]" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512" fill="currentColor">
+                  <path d="M438.6 278.6c12.5-12.5 12.5-32.8 0-45.3l-160-160c-12.5-12.5-32.8-12.5-45.3 0s-12.5 32.8 0 45.3L338.8 224 32 224c-17.7 0-32 14.3-32 32s14.3 32 32 32l306.7 0L233.4 393.4c-12.5 12.5-12.5 32.8 0 45.3s32.8 12.5 45.3 0l160-160z"/>
+                </svg>
+              </div>
 
               <!-- Gudang Tujuan -->
-              <select
-                v-model="toWarehouse"
-                :disabled="isApproved"
-                class="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-[#4C763B] focus:outline-none disabled:bg-gray-100"
-              >
-                <option disabled value="">Pilih Gudang Tujuan</option>
-                <option
-                  v-for="warehouse in toWarehouseOptions"
-                  :key="warehouse.id"
-                  :value="warehouse"
+              <div class="bg-gray-50 rounded-xl p-4 border-2 border-gray-200">
+                <p class="text-xs text-gray-500 font-semibold mb-2">Gudang Tujuan</p>
+                <select
+                  v-model="toWarehouse"
+                  :disabled="isApproved"
+                  class="w-full bg-transparent border-0 text-sm font-bold text-gray-900 focus:outline-none focus:ring-0 disabled:opacity-60 p-0"
                 >
-                  {{ warehouse.name }}
-                </option>
-              </select>
+                  <option disabled value="">Pilih Gudang Tujuan</option>
+                  <option
+                    v-for="warehouse in toWarehouseOptions"
+                    :key="warehouse.id"
+                    :value="warehouse"
+                  >
+                    {{ warehouse.name }}
+                  </option>
+                </select>
+              </div>
             </div>
 
             <p
               v-if="fromWarehouse && toWarehouse && fromWarehouse.id === toWarehouse.id"
-              class="text-xs sm:text-sm text-red-600 mt-2"
+              class="text-sm text-red-600 mt-3 flex items-center gap-2"
             >
+              <svg class="w-4 h-4" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" fill="currentColor">
+                <path d="M256 512A256 256 0 1 0 256 0a256 256 0 1 0 0 512zm0-384c13.3 0 24 10.7 24 24l0 112c0 13.3-10.7 24-24 24s-24-10.7-24-24l0-112c0-13.3 10.7-24 24-24zM224 352a32 32 0 1 1 64 0 32 32 0 1 1 -64 0z"/>
+              </svg>
               Gudang asal dan tujuan tidak boleh sama.
             </p>
           </div>
-        </div>
 
-        <!-- Divider -->
-        <div class="my-5 border-t border-dashed"></div>
+          <!-- Divider -->
+          <div class="my-6 border-t border-gray-200"></div>
 
-        <!-- Add/Edit Material -->
-        <div class="mt-6 sm:mt-8">
-          <div class="flex items-center justify-between mb-3">
-            <label class="font-medium text-black text-xl sm:text-base">Material</label>
-
-            <div class="flex items-center gap-2">
-              <!-- tombol tambah dari bin asal (optional pada edit) -->
+          <!-- Material Section -->
+          <div>
+            <div class="flex items-center justify-between mb-4">
+              <h3 class="text-lg font-bold text-gray-900 flex items-center gap-2">
+                <svg class="w-5 h-5 text-[#0071f3]" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512" fill="currentColor">
+                  <path d="M50.7 58.5L0 160l208 0 0-128L93.7 32C75.5 32 58.9 42.3 50.7 58.5zM240 160l208 0L397.3 58.5C389.1 42.3 372.5 32 354.3 32L240 32l0 128zm208 32L0 192 0 416c0 35.3 28.7 64 64 64l320 0c35.3 0 64-28.7 64-64l0-224z"/>
+                </svg>
+                Daftar Material
+              </h3>
               <button
                 :disabled="!selectedBinId || modalLoading || isApproved"
                 @click="openMaterialModal"
-                class="rounded-full p-2 sm:p-2.5 transition text-lg sm:text-xl"
-                :class="[
-                  !selectedBinId || modalLoading || isApproved
-                    ? 'bg-gray-200 text-gray-400 cursor-not-allowed'
-                    : 'bg-[#E8F5E9] text-black hover:bg-[#DDEEDC]',
-                ]"
-                title="Ambil dari bin asal"
-                aria-label="Tambah material dari bin asal"
+                class="flex items-center gap-2 px-4 py-2 rounded-lg transition-all text-sm font-semibold disabled:opacity-50 disabled:cursor-not-allowed"
+                :class="!selectedBinId || modalLoading || isApproved
+                  ? 'bg-gray-200 text-gray-400'
+                  : 'bg-gradient-to-r from-[#0071f3] to-[#0060d1] hover:from-[#0060d1] hover:to-[#0050b1] text-white shadow-md hover:shadow-lg'"
               >
-                {{ modalLoading ? '…' : '+' }}
+                <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
+                  <path fill-rule="evenodd" d="M10 3a1 1 0 011 1v5h5a1 1 0 110 2h-5v5a1 1 0 11-2 0v-5H4a1 1 0 110-2h5V4a1 1 0 011-1z" clip-rule="evenodd"/>
+                </svg>
+                Tambah Material
               </button>
             </div>
-          </div>
 
-          <!-- List Material -->
-          <div class="space-y-3 sm:space-y-4">
-            <div v-if="materials.length === 0" class="text-gray-500 text-sm">
-              Belum ada material.
+            <!-- Material List -->
+            <div v-if="materials.length === 0" class="text-center py-8 bg-gray-50 rounded-xl border border-gray-200">
+              <p class="text-gray-500 text-sm">Belum ada material</p>
             </div>
 
-            <div v-for="(item, index) in materials" :key="index">
+            <div v-else class="space-y-3">
               <div
-                class="border rounded-xl p-4 sm:p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-3 sm:gap-4 shadow-sm"
-                :class="
-                  item.stock != null && item.amount > item.stock
-                    ? 'border-red-400 bg-red-50'
-                    : 'border-gray-200 bg-[#F7F9FC]'
-                "
+                v-for="(item, index) in materials"
+                :key="index"
+                class="bg-gray-50 border rounded-xl p-4 transition-all"
+                :class="item.stock != null && item.amount > item.stock
+                  ? 'border-red-400 bg-red-50'
+                  : 'border-gray-200 hover:border-[#0071f3]'"
               >
-                <div class="flex items-center gap-3 sm:gap-4">
-                  <div
-                    class="w-10 h-10 flex items-center justify-center rounded-full text-white font-semibold shrink-0"
-                    :style="{ backgroundColor: item.color }"
-                  >
-                    {{ item.name?.charAt(0)?.toUpperCase() || '?' }}
-                  </div>
-                  <div>
-                    <p class="font-semibold text-black text-sm sm:text-base leading-tight">
-                      {{ item.name || '(No Name)' }}
-                    </p>
-                    <p class="text-[11px] sm:text-xs text-gray-500">UOM: {{ item.uom || '-' }}</p>
-
-                    <!-- Qty (mobile) -->
-                    <div class="mt-2 flex items-center gap-2 sm:hidden">
-                      <input
-                        v-model.number="item.amount"
-                        type="number"
-                        min="0"
-                        inputmode="decimal"
-                        placeholder="0"
-                        :disabled="isApproved"
-                        class="w-28 border-b focus:outline-none text-sm transition bg-transparent"
-                        :class="
-                          item.stock != null && item.amount > item.stock
-                            ? 'border-red-500 text-red-600'
-                            : 'border-gray-300 focus:border-[#4C763B] text-black'
-                        "
-                      />
-                      <span
-                        v-if="item.stock != null"
-                        class="text-xs"
-                        :class="item.amount > item.stock ? 'text-red-600' : 'text-black'"
-                      >
-                        / {{ formatNumber(item.stock) }} {{ item.uom || '' }}
-                      </span>
+                <div class="flex items-start justify-between gap-4">
+                  <div class="flex items-center gap-3 flex-1">
+                    <div
+                      class="w-12 h-12 bg-gradient-to-br from-[#0071f3] to-[#8FABD4] rounded-lg flex items-center justify-center text-white font-bold text-lg flex-shrink-0"
+                    >
+                      {{ (item.name || '?').charAt(0).toUpperCase() }}
+                    </div>
+                    <div class="flex-1">
+                      <p class="font-bold text-gray-900">{{ item.name || '-' }}</p>
+                      <div class="flex items-center gap-2 mt-1">
+                        <span class="text-xs bg-blue-100 text-blue-800 px-2 py-0.5 rounded font-semibold">
+                          {{ item.uom || '-' }}
+                        </span>
+                        <span v-if="item.stock != null" class="text-xs text-gray-500">
+                          Stock: {{ formatNumber(item.stock) }}
+                        </span>
+                      </div>
                     </div>
                   </div>
-                </div>
 
-                <!-- Qty (desktop/right) -->
-                <div class="hidden sm:flex items-center gap-2">
-                  <input
-                    v-model.number="item.amount"
-                    type="number"
-                    min="0"
-                    inputmode="decimal"
-                    placeholder="0"
-                    :disabled="isApproved"
-                    class="w-28 border-b focus:outline-none text-sm transition bg-transparent"
-                    :class="
-                      item.stock != null && item.amount > item.stock
-                        ? 'border-red-500 text-red-600'
-                        : 'border-gray-300 focus:border-[#4C763B] text-black'
-                    "
-                  />
-                  <span
-                    v-if="item.stock != null"
-                    class="text-sm"
-                    :class="item.amount > item.stock ? 'text-red-600' : 'text-black'"
-                  >
-                    / {{ formatNumber(item.stock) }} {{ item.uom || '' }}
-                  </span>
-                </div>
-
-                <!-- Delete -->
-                <div class="flex sm:block">
-                  <button
-                    @click="removeMaterial(index)"
-                    :disabled="isApproved"
-                    class="ml-auto sm:ml-0 text-red-500 hover:text-red-700 transition text-lg sm:text-xl disabled:opacity-50"
-                    aria-label="Hapus material"
-                    title="Hapus material"
-                  >
-                    🗑️
-                  </button>
+                  <!-- Quantity Input -->
+                  <div class="flex items-center gap-3">
+                    <input
+                      v-model.number="item.amount"
+                      type="number"
+                      min="0"
+                      :disabled="isApproved"
+                      class="w-24 border-2 rounded-lg px-3 py-2 text-sm font-semibold focus:outline-none focus:ring-2 transition disabled:opacity-50 disabled:bg-gray-100"
+                      :class="item.stock != null && item.amount > item.stock
+                        ? 'border-red-500 text-red-600 focus:ring-red-500'
+                        : 'border-gray-300 text-gray-900 focus:ring-[#0071f3] focus:border-[#0071f3]'"
+                      placeholder="0"
+                    />
+                    <button
+                      @click="removeMaterial(index)"
+                      :disabled="isApproved"
+                      class="text-red-500 hover:text-red-700 transition disabled:opacity-50"
+                    >
+                      <svg class="w-5 h-5" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512" fill="currentColor">
+                        <path d="M135.2 17.7L128 32H32C14.3 32 0 46.3 0 64S14.3 96 32 96H416c17.7 0 32-14.3 32-32s-14.3-32-32-32H320l-7.2-14.3C307.4 6.8 296.3 0 284.2 0H163.8c-12.1 0-23.2 6.8-28.6 17.7zM416 128H32L53.2 467c1.6 25.3 22.6 45 47.9 45H346.9c25.3 0 46.3-19.7 47.9-45L416 128z"/>
+                      </svg>
+                    </button>
+                  </div>
                 </div>
               </div>
             </div>
           </div>
-        </div>
 
-        <!-- Submit -->
-        <div class="mt-6 sm:mt-8">
-          <button
-            @click="submitUpdate"
-            :disabled="submitLoading || isApproved"
-            class="w-full bg-[#0071f3] hover:bg-[#dbe7ff] hover:text-black disabled:opacity-60 text-white font-semibold py-3 sm:py-3.5 rounded-lg transition text-base sm:text-lg"
-          >
-            {{ submitLoading ? 'Menyimpan…' : 'Simpan Perubahan' }}
-          </button>
+          <!-- Divider -->
+          <div class="my-8 border-t border-gray-200"></div>
+
+          <!-- Action Buttons -->
+          <div class="flex flex-wrap gap-3 justify-end">
+            <button
+              @click="goBack"
+              class="flex items-center gap-2 bg-gray-100 hover:bg-gray-200 text-gray-700 font-semibold px-6 py-2.5 rounded-xl transition-all"
+            >
+              Batal
+            </button>
+            <button
+              @click="submitUpdate"
+              :disabled="submitLoading || isApproved"
+              class="flex items-center gap-2 bg-gradient-to-r from-[#0071f3] to-[#0060d1] hover:from-[#0060d1] hover:to-[#0050b1] text-white font-semibold px-6 py-2.5 rounded-xl transition-all shadow-md hover:shadow-lg disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              <svg v-if="!submitLoading" class="w-4 h-4" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512" fill="currentColor">
+                <path d="M64 32C28.7 32 0 60.7 0 96L0 416c0 35.3 28.7 64 64 64l320 0c35.3 0 64-28.7 64-64l0-242.7c0-17-6.7-33.3-18.7-45.3L352 50.7C340 38.7 323.7 32 306.7 32L64 32z"/>
+              </svg>
+              <div v-else class="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+              {{ submitLoading ? 'Menyimpan...' : 'Simpan Perubahan' }}
+            </button>
+          </div>
+        </template>
+      </div>
+
+      <!-- Footer -->
+      <footer class="text-center py-10 mt-8 border-t border-gray-200">
+        <div class="flex items-center justify-center gap-2 mb-2">
+          <span class="text-2xl">🌱</span>
+          <p class="text-gray-400 font-bold text-sm">GREENHOUSE</p>
         </div>
-      </template>
+        <p class="text-gray-400 text-xs">© 2025 All Rights Reserved</p>
+      </footer>
     </div>
 
-    <!-- Popup Pilih Barang -->
+    <!-- Modal Pilih Material -->
     <div
       v-if="showModal"
-      class="fixed inset-0 z-50 flex items-center justify-center"
-      @keydown.esc.prevent="showModal = false"
+      class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4"
     >
-      <div class="absolute inset-0 bg-black/50" @click="showModal = false" aria-hidden="true"></div>
-
-      <div
-        class="relative bg-white w-[92%] sm:w-full sm:max-w-md rounded-2xl shadow-2xl p-4 sm:p-6 z-10 transform transition-all duration-150 ease-out scale-100"
-        role="dialog"
-        aria-modal="true"
-        aria-label="Pilih Barang"
-      >
-        <div class="flex items-center justify-between mb-3 sm:mb-4">
-          <h3 class="font-bold text-base sm:text-lg">Pilih Barang</h3>
-          <button
-            @click="showModal = false"
-            class="text-gray-500 hover:text-gray-700 p-2 -mr-2"
-            aria-label="Tutup"
-            title="Tutup"
-          >
-            ✖
-          </button>
-        </div>
-
-        <!-- Search bar -->
-        <div class="relative mb-3 sm:mb-4">
-          <input
-            ref="searchInputRef"
-            v-model="searchQuery"
-            type="text"
-            placeholder="Cari barang..."
-            class="w-full border rounded-lg pl-10 pr-3 py-2 focus:outline-none focus:ring-2 focus:ring-[#4C763B]"
-          />
-          <span class="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500">
-            <svg
-              xmlns="http://www.w3.org/2000/svg"
-              class="w-5 h-5"
-              fill="none"
-              viewBox="0 0 24 24"
-              stroke="currentColor"
-            >
-              <path
-                stroke-linecap="round"
-                stroke-linejoin="round"
-                stroke-width="2"
-                d="M21 21l-4.35-4.35m0 0A7.5 7.5 0 1010.5 18.5 7.5 7.5 0 0016.65 16.65z"
-              />
+      <div class="bg-white rounded-2xl max-w-md w-full p-6 relative">
+        <button
+          @click="showModal = false"
+          class="absolute top-4 right-4 w-8 h-8 bg-gray-100 hover:bg-gray-200 rounded-lg flex items-center justify-center transition"
+        >
+          <svg class="w-5 h-5 text-gray-600" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 384 512" fill="currentColor">
+            <path d="M342.6 150.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0L192 210.7 86.6 105.4c-12.5-12.5-32.8-12.5-45.3 0s-12.5 32.8 0 45.3L146.7 256 41.4 361.4c-12.5 12.5-12.5 32.8 0 45.3s32.8 12.5 45.3 0L192 301.3 297.4 406.6c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L237.3 256 342.6 150.6z"/>
+          </svg>
+        </button>
+        
+        <div class="text-center">
+          <div class="w-12 h-12 bg-gradient-to-br from-[#0071f3] to-[#0060d1] rounded-xl flex items-center justify-center mx-auto mb-4">
+            <svg class="w-6 h-6 text-white" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512" fill="currentColor">
+              <path d="M50.7 58.5L0 160l208 0 0-128L93.7 32C75.5 32 58.9 42.3 50.7 58.5zM240 160l208 0L397.3 58.5C389.1 42.3 372.5 32 354.3 32L240 32l0 128zm208 32L0 192 0 416c0 35.3 28.7 64 64 64l320 0c35.3 0 64-28.7 64-64l0-224z"/>
             </svg>
-          </span>
-        </div>
-
-        <div class="max-h-[60vh] overflow-y-auto">
-          <div v-if="modalLoading" class="text-center text-sm text-gray-500 py-10">
-            Memuat data dari bin…
+          </div>
+          
+          <h2 class="text-2xl font-bold text-gray-900 mb-2">Pilih Material</h2>
+          <p class="text-sm text-gray-500 mb-6">Pilih material dari gudang asal</p>
+          
+          <!-- Search -->
+          <div class="relative mb-4">
+            <input
+              ref="searchInputRef"
+              v-model="searchQuery"
+              type="text"
+              placeholder="Cari material..."
+              class="w-full border-2 border-gray-200 rounded-lg pl-10 pr-4 py-2 focus:outline-none focus:ring-2 focus:ring-[#0071f3] focus:border-[#0071f3]"
+            />
+            <svg class="w-5 h-5 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" fill="currentColor">
+              <path d="M416 208c0 45.9-14.9 88.3-40 122.7L502.6 457.4c12.5 12.5 12.5 32.8 0 45.3s-32.8 12.5-45.3 0L330.7 376c-34.4 25.2-76.8 40-122.7 40C93.1 416 0 322.9 0 208S93.1 0 208 0S416 93.1 416 208zM208 352a144 144 0 1 0 0-288 144 144 0 1 0 0 288z"/>
+            </svg>
           </div>
 
-          <div
-            v-else-if="availableItems.length === 0"
-            class="text-center text-sm text-gray-500 py-10"
-          >
-            Tidak ada item pada bin ini.
-          </div>
+          <!-- List -->
+          <div class="max-h-96 overflow-y-auto">
+            <div v-if="modalLoading" class="text-center py-8 text-gray-500">
+              <div class="w-8 h-8 border-4 border-[#0071f3] border-t-transparent rounded-full animate-spin mx-auto mb-2"></div>
+              Memuat data...
+            </div>
 
-          <div v-else class="space-y-2">
-            <div
-              v-for="(item, index) in filteredItems"
-              :key="index"
-              @click="selectItem(item)"
-              class="flex items-center justify-between border rounded-xl px-3 sm:px-4 py-3 cursor-pointer hover:bg-gray-50 transition"
-            >
-              <div class="flex items-center gap-3">
+            <div v-else-if="availableItems.length === 0" class="text-center py-8 text-gray-500">
+              Tidak ada material tersedia
+            </div>
+
+            <div v-else class="space-y-2">
+              <div
+                v-for="(item, index) in filteredItems"
+                :key="index"
+                @click="selectItem(item)"
+                class="flex items-center gap-3 border-2 border-gray-200 rounded-xl p-3 cursor-pointer hover:border-[#0071f3] hover:bg-blue-50 transition-all"
+              >
                 <div
-                  class="w-10 h-10 flex items-center justify-center rounded-full text-white font-semibold shrink-0"
-                  :style="{ backgroundColor: item.color }"
+                  class="w-10 h-10 bg-gradient-to-br from-[#0071f3] to-[#8FABD4] rounded-lg flex items-center justify-center text-white font-bold flex-shrink-0"
                 >
                   {{ item.name.charAt(0).toUpperCase() }}
                 </div>
-                <div class="min-w-0">
-                  <p class="font-semibold truncate max-w-[58vw] sm:max-w-[20rem]">
-                    {{ item.name }}
-                  </p>
-                  <p class="text-xs text-gray-600">
+                <div class="flex-1 text-left">
+                  <p class="font-semibold text-gray-900 truncate">{{ item.name }}</p>
+                  <p class="text-xs text-gray-500">
                     Stock: {{ formatNumber(item.stock) }} {{ item.uom || '' }}
                   </p>
                 </div>
@@ -773,7 +786,7 @@ const goBack = () => router.back()
   width: 6px;
 }
 ::-webkit-scrollbar-thumb {
-  background-color: #4c763b;
+  background-color: #0071f3;
   border-radius: 10px;
 }
 </style>

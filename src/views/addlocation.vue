@@ -132,7 +132,7 @@
               <svg v-else class="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
                 <path fill-rule="evenodd" d="M10.293 3.293a1 1 0 011.414 0l6 6a1 1 0 010 1.414l-6 6a1 1 0 01-1.414-1.414L14.586 11H3a1 1 0 110-2h11.586l-4.293-4.293a1 1 0 010-1.414z" clip-rule="evenodd"/>
               </svg>
-              {{ loading ? 'Mengirim ke OpenBravo...' : 'Lanjut ke OpenBravo' }}
+              {{ loading ? 'Mohon ditunggu...' : 'Tambahkan Lokasi' }}
             </button>
           </div>
         </form>
@@ -149,7 +149,7 @@
               </svg>
             </div>
             <div class="flex-1">
-              <h3 class="text-lg font-bold text-green-900 mb-1">✅ Berhasil Disimpan ke OpenBravo!</h3>
+              <h3 class="text-lg font-bold text-green-900 mb-1">✅ Lokasi berhasil ditambahkan!</h3>
               <p class="text-sm text-green-700">Lokasi telah berhasil didaftarkan di OpenBravo dengan ID berikut:</p>
             </div>
           </div>
@@ -188,12 +188,6 @@
                 </button>
               </div>
             </div>
-
-            <div class="bg-blue-50 rounded-xl p-4 border border-blue-200">
-              <p class="text-xs text-blue-700">
-                <span class="font-semibold">💡 Info:</span> ID ini akan digunakan untuk menghubungkan data lokasi di database lokal dengan OpenBravo.
-              </p>
-            </div>
           </div>
         </div>
 
@@ -205,8 +199,8 @@
                 💾
               </div>
               <div>
-                <h2 class="text-xl font-bold text-white">Step 2: Simpan ke Database</h2>
-                <p class="text-sm text-blue-100 mt-0.5">Simpan lokasi ke database lokal</p>
+                <h2 class="text-xl font-bold text-white">Step 2: Masukkan ID Open Bravo</h2>
+                <p class="text-sm text-blue-100 mt-0.5">Simpan lokasi ke database</p>
               </div>
             </div>
           </div>
@@ -316,14 +310,14 @@
 </template>
 
 <script setup>
-import { ref } from 'vue'
+import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import openbravoApi from '@/lib/openbravo'
 import { supabase } from '@/lib/supabase'
 
 const router = useRouter()
 
-// State Management
+// ===== STATE MANAGEMENT =====
 const step = ref(1)
 const locationName = ref('')
 const openbravoId = ref('')
@@ -334,10 +328,52 @@ const messageStep2 = ref('')
 const isError = ref(false)
 const isErrorStep2 = ref(false)
 
-// Step 1: Submit ke OpenBravo
+// Warehouse ID default (akan diambil dari warehouse pertama)
+const defaultWarehouseId = ref('')
+
+// ===== LIFECYCLE: Load Default Warehouse =====
+onMounted(async () => {
+  await loadDefaultWarehouse()
+})
+
+// ===== FUNCTION: Load Warehouse Pertama sebagai Default =====
+async function loadDefaultWarehouse() {
+  try {
+    const { data } = await openbravoApi.get(
+      '/org.openbravo.service.json.jsonrest/Warehouse',
+      {
+        params: {
+          _startRow: 0,
+          _endRow: 1,
+          _selectedProperties: 'id,name'
+        }
+      }
+    )
+    
+    const warehouse = data?.response?.data?.[0]
+    if (warehouse?.id) {
+      defaultWarehouseId.value = warehouse.id
+      console.log('Default Warehouse loaded:', warehouse.name, warehouse.id)
+    } else {
+      console.warn('Tidak ada warehouse ditemukan di OpenBravo')
+    }
+  } catch (err) {
+    console.error('Gagal load default warehouse:', err)
+  }
+}
+
+// ===== FUNCTION: Step 1 - Submit ke OpenBravo =====
 async function submitToOpenBravo() {
+  // Validasi input
   if (!locationName.value.trim()) {
     message.value = 'Mohon isi nama lokasi terlebih dahulu.'
+    isError.value = true
+    return
+  }
+
+  // Validasi warehouse tersedia
+  if (!defaultWarehouseId.value) {
+    message.value = 'Gagal mendapatkan warehouse default dari OpenBravo. Coba refresh halaman.'
     isError.value = true
     return
   }
@@ -347,27 +383,44 @@ async function submitToOpenBravo() {
   isError.value = false
 
   try {
-    // Kirim ke OpenBravo API
-    const { data } = await openbravoApi.post(
-      '/org.openbravo.service.json.jsonrest/Locator',
-      {
-        searchKey: locationName.value,
-        _identifier: locationName.value,
-        // Sesuaikan dengan field yang diperlukan OpenBravo
-        // warehouse: 'WAREHOUSE_ID_HERE', // Jika diperlukan
-      }
-    )
-
-    // Ambil ID yang dikembalikan dari OpenBravo
-    const createdId = data?.response?.data?.[0]?.id || data?.id
-
-    if (!createdId) {
-      throw new Error('Gagal mendapatkan ID dari OpenBravo')
+    // Buat payload untuk Locator (bin/lokasi) di OpenBravo
+    // Format payload harus sesuai dengan struktur yang diterima OpenBravo
+    const payload = {
+      data: [
+        {
+          _entityName: 'Locator',
+          searchKey: locationName.value,
+          _identifier: locationName.value,
+          warehouse: defaultWarehouseId.value
+        }
+      ]
     }
 
+    console.log('Sending payload to OpenBravo:', payload)
+
+    // POST ke endpoint Locator OpenBravo
+    const { data } = await openbravoApi.post(
+      '/org.openbravo.service.json.jsonrest/Locator',
+      payload
+    )
+
+    console.log('OpenBravo response:', data)
+
+    // Ambil ID yang dikembalikan dari OpenBravo
+    // Response structure: data.response.data[0].id
+    const createdLocator = data?.response?.data?.[0]
+    const createdId = createdLocator?.id
+
+    if (!createdId) {
+      throw new Error('Tidak menerima ID dari OpenBravo. Response tidak valid.')
+    }
+
+    // Simpan ID OpenBravo
     openbravoId.value = createdId
     message.value = '✅ Berhasil disimpan ke OpenBravo!'
     isError.value = false
+
+    console.log('Locator created successfully with ID:', createdId)
 
     // Pindah ke step 2 setelah 1.5 detik
     setTimeout(() => {
@@ -377,27 +430,35 @@ async function submitToOpenBravo() {
 
   } catch (err) {
     console.error('Error submitting to OpenBravo:', err)
-    message.value = `⚠️ Gagal menyimpan ke OpenBravo: ${err.response?.data?.error?.message || err.message}`
+    
+    // Extract error message
+    const errorMsg = err.response?.data?.error?.message 
+      || err.response?.data?.message 
+      || err.message 
+      || 'Terjadi kesalahan tidak diketahui'
+    
+    message.value = `⚠️ Gagal menyimpan ke OpenBravo: ${errorMsg}`
     isError.value = true
   } finally {
     loading.value = false
   }
 }
 
-// Step 2: Submit ke Supabase
+// ===== FUNCTION: Step 2 - Submit ke Supabase =====
 async function submitToSupabase() {
   loadingStep2.value = true
   messageStep2.value = ''
   isErrorStep2.value = false
 
   try {
+    // Insert data ke Supabase
     const { data, error } = await supabase
-      .from('public.gh_location')
+      .from('gh_location')
       .insert([
         {
           location: locationName.value,
           id_openbravo: openbravoId.value,
-          batch_id: null // Opsional, sesuaikan dengan kebutuhan
+          batch_id: null
         }
       ])
       .select()
@@ -405,6 +466,8 @@ async function submitToSupabase() {
     if (error) {
       throw error
     }
+
+    console.log('Data saved to Supabase:', data)
 
     messageStep2.value = '✅ Lokasi berhasil disimpan ke database!'
     isErrorStep2.value = false
@@ -423,7 +486,7 @@ async function submitToSupabase() {
   }
 }
 
-// Copy ID to Clipboard
+// ===== FUNCTION: Copy ID to Clipboard =====
 async function copyToClipboard() {
   try {
     await navigator.clipboard.writeText(openbravoId.value)
@@ -435,10 +498,12 @@ async function copyToClipboard() {
     }, 2000)
   } catch (err) {
     console.error('Failed to copy:', err)
+    messageStep2.value = '⚠️ Gagal menyalin ID'
+    isErrorStep2.value = true
   }
 }
 
-// Reset Form untuk menambah lokasi baru
+// ===== FUNCTION: Reset Form untuk Menambah Lokasi Baru =====
 function resetForm() {
   step.value = 1
   locationName.value = ''
