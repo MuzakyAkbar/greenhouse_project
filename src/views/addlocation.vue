@@ -29,22 +29,9 @@
 
     <!-- Main Content -->
     <div class="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
-      
-      <!-- Info Box -->
-      <div class="bg-blue-50 border-2 border-blue-100 rounded-2xl p-5 flex items-start gap-4 mb-8">
-        <div class="flex-shrink-0 w-6 h-6 text-[#0071f3] mt-0.5">
-          <svg fill="currentColor" viewBox="0 0 20 20">
-            <path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd"/>
-          </svg>
-        </div>
-        <div class="flex-1">
-          <p class="text-sm text-gray-700 font-semibold mb-1">Informasi Penting</p>
-          <p class="text-sm text-gray-600">Pastikan nama lokasi yang diinput sesuai dengan lokasi fisik kebun untuk memudahkan tracking produksi.</p>
-        </div>
-      </div>
 
-      <!-- Form Card -->
-      <div class="bg-white rounded-2xl border-2 border-gray-100 shadow-lg overflow-hidden">
+      <!-- Step 1: Form Input Nama Lokasi -->
+      <div v-if="step === 1" class="bg-white rounded-2xl border-2 border-gray-100 shadow-lg overflow-hidden">
         <!-- Card Header -->
         <div class="bg-gradient-to-r from-[#0071f3] to-[#0060d1] p-6 relative overflow-hidden">
           <div class="absolute top-0 right-0 w-40 h-40 bg-white opacity-5 rounded-full -mr-20 -mt-20"></div>
@@ -53,14 +40,14 @@
               🏡
             </div>
             <div>
-              <h2 class="text-xl font-bold text-white">Formulir Lokasi</h2>
-              <p class="text-sm text-blue-100 mt-0.5">Lengkapi data lokasi di bawah ini</p>
+              <h2 class="text-xl font-bold text-white">Step 1: Nama Lokasi</h2>
+              <p class="text-sm text-blue-100 mt-0.5">Masukkan nama lokasi untuk OpenBravo</p>
             </div>
           </div>
         </div>
 
         <!-- Form Content -->
-        <form @submit.prevent="saveLocation" class="p-8 space-y-6">
+        <form @submit.prevent="submitToOpenBravo" class="p-8 space-y-6">
           <!-- Nama Lokasi -->
           <div class="space-y-2">
             <label class="text-sm font-semibold text-gray-700 flex items-center gap-2">
@@ -74,16 +61,17 @@
                 </svg>
               </div>
               <input
-                v-model="newLocation.nama"
+                v-model="locationName"
                 type="text"
                 placeholder="Contoh: Kebun 3, Greenhouse A, Lahan Utara"
                 class="w-full bg-gray-50 border-2 border-gray-200 rounded-xl py-3 pl-12 pr-4 text-gray-900 font-medium focus:outline-none focus:border-[#0071f3] focus:ring-2 focus:ring-[#0071f3] focus:ring-opacity-20 transition hover:border-gray-300"
+                :disabled="loading"
               />
             </div>
             <p class="text-xs text-gray-500 mt-1">Gunakan nama yang mudah diidentifikasi dan diingat</p>
           </div>
 
-          <!-- Additional Info (Optional) -->
+          <!-- Additional Info -->
           <div class="bg-gradient-to-br from-gray-50 to-white rounded-xl p-5 border-2 border-gray-100">
             <div class="flex items-start gap-3">
               <div class="flex-shrink-0 w-5 h-5 text-gray-400 mt-0.5">
@@ -106,17 +94,17 @@
           <div
             v-if="message"
             class="rounded-xl p-4 flex items-center gap-3 transition-all duration-300"
-            :class="message.includes('⚠️') ? 'bg-red-50 border-2 border-red-200' : 'bg-green-50 border-2 border-green-200'"
+            :class="isError ? 'bg-red-50 border-2 border-red-200' : 'bg-green-50 border-2 border-green-200'"
           >
-            <div class="flex-shrink-0" :class="message.includes('⚠️') ? 'text-red-500' : 'text-green-500'">
-              <svg v-if="message.includes('⚠️')" class="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
+            <div class="flex-shrink-0" :class="isError ? 'text-red-500' : 'text-green-500'">
+              <svg v-if="isError" class="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
                 <path fill-rule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clip-rule="evenodd"/>
               </svg>
               <svg v-else class="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
                 <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"/>
               </svg>
             </div>
-            <p class="text-sm font-medium" :class="message.includes('⚠️') ? 'text-red-700' : 'text-green-700'">
+            <p class="text-sm font-medium" :class="isError ? 'text-red-700' : 'text-green-700'">
               {{ message }}
             </p>
           </div>
@@ -134,19 +122,172 @@
             </router-link>
             <button
               type="submit"
-              class="flex-1 bg-gradient-to-r from-[#0071f3] to-[#0060d1] hover:from-[#0060d1] hover:to-[#0050b1] text-white font-medium px-6 py-3 rounded-xl transition-all text-sm shadow-md hover:shadow-lg transform hover:-translate-y-0.5 flex items-center justify-center gap-2"
+              :disabled="loading || !locationName"
+              class="flex-1 bg-gradient-to-r from-[#0071f3] to-[#0060d1] hover:from-[#0060d1] hover:to-[#0050b1] text-white font-medium px-6 py-3 rounded-xl transition-all text-sm shadow-md hover:shadow-lg transform hover:-translate-y-0.5 flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none"
             >
-              <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
-                <path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"/>
+              <svg v-if="loading" class="animate-spin h-5 w-5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
               </svg>
-              Simpan Lokasi
+              <svg v-else class="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
+                <path fill-rule="evenodd" d="M10.293 3.293a1 1 0 011.414 0l6 6a1 1 0 010 1.414l-6 6a1 1 0 01-1.414-1.414L14.586 11H3a1 1 0 110-2h11.586l-4.293-4.293a1 1 0 010-1.414z" clip-rule="evenodd"/>
+              </svg>
+              {{ loading ? 'Mengirim ke OpenBravo...' : 'Lanjut ke OpenBravo' }}
             </button>
           </div>
         </form>
       </div>
 
-      <!-- Preview Card (Optional) -->
-      <div v-if="newLocation.nama" class="mt-8">
+      <!-- Step 2: Tampilkan ID OpenBravo dan Input ke Supabase -->
+      <div v-if="step === 2" class="space-y-6">
+        <!-- Success Card -->
+        <div class="bg-green-50 border-2 border-green-200 rounded-2xl p-6">
+          <div class="flex items-start gap-4">
+            <div class="flex-shrink-0 w-12 h-12 bg-green-500 rounded-full flex items-center justify-center">
+              <svg class="w-6 h-6 text-white" fill="currentColor" viewBox="0 0 20 20">
+                <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"/>
+              </svg>
+            </div>
+            <div class="flex-1">
+              <h3 class="text-lg font-bold text-green-900 mb-1">✅ Berhasil Disimpan ke OpenBravo!</h3>
+              <p class="text-sm text-green-700">Lokasi telah berhasil didaftarkan di OpenBravo dengan ID berikut:</p>
+            </div>
+          </div>
+        </div>
+
+        <!-- OpenBravo ID Display -->
+        <div class="bg-white rounded-2xl border-2 border-gray-100 shadow-lg overflow-hidden">
+          <div class="bg-gradient-to-r from-purple-500 to-purple-600 p-6">
+            <div class="flex items-center gap-3">
+              <div class="w-12 h-12 bg-white rounded-xl flex items-center justify-center text-2xl flex-shrink-0 shadow-lg">
+                🔑
+              </div>
+              <div>
+                <h2 class="text-xl font-bold text-white">OpenBravo ID</h2>
+                <p class="text-sm text-purple-100 mt-0.5">ID yang dihasilkan dari OpenBravo</p>
+              </div>
+            </div>
+          </div>
+
+          <div class="p-8 space-y-4">
+            <div class="bg-gray-50 rounded-xl p-6 border-2 border-gray-200">
+              <p class="text-xs text-gray-500 font-semibold mb-2">ID OPENBRAVO:</p>
+              <div class="flex items-center gap-3">
+                <code class="flex-1 text-lg font-mono font-bold text-gray-900 bg-white px-4 py-3 rounded-lg border border-gray-300">
+                  {{ openbravoId }}
+                </code>
+                <button
+                  @click="copyToClipboard"
+                  class="flex-shrink-0 bg-[#0071f3] hover:bg-[#0060d1] text-white p-3 rounded-lg transition"
+                  title="Salin ID"
+                >
+                  <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
+                    <path d="M8 3a1 1 0 011-1h2a1 1 0 110 2H9a1 1 0 01-1-1z"/>
+                    <path d="M6 3a2 2 0 00-2 2v11a2 2 0 002 2h8a2 2 0 002-2V5a2 2 0 00-2-2 3 3 0 01-3 3H9a3 3 0 01-3-3z"/>
+                  </svg>
+                </button>
+              </div>
+            </div>
+
+            <div class="bg-blue-50 rounded-xl p-4 border border-blue-200">
+              <p class="text-xs text-blue-700">
+                <span class="font-semibold">💡 Info:</span> ID ini akan digunakan untuk menghubungkan data lokasi di database lokal dengan OpenBravo.
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <!-- Form Supabase -->
+        <div class="bg-white rounded-2xl border-2 border-gray-100 shadow-lg overflow-hidden">
+          <div class="bg-gradient-to-r from-[#0071f3] to-[#0060d1] p-6">
+            <div class="flex items-center gap-3">
+              <div class="w-12 h-12 bg-white rounded-xl flex items-center justify-center text-2xl flex-shrink-0 shadow-lg">
+                💾
+              </div>
+              <div>
+                <h2 class="text-xl font-bold text-white">Step 2: Simpan ke Database</h2>
+                <p class="text-sm text-blue-100 mt-0.5">Simpan lokasi ke database lokal</p>
+              </div>
+            </div>
+          </div>
+
+          <form @submit.prevent="submitToSupabase" class="p-8 space-y-6">
+            <!-- Nama Lokasi (Read-only) -->
+            <div class="space-y-2">
+              <label class="text-sm font-semibold text-gray-700">Nama Lokasi</label>
+              <input
+                :value="locationName"
+                type="text"
+                readonly
+                class="w-full bg-gray-100 border-2 border-gray-200 rounded-xl py-3 px-4 text-gray-900 font-medium cursor-not-allowed"
+              />
+            </div>
+
+            <!-- ID OpenBravo (Read-only) -->
+            <div class="space-y-2">
+              <label class="text-sm font-semibold text-gray-700">ID OpenBravo</label>
+              <input
+                :value="openbravoId"
+                type="text"
+                readonly
+                class="w-full bg-gray-100 border-2 border-gray-200 rounded-xl py-3 px-4 text-gray-900 font-mono font-medium cursor-not-allowed"
+              />
+              <p class="text-xs text-gray-500">ID ini otomatis diambil dari OpenBravo</p>
+            </div>
+
+            <!-- Message Display -->
+            <div
+              v-if="messageStep2"
+              class="rounded-xl p-4 flex items-center gap-3"
+              :class="isErrorStep2 ? 'bg-red-50 border-2 border-red-200' : 'bg-green-50 border-2 border-green-200'"
+            >
+              <div class="flex-shrink-0" :class="isErrorStep2 ? 'text-red-500' : 'text-green-500'">
+                <svg v-if="isErrorStep2" class="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
+                  <path fill-rule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clip-rule="evenodd"/>
+                </svg>
+                <svg v-else class="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
+                  <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"/>
+                </svg>
+              </div>
+              <p class="text-sm font-medium" :class="isErrorStep2 ? 'text-red-700' : 'text-green-700'">
+                {{ messageStep2 }}
+              </p>
+            </div>
+
+            <!-- Action Buttons -->
+            <div class="flex flex-col sm:flex-row gap-3 pt-4">
+              <button
+                type="button"
+                @click="resetForm"
+                class="flex-1 bg-white hover:bg-gray-50 text-gray-700 font-medium px-6 py-3 rounded-xl transition-all text-sm border-2 border-gray-200 hover:border-gray-300 shadow-sm hover:shadow flex items-center justify-center gap-2"
+                :disabled="loadingStep2"
+              >
+                <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
+                  <path fill-rule="evenodd" d="M4 2a1 1 0 011 1v2.101a7.002 7.002 0 0111.601 2.566 1 1 0 11-1.885.666A5.002 5.002 0 005.999 7H9a1 1 0 010 2H4a1 1 0 01-1-1V3a1 1 0 011-1zm.008 9.057a1 1 0 011.276.61A5.002 5.002 0 0014.001 13H11a1 1 0 110-2h5a1 1 0 011 1v5a1 1 0 11-2 0v-2.101a7.002 7.002 0 01-11.601-2.566 1 1 0 01.61-1.276z" clip-rule="evenodd"/>
+                </svg>
+                Tambah Lokasi Lain
+              </button>
+              <button
+                type="submit"
+                :disabled="loadingStep2"
+                class="flex-1 bg-gradient-to-r from-green-500 to-green-600 hover:from-green-600 hover:to-green-700 text-white font-medium px-6 py-3 rounded-xl transition-all text-sm shadow-md hover:shadow-lg transform hover:-translate-y-0.5 flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none"
+              >
+                <svg v-if="loadingStep2" class="animate-spin h-5 w-5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                  <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                  <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                </svg>
+                <svg v-else class="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
+                  <path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"/>
+                </svg>
+                {{ loadingStep2 ? 'Menyimpan...' : 'Simpan ke Database' }}
+              </button>
+            </div>
+          </form>
+        </div>
+      </div>
+
+      <!-- Preview Card -->
+      <div v-if="locationName && step === 1" class="mt-8">
         <h3 class="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-3">Preview</h3>
         <div class="bg-white rounded-2xl border-2 border-gray-100 shadow-sm p-6">
           <div class="flex items-center gap-4">
@@ -155,7 +296,7 @@
             </div>
             <div>
               <p class="text-xs text-gray-500 font-medium mb-1">Nama Lokasi:</p>
-              <h2 class="text-xl font-bold text-gray-900">{{ newLocation.nama }}</h2>
+              <h2 class="text-xl font-bold text-gray-900">{{ locationName }}</h2>
               <p class="text-xs text-gray-500 mt-1">0 Batch Aktif</p>
             </div>
           </div>
@@ -177,27 +318,157 @@
 <script setup>
 import { ref } from 'vue'
 import { useRouter } from 'vue-router'
+import openbravoApi from '@/lib/openbravo'
+import { supabase } from '@/lib/supabase'
 
 const router = useRouter()
 
-// Data lokasi baru
-const newLocation = ref({
-  nama: ''
-})
-
-// Pesan notifikasi
+// State Management
+const step = ref(1)
+const locationName = ref('')
+const openbravoId = ref('')
+const loading = ref(false)
+const loadingStep2 = ref(false)
 const message = ref('')
+const messageStep2 = ref('')
+const isError = ref(false)
+const isErrorStep2 = ref(false)
 
-// Fungsi simpan lokasi
-function saveLocation() {
-  if (!newLocation.value.nama) {
-    message.value = '⚠️ Mohon isi nama lokasi terlebih dahulu.'
+// Step 1: Submit ke OpenBravo
+async function submitToOpenBravo() {
+  if (!locationName.value.trim()) {
+    message.value = 'Mohon isi nama lokasi terlebih dahulu.'
+    isError.value = true
     return
   }
 
-  message.value = '✅ Lokasi berhasil ditambahkan!'
-  setTimeout(() => {
-    router.push('/location')
-  }, 1500)
+  loading.value = true
+  message.value = ''
+  isError.value = false
+
+  try {
+    // Kirim ke OpenBravo API
+    const { data } = await openbravoApi.post(
+      '/org.openbravo.service.json.jsonrest/Locator',
+      {
+        searchKey: locationName.value,
+        _identifier: locationName.value,
+        // Sesuaikan dengan field yang diperlukan OpenBravo
+        // warehouse: 'WAREHOUSE_ID_HERE', // Jika diperlukan
+      }
+    )
+
+    // Ambil ID yang dikembalikan dari OpenBravo
+    const createdId = data?.response?.data?.[0]?.id || data?.id
+
+    if (!createdId) {
+      throw new Error('Gagal mendapatkan ID dari OpenBravo')
+    }
+
+    openbravoId.value = createdId
+    message.value = '✅ Berhasil disimpan ke OpenBravo!'
+    isError.value = false
+
+    // Pindah ke step 2 setelah 1.5 detik
+    setTimeout(() => {
+      step.value = 2
+      message.value = ''
+    }, 1500)
+
+  } catch (err) {
+    console.error('Error submitting to OpenBravo:', err)
+    message.value = `⚠️ Gagal menyimpan ke OpenBravo: ${err.response?.data?.error?.message || err.message}`
+    isError.value = true
+  } finally {
+    loading.value = false
+  }
+}
+
+// Step 2: Submit ke Supabase
+async function submitToSupabase() {
+  loadingStep2.value = true
+  messageStep2.value = ''
+  isErrorStep2.value = false
+
+  try {
+    const { data, error } = await supabase
+      .from('public.gh_location')
+      .insert([
+        {
+          location: locationName.value,
+          id_openbravo: openbravoId.value,
+          batch_id: null // Opsional, sesuaikan dengan kebutuhan
+        }
+      ])
+      .select()
+
+    if (error) {
+      throw error
+    }
+
+    messageStep2.value = '✅ Lokasi berhasil disimpan ke database!'
+    isErrorStep2.value = false
+
+    // Redirect ke halaman location setelah 2 detik
+    setTimeout(() => {
+      router.push('/location')
+    }, 2000)
+
+  } catch (err) {
+    console.error('Error submitting to Supabase:', err)
+    messageStep2.value = `⚠️ Gagal menyimpan ke database: ${err.message}`
+    isErrorStep2.value = true
+  } finally {
+    loadingStep2.value = false
+  }
+}
+
+// Copy ID to Clipboard
+async function copyToClipboard() {
+  try {
+    await navigator.clipboard.writeText(openbravoId.value)
+    messageStep2.value = '✅ ID berhasil disalin!'
+    isErrorStep2.value = false
+    
+    setTimeout(() => {
+      messageStep2.value = ''
+    }, 2000)
+  } catch (err) {
+    console.error('Failed to copy:', err)
+  }
+}
+
+// Reset Form untuk menambah lokasi baru
+function resetForm() {
+  step.value = 1
+  locationName.value = ''
+  openbravoId.value = ''
+  message.value = ''
+  messageStep2.value = ''
+  isError.value = false
+  isErrorStep2.value = false
 }
 </script>
+
+<style scoped>
+.ml-13 {
+  margin-left: 3.25rem;
+}
+
+@media (max-width: 640px) {
+  .ml-13 {
+    margin-left: 0;
+  }
+}
+
+::-webkit-scrollbar {
+  width: 8px;
+}
+::-webkit-scrollbar-thumb {
+  background-color: #0071f3;
+  border-radius: 10px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background-color: #0060d1;
+}
+</style>
