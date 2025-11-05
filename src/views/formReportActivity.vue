@@ -1,38 +1,27 @@
 <script setup>
-import { ref, onMounted, watch, onUnmounted } from "vue";
+import { ref, onMounted, watch, onUnmounted, computed } from "vue";
 import { supabase } from "@/lib/supabase.js";
-// Install: npm install html5-qrcode
 import { Html5Qrcode } from "html5-qrcode";
+
+// Import stores
+import { useLocationStore } from "@/stores/location";
+import { useBatchStore } from "@/stores/batch";
+import { useMaterialStore } from "@/stores/material";
+import { usePotatoActivityStore } from "@/stores/potatoActivity";
+import { useActivityReportStore } from "@/stores/activityReport";
+import { useTypeDamageStore } from "@/stores/typeDamage";
+
+// Initialize stores
+const locationStore = useLocationStore();
+const batchStore = useBatchStore();
+const materialStore = useMaterialStore();
+const potatoActivityStore = usePotatoActivityStore();
+const activityReportStore = useActivityReportStore();
+const typeDamageStore = useTypeDamageStore();
 
 // ======================
 // STATE
 // ======================
-
-onMounted(async () => {
-  console.log("🚀 Memuat data activity dari gh_potato_activity...");
-
-  const { data, error } = await supabase
-    .schema("public")
-    .from("gh_potato_activity")
-    .select("activity_id, activity, CoA_code");
-
-  if (error) {
-    console.error("❌ Gagal memuat activity:", error);
-  } else if (!data || data.length === 0) {
-    console.warn("⚠️ Tidak ada data yang dikembalikan dari tabel gh_potato_activity!");
-  } else {
-    console.log("✅ Data activity berhasil dimuat:", data);
-    potatoActivities.value = data;
-  }
-
-  selectedDate.value = new Date().toISOString().split("T")[0];
-});
-
-onUnmounted(() => {
-  // Cleanup QR scanner saat component unmount
-  stopScanner();
-});
-
 const selectedDate = ref("");
 const selectedLocation = ref("");
 const selectedBatch = ref("");
@@ -48,9 +37,6 @@ const showScanner = ref(false);
 const isScanning = ref(false);
 let html5QrCode = null;
 
-// Data master dari database
-const potatoActivities = ref([]); // dari gh_potato_activity
-
 // Dynamic form
 const formSections = ref([
   {
@@ -62,6 +48,48 @@ const formSections = ref([
   },
 ]);
 
+// Computed properties untuk data dari stores
+const locations = computed(() => locationStore.locations);
+const batches = computed(() => batchStore.batches);
+const materials = computed(() => materialStore.materials);
+const potatoActivities = computed(() => potatoActivityStore.activities);
+
+// Loading states
+const isSubmitting = ref(false);
+
+// ======================
+// LIFECYCLE HOOKS
+// ======================
+onMounted(async () => {
+  console.log("🚀 Memuat data awal...");
+  
+  // Set tanggal hari ini
+  selectedDate.value = new Date().toISOString().split("T")[0];
+  
+  // Load data dari stores
+  try {
+    await Promise.all([
+      locationStore.fetchAll(),
+      batchStore.getBatches(),
+      materialStore.fetchAll(),
+      potatoActivityStore.fetchAll(),
+    ]);
+    
+    console.log("✅ Data berhasil dimuat");
+    console.log("Locations:", locations.value);
+    console.log("Batches:", batches.value);
+    console.log("Materials:", materials.value);
+    console.log("Activities:", potatoActivities.value);
+  } catch (error) {
+    console.error("❌ Gagal memuat data:", error);
+    alert("Gagal memuat data. Silakan refresh halaman.");
+  }
+});
+
+onUnmounted(() => {
+  stopScanner();
+});
+
 // ======================
 // QR SCANNER FUNCTIONS
 // ======================
@@ -69,11 +97,9 @@ const startScanner = async () => {
   showScanner.value = true;
   isScanning.value = true;
 
-  // Tunggu DOM update dengan nextTick
   await new Promise(resolve => setTimeout(resolve, 100));
 
   try {
-    // Cek apakah element sudah ada
     const element = document.getElementById("qr-reader");
     if (!element) {
       console.error("Element qr-reader not found in DOM");
@@ -109,11 +135,18 @@ const onScanSuccess = (decodedText) => {
   try {
     const data = JSON.parse(decodedText);
 
-    // Auto-fill lokasi dan batch
-    selectedLocation.value = data.location;
-    selectedBatch.value = data.batch;
+    // Auto-fill lokasi dan batch berdasarkan ID
+    if (data.location_id) {
+      selectedLocation.value = data.location_id;
+    }
+    if (data.batch_id) {
+      selectedBatch.value = data.batch_id;
+    }
 
-    alert(`✅ QR Code berhasil di-scan!\n📍 Lokasi: ${data.location}\n🏷️ Batch: ${data.batch}`);
+    const locationName = locations.value.find(l => l.location_id == data.location_id)?.location || data.location;
+    const batchName = batches.value.find(b => b.batch_id == data.batch_id)?.batch_name || data.batch;
+
+    alert(`✅ QR Code berhasil di-scan!\n📍 Lokasi: ${locationName}\n🏷️ Batch: ${batchName}`);
 
     stopScanner();
   } catch (err) {
@@ -123,8 +156,7 @@ const onScanSuccess = (decodedText) => {
 };
 
 const onScanError = (errorMessage) => {
-  // Jangan log setiap error karena akan spam console
-  // console.log("Scan error:", errorMessage);
+  // Tidak log setiap error untuk menghindari spam
 };
 
 const stopScanner = () => {
@@ -150,7 +182,7 @@ const stopScanner = () => {
 };
 
 // ======================
-// HANDLER
+// FORM HANDLERS
 // ======================
 function addFormSection() {
   formSections.value.push({
@@ -178,6 +210,10 @@ function removeMaterialRow(sectionIndex, matIndex) {
   }
 }
 
+function addWorkerRow(i) {
+  formSections.value[i].workers.push({ qty: "" });
+}
+
 function removeWorkerRow(sectionIndex, workerIndex) {
   if (formSections.value[sectionIndex].workers.length > 1) {
     formSections.value[sectionIndex].workers.splice(workerIndex, 1);
@@ -185,14 +221,14 @@ function removeWorkerRow(sectionIndex, workerIndex) {
 }
 
 // ======================
-// WATCHER — otomatis ubah CoA saat pilih Activity
+// WATCHER - Auto-fill CoA
 // ======================
 watch(
   formSections,
   (sections) => {
     sections.forEach((s) => {
       const selected = potatoActivities.value.find(
-        (a) => a.activity_id === s.activity_id
+        (a) => a.activity_id == s.activity_id
       );
       s.coa = selected ? selected.CoA_code : "";
     });
@@ -201,7 +237,7 @@ watch(
 );
 
 // ======================
-// SUBMIT KE DATABASE
+// SUBMIT TO DATABASE
 // ======================
 const submitActivityReport = async () => {
   if (!selectedBatch.value || !selectedLocation.value) {
@@ -209,74 +245,168 @@ const submitActivityReport = async () => {
     return;
   }
 
+  // Validasi form sections
+  const hasEmptyActivity = formSections.value.some(s => !s.activity_id);
+  if (hasEmptyActivity) {
+    alert("⚠️ Harap pilih aktivitas untuk setiap form!");
+    return;
+  }
+
+  isSubmitting.value = true;
+
   try {
-    // ======================
-    // 1️⃣ Simpan data kerusakan ke gh_type_damage
-    // ======================
+    console.log("📤 Memulai submit data...");
+
+    // 1️⃣ Simpan type damage
     const typeDamageData = [
-      { type_damage: "Kuning", qty: parseInt(typeDamage.value.kuning) || 0 },
-      { type_damage: "Kutilang", qty: parseInt(typeDamage.value.kutilang) || 0 },
-      { type_damage: "Busuk", qty: parseInt(typeDamage.value.busuk) || 0 },
+      { 
+        type_damage: "Kuning", 
+        qty: parseInt(typeDamage.value.kuning) || 0,
+        batch_id: parseInt(selectedBatch.value)
+      },
+      { 
+        type_damage: "Kutilang", 
+        qty: parseInt(typeDamage.value.kutilang) || 0,
+        batch_id: parseInt(selectedBatch.value)
+      },
+      { 
+        type_damage: "Busuk", 
+        qty: parseInt(typeDamage.value.busuk) || 0,
+        batch_id: parseInt(selectedBatch.value)
+      },
     ];
 
-    const { data: insertedDamage, error: damageError } = await supabase
-      .from("gh_type_damage")
-      .insert(typeDamageData)
-      .select("typedamage_id");
+    console.log("Saving type damage:", typeDamageData);
 
-    if (damageError) {
-      console.error("❌ Gagal simpan kerusakan:", damageError);
-      alert("Terjadi kesalahan saat menyimpan kerusakan tanaman!");
-      return;
+    const damageResults = [];
+    for (const damage of typeDamageData) {
+      const { data, error } = await typeDamageStore.create(damage);
+      if (error) {
+        console.error("Error saving damage:", error);
+        throw new Error(`Gagal menyimpan data kerusakan: ${error.message}`);
+      }
+      if (data && data.length > 0) {
+        damageResults.push(data[0]);
+      }
     }
 
-    // Ambil ID terakhir dari hasil insert (gunakan satu untuk relasi activity_report)
-    const lastDamageId =
-      insertedDamage && insertedDamage.length > 0
-        ? insertedDamage[insertedDamage.length - 1].typedamage_id
-        : null;
+    const lastDamageId = damageResults.length > 0 
+      ? damageResults[damageResults.length - 1].typedamage_id 
+      : null;
 
-    // ======================
-    // 2️⃣ Simpan activity report ke gh_activity_report
-    // ======================
+    console.log("✅ Type damage saved. Last ID:", lastDamageId);
+
+    // 2️⃣ Simpan activity reports
+    let successCount = 0;
+    
     for (const section of formSections.value) {
-      for (const mat of section.materials) {
-        const manpowerTotal = section.workers.reduce(
-          (a, w) => a + (parseInt(w.qty) || 0),
-          0
-        );
+      const manpowerTotal = section.workers.reduce(
+        (a, w) => a + (parseInt(w.qty) || 0),
+        0
+      );
 
-        const { error } = await supabase.from("gh_activity_report").insert([
-          {
+      // Jika tidak ada material, tetap simpan dengan material_id null
+      if (section.materials.length === 0 || !section.materials[0].material_id) {
+        const payload = {
+          location: selectedLocation.value,
+          batch_id: parseInt(selectedBatch.value),
+          activity_id: parseInt(section.activity_id),
+          material_id: null,
+          qty: 0,
+          UoM: null,
+          manpower: manpowerTotal,
+          CoA: section.coa ? parseFloat(section.coa) : null,
+          typedamage_id: lastDamageId,
+          report_date: selectedDate.value,
+        };
+
+        console.log("Saving activity report (no material):", payload);
+
+        const { data, error } = await activityReportStore.create(payload);
+        if (error) {
+          console.error("Error saving report:", error);
+          throw new Error(`Gagal menyimpan laporan aktivitas: ${error.message}`);
+        }
+        successCount++;
+      } else {
+        // Simpan untuk setiap material
+        for (const mat of section.materials) {
+          if (!mat.material_id) continue;
+
+          const payload = {
             location: selectedLocation.value,
             batch_id: parseInt(selectedBatch.value),
             activity_id: parseInt(section.activity_id),
-            material_id: mat.material_id
-              ? parseInt(mat.material_id)
-              : null,
+            material_id: parseInt(mat.material_id),
             qty: parseFloat(mat.qty) || 0,
-            UoM: mat.unit,
+            UoM: mat.unit || null,
             manpower: manpowerTotal,
             CoA: section.coa ? parseFloat(section.coa) : null,
             typedamage_id: lastDamageId,
             report_date: selectedDate.value,
-          },
-        ]);
+          };
 
-        if (error) {
-          console.error("❌ Gagal insert data:", error);
-          alert("Terjadi kesalahan saat menyimpan data: " + error.message);
-          return;
+          console.log("Saving activity report:", payload);
+
+          const { data, error } = await activityReportStore.create(payload);
+          if (error) {
+            console.error("Error saving report:", error);
+            throw new Error(`Gagal menyimpan laporan aktivitas: ${error.message}`);
+          }
+          successCount++;
         }
       }
     }
 
-    alert("✅ Data berhasil disimpan ke database!");
+    console.log(`✅ ${successCount} activity reports saved successfully`);
+
+    alert(`✅ Data berhasil disimpan!\n\n📊 Total: ${successCount} laporan aktivitas\n🌱 Kerusakan tanaman tercatat`);
+
+    // Reset form
+    resetForm();
+
   } catch (err) {
-    console.error("Unexpected error:", err);
-    alert("Terjadi kesalahan tak terduga.");
+    console.error("❌ Error:", err);
+    alert(`❌ Terjadi kesalahan:\n${err.message}`);
+  } finally {
+    isSubmitting.value = false;
   }
 };
+
+// ======================
+// RESET FORM
+// ======================
+function resetForm() {
+  selectedLocation.value = "";
+  selectedBatch.value = "";
+  typeDamage.value = {
+    kuning: 0,
+    kutilang: 0,
+    busuk: 0,
+  };
+  formSections.value = [
+    {
+      id: Date.now(),
+      activity_id: "",
+      coa: "",
+      materials: [{ material_id: "", qty: "", unit: "" }],
+      workers: [{ qty: "" }],
+    },
+  ];
+  selectedDate.value = new Date().toISOString().split("T")[0];
+}
+
+// Helper untuk mendapatkan nama lokasi
+function getLocationName(locationId) {
+  const location = locations.value.find(l => l.location_id == locationId);
+  return location ? location.location : "";
+}
+
+// Helper untuk mendapatkan nama batch
+function getBatchName(batchId) {
+  const batch = batches.value.find(b => b.batch_id == batchId);
+  return batch ? batch.batch_name : "";
+}
 </script>
 
 <template>
@@ -352,9 +482,13 @@ const submitActivityReport = async () => {
                 class="px-4 py-3 border-2 border-gray-200 rounded-xl bg-white text-gray-700 font-medium focus:outline-none focus:border-[#0071f3] focus:ring-2 focus:ring-[#0071f3]/20 transition appearance-none cursor-pointer"
               >
                 <option value="" disabled>Pilih Lokasi</option>
-                <option>Kebun 1</option>
-                <option>Kebun 2</option>
-                <option>Kebun 3</option>
+                <option 
+                  v-for="loc in locations" 
+                  :key="loc.location_id" 
+                  :value="loc.location_id"
+                >
+                  {{ loc.location }}
+                </option>
               </select>
             </div>
 
@@ -369,9 +503,13 @@ const submitActivityReport = async () => {
                 class="px-4 py-3 border-2 border-gray-200 rounded-xl bg-white text-gray-700 font-medium focus:outline-none focus:border-[#0071f3] focus:ring-2 focus:ring-[#0071f3]/20 transition appearance-none cursor-pointer"
               >
                 <option value="" disabled>Pilih Batch</option>
-                <option>Batch Planlet Kentang A</option>
-                <option>Batch Planlet Kentang B</option>
-                <option>Batch Planlet Stek Kentang</option>
+                <option 
+                  v-for="batch in batches" 
+                  :key="batch.batch_id" 
+                  :value="batch.batch_id"
+                >
+                  {{ batch.batch_name }}
+                </option>
               </select>
             </div>
           </div>
@@ -382,7 +520,7 @@ const submitActivityReport = async () => {
               <svg class="w-4 h-4" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" fill="currentColor">
                 <path d="M256 512A256 256 0 1 0 256 0a256 256 0 1 0 0 512zM369 209L241 337c-9.4 9.4-24.6 9.4-33.9 0l-64-64c-9.4-9.4-9.4-24.6 0-33.9s24.6-9.4 33.9 0l47 47L335 175c9.4-9.4 24.6-9.4 33.9 0s9.4 24.6 0 33.9z"/>
               </svg>
-              Lokasi & Batch telah terisi
+              Lokasi: {{ getLocationName(selectedLocation) }} | Batch: {{ getBatchName(selectedBatch) }}
             </p>
           </div>
         </div>
@@ -514,9 +652,13 @@ const submitActivityReport = async () => {
                       class="px-4 py-2.5 border-2 border-gray-200 rounded-lg bg-white text-gray-700 text-sm font-medium focus:outline-none focus:border-[#0071f3] focus:ring-2 focus:ring-[#0071f3]/20 transition appearance-none cursor-pointer"
                     >
                       <option value="" disabled>Pilih Material</option>
-                      <option>Pestisida selektif</option>
-                      <option>Nutrisi NPK cair</option>
-                      <option>Kalium nitrat (KNO₃)</option>
+                      <option
+                        v-for="mat in materials"
+                        :key="mat.material_id"
+                        :value="mat.material_id"
+                      >
+                        {{ mat.material_name || mat.name || 'Material' }}
+                      </option>
                     </select>
                   </div>
 
@@ -572,7 +714,7 @@ const submitActivityReport = async () => {
                   :key="workerIndex"
                   class="flex gap-3 items-end bg-white rounded-lg p-4 border border-gray-200"
                 >
-                  <div class="w-full md:w-32 flex flex-col">
+                  <div class="flex-1 flex flex-col">
                     <label class="text-xs font-semibold text-gray-600 mb-2">Jumlah Pekerja</label>
                     <input
                       type="number"
@@ -591,6 +733,13 @@ const submitActivityReport = async () => {
                   </button>
                 </div>
               </div>
+
+              <button
+                @click="addWorkerRow(index)"
+                class="w-full mt-3 bg-gradient-to-r from-[#0071f3] to-[#0060d1] hover:from-[#0060d1] hover:to-[#0050b1] text-white font-semibold px-4 py-2.5 rounded-lg transition shadow-md hover:shadow-lg text-sm"
+              >
+                + Tambah Pekerja
+              </button>
             </div>
           </div>
         </div>
@@ -613,9 +762,12 @@ const submitActivityReport = async () => {
       <div class="flex justify-center mb-8">
         <button
           @click.prevent="submitActivityReport"
+          :disabled="isSubmitting"
+          :class="{ 'opacity-50 cursor-not-allowed': isSubmitting }"
           class="bg-gradient-to-r from-[#0071f3] to-[#0060d1] hover:from-[#0060d1] hover:to-[#0050b1] text-white font-bold px-12 py-4 rounded-xl shadow-lg hover:shadow-xl transition-all transform hover:-translate-y-0.5 text-lg"
         >
-          📤 Submit Report
+          <span v-if="isSubmitting">⏳ Menyimpan...</span>
+          <span v-else>📤 Submit Report</span>
         </button>
       </div>
 
@@ -712,5 +864,18 @@ select {
 #qr-reader__dashboard,
 #qr-reader__dashboard_section {
   display: none !important;
+}
+
+@keyframes pulse {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.5;
+  }
+}
+
+.animate-pulse {
+  animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
 }
 </style>
