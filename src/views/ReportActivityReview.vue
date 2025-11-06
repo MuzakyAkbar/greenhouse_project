@@ -43,6 +43,7 @@ onMounted(async () => {
   try {
     loading.value = true
     
+    // Fetch reference data
     await Promise.all([
       batchStore.getBatches(),
       locationStore.fetchAll(),
@@ -51,28 +52,43 @@ onMounted(async () => {
       typeDamageStore.fetchAll()
     ])
 
+    // Fetch report data
     const { data, error: fetchError } = await activityReportStore.fetchById(reportId.value)
     
     if (fetchError) {
       throw new Error(fetchError.message)
     }
 
+    if (!data) {
+      throw new Error('Laporan tidak ditemukan')
+    }
+
     reportData.value = data
     
-    // Check if report is already reviewed
+    console.log('Report loaded:', {
+      id: data.report_id,
+      status: data.report_status
+    })
+    
+    // Check if report status is onReview
     if (data.report_status === 'approved') {
-      alert('Laporan ini sudah disetujui')
+      alert('⚠️ Laporan ini sudah disetujui dan tidak dapat direview lagi')
       router.push('/reportActivityList')
       return
     } else if (data.report_status === 'needRevision') {
-      alert('Laporan ini sedang dalam revisi')
+      alert('⚠️ Laporan ini sedang dalam proses revisi oleh staff')
+      router.push('/reportActivityList')
+      return
+    } else if (data.report_status !== 'onReview') {
+      alert('⚠️ Status laporan tidak valid untuk direview')
       router.push('/reportActivityList')
       return
     }
   } catch (err) {
     console.error('Error loading data:', err)
     error.value = err.message
-    alert('Gagal memuat data: ' + err.message)
+    alert('❌ Gagal memuat data: ' + err.message)
+    router.push('/reportActivityList')
   } finally {
     loading.value = false
   }
@@ -109,27 +125,58 @@ const getTypeDamageName = (typeDamageId) => {
 const formatDate = (dateStr) => {
   if (!dateStr) return '-'
   const date = new Date(dateStr)
-  return date.toLocaleDateString('id-ID', { day: '2-digit', month: '2-digit', year: 'numeric' })
+  return date.toLocaleDateString('id-ID', { 
+    day: '2-digit', 
+    month: 'long', 
+    year: 'numeric' 
+  })
+}
+
+const formatDateTime = (dateStr) => {
+  if (!dateStr) return '-'
+  const date = new Date(dateStr)
+  return date.toLocaleString('id-ID', { 
+    day: '2-digit', 
+    month: 'long', 
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit'
+  })
 }
 
 const handleApprove = async () => {
-  if (!confirm('Apakah Anda yakin ingin menyetujui laporan ini?')) return
+  if (!confirm('✅ Apakah Anda yakin ingin menyetujui laporan ini?\n\nLaporan yang sudah disetujui tidak dapat diubah lagi.')) return
 
   try {
     processing.value = true
     
+    console.log('Approving report:', reportId.value)
+    
     // Update status to approved
-    const { error: updateError } = await activityReportStore.update(reportId.value, {
+    const updatePayload = {
       report_status: 'approved',
-      approved_by: authStore.user?.username || 'Admin',
-      approved_at: new Date().toISOString()
-    })
+      approved_by: authStore.user?.username || authStore.user?.email || 'Admin',
+      approved_at: new Date().toISOString(),
+      // Clear any previous revision data
+      revision_notes: null,
+      revision_requested_by: null,
+      revision_requested_at: null
+    }
+    
+    const { data, error: updateError } = await activityReportStore.update(
+      reportId.value, 
+      updatePayload
+    )
 
     if (updateError) {
       throw new Error(updateError.message)
     }
 
+    console.log('Report approved successfully:', data)
+    
     alert('✅ Laporan berhasil disetujui!')
+    
+    // Navigate back to list
     router.push('/reportActivityList')
   } catch (err) {
     console.error('Error approving report:', err)
@@ -140,6 +187,7 @@ const handleApprove = async () => {
 }
 
 const openRevisionModal = () => {
+  revisionNotes.value = ''
   showRevisionModal.value = true
 }
 
@@ -149,29 +197,50 @@ const closeRevisionModal = () => {
 }
 
 const handleRevision = async () => {
-  if (!revisionNotes.value.trim()) {
-    alert('Mohon masukkan catatan revisi')
+  const notes = revisionNotes.value.trim()
+  
+  if (!notes) {
+    alert('⚠️ Mohon masukkan catatan revisi')
     return
   }
 
-  if (!confirm('Kirim permintaan revisi?')) return
+  if (notes.length < 10) {
+    alert('⚠️ Catatan revisi terlalu singkat. Mohon berikan penjelasan yang lebih detail (minimal 10 karakter)')
+    return
+  }
+
+  if (!confirm('🔄 Kirim permintaan revisi?\n\nLaporan akan dikembalikan ke staff untuk diperbaiki.')) return
 
   try {
     processing.value = true
     
+    console.log('Requesting revision for report:', reportId.value)
+    
     // Update status to needRevision with notes
-    const { error: updateError } = await activityReportStore.update(reportId.value, {
+    const updatePayload = {
       report_status: 'needRevision',
-      revision_notes: revisionNotes.value.trim(),
-      revision_requested_by: authStore.user?.username || 'Admin',
-      revision_requested_at: new Date().toISOString()
-    })
+      revision_notes: notes,
+      revision_requested_by: authStore.user?.username || authStore.user?.email || 'Admin',
+      revision_requested_at: new Date().toISOString(),
+      // Clear approval data if any
+      approved_by: null,
+      approved_at: null
+    }
+    
+    const { data, error: updateError } = await activityReportStore.update(
+      reportId.value,
+      updatePayload
+    )
 
     if (updateError) {
       throw new Error(updateError.message)
     }
 
-    alert('✅ Permintaan revisi berhasil dikirim!')
+    console.log('Revision requested successfully:', data)
+    
+    alert('✅ Permintaan revisi berhasil dikirim!\n\nStaff akan mendapatkan notifikasi untuk memperbaiki laporan.')
+    
+    // Navigate back to list
     router.push('/reportActivityList')
   } catch (err) {
     console.error('Error requesting revision:', err)
@@ -181,6 +250,31 @@ const handleRevision = async () => {
     closeRevisionModal()
   }
 }
+
+// Computed properties
+const currentStatus = computed(() => {
+  if (!reportData.value) return null
+  return reportData.value.report_status
+})
+
+const statusBadge = computed(() => {
+  const status = currentStatus.value
+  const badges = {
+    'onReview': {
+      text: '⏳ Waiting Review',
+      class: 'bg-yellow-100 text-yellow-800 border-yellow-200'
+    },
+    'needRevision': {
+      text: '🔄 Need Revision',
+      class: 'bg-red-100 text-red-800 border-red-200'
+    },
+    'approved': {
+      text: '✅ Approved',
+      class: 'bg-green-100 text-green-800 border-green-200'
+    }
+  }
+  return badges[status] || badges['onReview']
+})
 </script>
 
 <template>
@@ -197,14 +291,23 @@ const handleRevision = async () => {
               <path d="M9.4 233.4c-12.5 12.5-12.5 32.8 0 45.3l160 160c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L109.2 288 416 288c17.7 0 32-14.3 32-32s-14.3-32-32-32l-306.7 0L214.6 118.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0l-160 160z"/>
             </svg>
           </button>
-          <div>
+          <div class="flex-1">
             <h1 class="text-2xl font-bold text-gray-900 flex items-center gap-3">
               <span class="w-10 h-10 bg-gradient-to-br from-yellow-400 to-yellow-500 rounded-lg flex items-center justify-center text-white text-lg">
                 ⏳
               </span>
               Review Activity Report
             </h1>
-            <p class="text-sm text-gray-500 mt-1 ml-13">Tinjau & Approve Laporan Aktivitas</p>
+            <p class="text-sm text-gray-500 mt-1">Tinjau & Approve Laporan Aktivitas</p>
+          </div>
+          <!-- Status Badge in Header -->
+          <div v-if="reportData && !loading">
+            <span 
+              :class="statusBadge.class"
+              class="px-4 py-2 rounded-lg font-bold text-sm border-2"
+            >
+              {{ statusBadge.text }}
+            </span>
           </div>
         </div>
       </div>
@@ -217,7 +320,7 @@ const handleRevision = async () => {
       <div v-if="loading" class="flex items-center justify-center py-20">
         <div class="text-center">
           <div class="inline-block w-12 h-12 border-4 border-[#0071f3] border-t-transparent rounded-full animate-spin"></div>
-          <p class="mt-4 text-gray-600 font-semibold">Memuat data...</p>
+          <p class="mt-4 text-gray-600 font-semibold">Memuat data laporan...</p>
         </div>
       </div>
 
@@ -234,6 +337,22 @@ const handleRevision = async () => {
 
       <!-- Content -->
       <template v-else-if="reportData">
+        <!-- Report Info Banner -->
+        <div class="mb-6">
+          <div class="bg-gradient-to-r from-blue-50 to-indigo-50 border-2 border-blue-200 rounded-2xl p-5">
+            <div class="flex items-center justify-between flex-wrap gap-4">
+              <div>
+                <p class="text-sm text-gray-600 font-semibold mb-1">Report ID</p>
+                <p class="text-2xl font-bold text-gray-900">#{{ reportData.report_id }}</p>
+              </div>
+              <div class="text-right">
+                <p class="text-sm text-gray-600 font-semibold mb-1">Submitted</p>
+                <p class="text-sm text-gray-900">{{ formatDateTime(reportData.created_at || reportData.report_date) }}</p>
+              </div>
+            </div>
+          </div>
+        </div>
+
         <!-- Info Section -->
         <div class="mb-8">
           <h2 class="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-3">Informasi Laporan</h2>
@@ -375,24 +494,33 @@ const handleRevision = async () => {
               <button
                 @click="handleApprove"
                 :disabled="processing"
-                class="flex-1 bg-gradient-to-r from-green-500 to-green-600 hover:from-green-600 hover:to-green-700 text-white font-semibold py-4 rounded-xl transition-all shadow-md hover:shadow-lg transform hover:-translate-y-0.5 flex items-center justify-center gap-2 text-lg disabled:opacity-50 disabled:cursor-not-allowed"
+                class="flex-1 bg-gradient-to-r from-green-500 to-green-600 hover:from-green-600 hover:to-green-700 text-white font-semibold py-4 rounded-xl transition-all shadow-md hover:shadow-lg transform hover:-translate-y-0.5 flex items-center justify-center gap-2 text-lg disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none"
               >
                 <svg class="w-5 h-5" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512" fill="currentColor">
                   <path d="M438.6 105.4c12.5 12.5 12.5 32.8 0 45.3l-256 256c-12.5 12.5-32.8 12.5-45.3 0l-128-128c-12.5-12.5-12.5-32.8 0-45.3s32.8-12.5 45.3 0L160 338.7 393.4 105.4c12.5-12.5 32.8-12.5 45.3 0z"/>
                 </svg>
-                {{ processing ? 'Processing...' : 'Approve' }}
+                {{ processing ? 'Processing...' : '✅ Approve Report' }}
               </button>
 
               <button
                 @click="openRevisionModal"
                 :disabled="processing"
-                class="flex-1 bg-gradient-to-r from-red-500 to-red-600 hover:from-red-600 hover:to-red-700 text-white font-semibold py-4 rounded-xl transition-all shadow-md hover:shadow-lg transform hover:-translate-y-0.5 flex items-center justify-center gap-2 text-lg disabled:opacity-50 disabled:cursor-not-allowed"
+                class="flex-1 bg-gradient-to-r from-red-500 to-red-600 hover:from-red-600 hover:to-red-700 text-white font-semibold py-4 rounded-xl transition-all shadow-md hover:shadow-lg transform hover:-translate-y-0.5 flex items-center justify-center gap-2 text-lg disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none"
               >
                 <svg class="w-5 h-5" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" fill="currentColor">
                   <path d="M142.9 142.9c-17.5 17.5-30.1 38-37.8 59.8c-5.9 16.7-24.2 25.4-40.8 19.5s-25.4-24.2-19.5-40.8C55.6 150.7 73.2 122 97.6 97.6c87.2-87.2 228.3-87.5 315.8-1L455 55c6.9-6.9 17.2-8.9 26.2-5.2s14.8 12.5 14.8 22.2l0 128c0 13.3-10.7 24-24 24l-8.4 0c0 0 0 0 0 0L344 224c-9.7 0-18.5-5.8-22.2-14.8s-1.7-19.3 5.2-26.2l41.1-41.1c-62.6-61.5-163.1-61.2-225.3 1zM16 312c0-13.3 10.7-24 24-24l7.6 0 .7 0L168 288c9.7 0 18.5 5.8 22.2 14.8s1.7 19.3-5.2 26.2l-41.1 41.1c62.6 61.5 163.1 61.2 225.3-1c17.5-17.5 30.1-38 37.8-59.8c5.9-16.7 24.2-25.4 40.8-19.5s25.4 24.2 19.5 40.8c-10.8 30.6-28.4 59.3-52.9 83.8c-87.2 87.2-228.3 87.5-315.8 1L57 457c-6.9 6.9-17.2 8.9-26.2 5.2S16 449.7 16 440l0-119.6 0-.7 0-7.6z"/>
                 </svg>
-                Request Revision
+                🔄 Request Revision
               </button>
+            </div>
+            
+            <!-- Guidance Text -->
+            <div class="mt-4 pt-4 border-t border-gray-200">
+              <p class="text-sm text-gray-600 text-center">
+                <span class="font-semibold">💡 Tip:</span> Pastikan semua data sudah benar sebelum menyetujui. 
+                Jika ada yang perlu diperbaiki, gunakan <span class="font-semibold text-red-600">"Request Revision"</span> 
+                dengan catatan yang jelas.
+              </p>
             </div>
           </div>
         </div>
@@ -410,13 +538,17 @@ const handleRevision = async () => {
 
     <!-- Revision Modal -->
     <div v-if="showRevisionModal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-      <div class="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl">
+      <div class="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl animate-fade-in">
         <div class="flex items-center justify-between mb-4">
           <h3 class="text-xl font-bold text-gray-900 flex items-center gap-2">
             <span class="text-2xl">🔄</span>
             Request Revision
           </h3>
-          <button @click="closeRevisionModal" class="text-gray-400 hover:text-gray-600 transition">
+          <button 
+            @click="closeRevisionModal" 
+            class="text-gray-400 hover:text-gray-600 transition"
+            :disabled="processing"
+          >
             <svg class="w-6 h-6" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 384 512" fill="currentColor">
               <path d="M342.6 150.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0L192 210.7 86.6 105.4c-12.5-12.5-32.8-12.5-45.3 0s-12.5 32.8 0 45.3L146.7 256 41.4 361.4c-12.5 12.5-12.5 32.8 0 45.3s32.8 12.5 45.3 0L192 301.3 297.4 406.6c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L237.3 256 342.6 150.6z"/>
             </svg>
@@ -429,25 +561,40 @@ const handleRevision = async () => {
           </label>
           <textarea
             v-model="revisionNotes"
-            rows="4"
-            placeholder="Tuliskan alasan dan detail yang perlu diperbaiki..."
+            rows="5"
+            placeholder="Tuliskan dengan jelas apa yang perlu diperbaiki...&#10;&#10;Contoh:&#10;- Material yang digunakan belum sesuai&#10;- Jumlah qty perlu diperbaiki&#10;- Tanggal laporan salah"
             class="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:border-[#0071f3] focus:outline-none transition resize-none"
+            :disabled="processing"
           ></textarea>
+          <p class="text-xs text-gray-500 mt-2">
+            Minimal 10 karakter. Berikan penjelasan yang detail agar staff dapat memperbaiki dengan tepat.
+          </p>
+          <div class="mt-3 flex items-center gap-2 text-sm">
+            <span class="font-semibold" :class="revisionNotes.trim().length < 10 ? 'text-red-600' : 'text-green-600'">
+              {{ revisionNotes.trim().length }} / 10
+            </span>
+            <span class="text-gray-500">karakter</span>
+          </div>
         </div>
 
         <div class="flex gap-3">
           <button
             @click="closeRevisionModal"
-            class="flex-1 px-4 py-3 bg-gray-100 hover:bg-gray-200 text-gray-700 font-semibold rounded-xl transition"
+            :disabled="processing"
+            class="flex-1 px-4 py-3 bg-gray-100 hover:bg-gray-200 text-gray-700 font-semibold rounded-xl transition disabled:opacity-50 disabled:cursor-not-allowed"
           >
             Batal
           </button>
           <button
             @click="handleRevision"
-            :disabled="!revisionNotes.trim() || processing"
-            class="flex-1 px-4 py-3 bg-gradient-to-r from-red-500 to-red-600 hover:from-red-600 hover:to-red-700 text-white font-semibold rounded-xl transition disabled:opacity-50 disabled:cursor-not-allowed"
+            :disabled="!revisionNotes.trim() || revisionNotes.trim().length < 10 || processing"
+            class="flex-1 px-4 py-3 bg-gradient-to-r from-red-500 to-red-600 hover:from-red-600 hover:to-red-700 text-white font-semibold rounded-xl transition disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
           >
-            {{ processing ? 'Mengirim...' : 'Kirim Revisi' }}
+            <svg v-if="processing" class="w-5 h-5 animate-spin" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+              <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+              <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+            </svg>
+            <span>{{ processing ? 'Mengirim...' : 'Kirim Revisi' }}</span>
           </button>
         </div>
       </div>
@@ -456,8 +603,19 @@ const handleRevision = async () => {
 </template>
 
 <style scoped>
-.ml-13 {
-  margin-left: 3.25rem;
+@keyframes fade-in {
+  from {
+    opacity: 0;
+    transform: scale(0.95);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.animate-fade-in {
+  animation: fade-in 0.2s ease-out;
 }
 
 @media (max-width: 640px) {
