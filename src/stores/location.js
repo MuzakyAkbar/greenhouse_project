@@ -15,7 +15,7 @@ export const useLocationStore = defineStore('location', () => {
     console.log('🔍 Fetching locations...')
     
     const { data, error: err } = await supabase
-      .from('gh_location') // ✅ Nama tabel benar
+      .from('gh_location') 
       .select('*')
       .order('location_id', { ascending: true })
 

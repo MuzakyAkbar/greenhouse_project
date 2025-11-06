@@ -11,8 +11,9 @@ export const useTypeDamageStore = defineStore('typeDamage', () => {
   async function fetchAll() {
     loading.value = true
     error.value = null
+    // ✅ FIXED: Hapus 'public.'
     const { data, error: err } = await supabase
-      .from('public.gh_type_damage')
+      .from('gh_type_damage')
       .select('*')
       .order('typedamage_id', { ascending: true })
 
@@ -25,7 +26,7 @@ export const useTypeDamageStore = defineStore('typeDamage', () => {
 
   async function fetchById(id) {
     const { data, error: err } = await supabase
-      .from('public.gh_type_damage')
+      .from('gh_type_damage')
       .select('*')
       .eq('typedamage_id', id)
       .single()
@@ -34,7 +35,7 @@ export const useTypeDamageStore = defineStore('typeDamage', () => {
 
   async function create(payload) {
     const { data, error: err } = await supabase
-      .from('public.gh_type_damage')
+      .from('gh_type_damage')
       .insert([payload])
       .select()
     if (!err) await fetchAll()
@@ -43,7 +44,7 @@ export const useTypeDamageStore = defineStore('typeDamage', () => {
 
   async function update(id, payload) {
     const { data, error: err } = await supabase
-      .from('public.gh_type_damage')
+      .from('gh_type_damage')
       .update(payload)
       .eq('typedamage_id', id)
       .select()
@@ -53,7 +54,7 @@ export const useTypeDamageStore = defineStore('typeDamage', () => {
 
   async function remove(id) {
     const { data, error: err } = await supabase
-      .from('public.gh_type_damage')
+      .from('gh_type_damage')
       .delete()
       .eq('typedamage_id', id)
     if (!err) await fetchAll()

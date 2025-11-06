@@ -38,15 +38,22 @@ const router = createRouter({
       meta: { requiresAuth: true },
     },
     {
-      path: "/formReportActivity",
-      name: "formReportActivity",
-      component: () => import("../views/formReportActivity.vue"),
-      meta: { requiresAuth: true },
-    },
-    {
       path: "/reportActivityView",
       name: "reportActivityView",
       component: () => import("../views/ReportActivityView.vue"),
+      meta: { requiresAuth: true },
+    },
+    // 🔹 FIXED: Edit Activity Report - harus ada :id sebagai params
+    {
+      path: "/reportActivityEdit/:id",
+      name: "reportActivityEdit",
+      component: () => import("../views/ReportActivityEdit.vue"),
+      meta: { requiresAuth: true },
+    },
+    {
+      path: "/formReportActivity",
+      name: "formReportActivity",
+      component: () => import("../views/formReportActivity.vue"),
       meta: { requiresAuth: true },
     },
     {
@@ -73,6 +80,13 @@ const router = createRouter({
       path: "/reportProductionView",
       name: "reportProductionView",
       component: () => import("../views/reportProductionView.vue"),
+      meta: { requiresAuth: true },
+    },
+    // 🔹 FIXED: Edit Production Report - harus konsisten pakai params
+    {
+      path: "/reportProductionEdit/:batchId/:date",
+      name: "reportProductionEdit",
+      component: () => import("../views/reportProductionEdit.vue"),
       meta: { requiresAuth: true },
     },
     {

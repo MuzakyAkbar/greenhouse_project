@@ -1,8 +1,7 @@
 // /src/stores/activityReport.js
-// ========================================
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
-import { supabase } from '@/lib/supabase'
+import { supabase } from '../lib/supabase'
 
 export const useActivityReportStore = defineStore('activityReport', () => {
   const reports = ref([])
@@ -12,6 +11,7 @@ export const useActivityReportStore = defineStore('activityReport', () => {
   async function fetchAll(batch_id = null) {
     loading.value = true
     error.value = null
+    // ✅ FIXED: Hapus 'public.' karena sudah ada di schema
     let q = supabase.from('gh_activity_report').select('*')
     if (batch_id) q = q.eq('batch_id', batch_id)
     const { data, error: err } = await q.order('report_id', { ascending: false })

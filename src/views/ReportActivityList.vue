@@ -1,56 +1,224 @@
 <script setup>
 import { RouterLink, useRouter } from 'vue-router'
 import { useAuthStore } from '../stores/auth'
-import { onMounted, ref } from 'vue'
+import { useActivityReportStore } from '../stores/activityReport'
+import { useProductionStore } from '../stores/production'
+import { useSalesStore } from '../stores/sales'
+import { useBatchStore } from '../stores/batch'
+import { useLocationStore } from '../stores/location'
+import { usePotatoActivityStore } from '../stores/potatoActivity'
+import { onMounted, ref, computed } from 'vue'
 
 const authStore = useAuthStore()
+const activityReportStore = useActivityReportStore()
+const productionStore = useProductionStore()
+const salesStore = useSalesStore()
+const batchStore = useBatchStore()
+const locationStore = useLocationStore()
+const potatoActivityStore = usePotatoActivityStore()
 const router = useRouter()
 
 // Toggle state untuk memilih report
-const selectedReport = ref('activity') // 'activity' atau 'production'
+const selectedReport = ref('activity')
+const filterDate = ref('')
+const filterDateProduction = ref('')
 
-onMounted(() => {
+onMounted(async () => {
   if (!authStore.isLoggedIn) {
     router.push('/')
+    return
   }
+  
+  await Promise.all([
+    activityReportStore.fetchAll(),
+    productionStore.fetchAll(),
+    salesStore.fetchAll(),
+    batchStore.getBatches(),
+    locationStore.fetchAll(),
+    potatoActivityStore.fetchAll()
+  ])
 })
 
-// Dummy data untuk Report Activity
-const activityReports = ref([
-  { date: '2025-10-23', location: 'Lokasi A', batch: 'Batch 1', coa: 'CoA 001', activity: 'Pekerjaan A', status: 'Waiting' },
-  { date: '2025-10-23', location: 'Lokasi B', batch: 'Batch 2', coa: 'CoA 002', activity: 'Pekerjaan B', status: 'Approved' },
-  { date: '2025-10-24', location: 'Lokasi C', batch: 'Batch 3', coa: 'CoA 003', activity: 'Pekerjaan C', status: 'Revision' },
-])
+// Helper functions
+const getBatchName = (batchId) => {
+  const batch = batchStore.batches.find(b => b.batch_id === batchId)
+  return batch?.batch_name || 'Unknown'
+}
 
-// Dummy data untuk Report Production & Sales
-const productionSalesList = ref([
-  {
-    date: '2025-10-23',
-    batch: 'Batch 1',
-    status: 'Waiting',
-    production: [
-      { category: 'Planlet G0', owner: 'Petani', quantity: 100 },
-      { category: 'Planlet G1', owner: 'Mitra', quantity: 50 },
-    ],
-    sales: [
-      { category: 'Planlet G0', quantity: 30, unit: 'perkg', price: 20000 },
-      { category: 'Planlet G1', quantity: 20, unit: 'perkg', price: 25000 },
-    ],
-  },
-  {
-    date: '2025-10-24',
-    batch: 'Batch 2',
-    status: 'Approved',
-    production: [
-      { category: 'Planlet G0', owner: 'Petani', quantity: 80 },
-      { category: 'Planlet G1', owner: 'Mitra', quantity: 40 },
-    ],
-    sales: [
-      { category: 'Planlet G0', quantity: 50, unit: 'perkg', price: 20000 },
-      { category: 'Planlet G1', quantity: 10, unit: 'perkg', price: 25000 },
-    ],
-  },
-])
+const getLocationName = (locationId) => {
+  const location = locationStore.locations.find(l => l.location_id === locationId)
+  return location?.location || 'Unknown'
+}
+
+const getActivityName = (activityId) => {
+  const activity = potatoActivityStore.activities.find(a => a.activity_id === activityId)
+  return activity?.activity || 'Unknown'
+}
+
+const getCoACode = (activityId) => {
+  const activity = potatoActivityStore.activities.find(a => a.activity_id === activityId)
+  return activity?.CoA_code ? `CoA ${activity.CoA_code}` : 'N/A'
+}
+
+// 🔥 FIXED: Fungsi untuk mendapatkan route berdasarkan status
+const getReportRoute = (report) => {
+  // Konversi report_id ke string untuk menghindari error regex di router
+  const reportId = String(report.report_id)
+  
+  // Map database status to display status
+  const statusMap = {
+    'onReview': 'Waiting',
+    'needRevision': 'Revision',
+    'approved': 'Approved'
+  }
+  
+  const displayStatus = statusMap[report.raw.report_status] || 'Waiting'
+  
+  const routes = {
+    'Waiting': { name: 'reportActivityReview', query: { id: reportId } },
+    'Approved': { name: 'reportActivityView', query: { id: reportId } },
+    'Revision': { name: 'reportActivityEdit', params: { id: reportId } }
+  }
+  
+  return routes[displayStatus] || { name: 'reportActivityReview', query: { id: reportId } }
+}
+
+// 🔥 Handler untuk navigation dengan error handling
+const handleReportClick = (report) => {
+  try {
+    const route = getReportRoute(report)
+    console.log('Navigating to:', route) // Debug
+    router.push(route)
+  } catch (err) {
+    console.error('Navigation error:', err)
+    alert('Gagal membuka laporan. Silakan coba lagi.')
+  }
+}
+
+// 🔥 FIXED: Fungsi untuk mendapatkan route production
+const getProductionRoute = (item) => {
+  // Konversi ke string untuk menghindari error regex
+  const batchId = String(item.batch_id)
+  const date = String(item.date)
+  
+  const routes = {
+    'Waiting': { name: 'reportProductionReview', query: { batchId, date } },
+    'Approved': { name: 'reportProductionView', query: { batchId, date } },
+    'Revision': { name: 'reportProductionEdit', params: { batchId, date } }
+  }
+  
+  return routes[item.status] || { name: 'reportProductionReview', query: { batchId, date } }
+}
+
+// 🔥 Handler untuk navigation production
+const handleProductionClick = (item) => {
+  try {
+    const route = getProductionRoute(item)
+    console.log('Navigating to production:', route) // Debug
+    router.push(route)
+  } catch (err) {
+    console.error('Navigation error:', err)
+    alert('Gagal membuka laporan produksi. Silakan coba lagi.')
+  }
+}
+
+// Computed untuk format activity reports
+const activityReports = computed(() => {
+  let reports = activityReportStore.reports.map(report => {
+    // Map database status to display status
+    const statusMap = {
+      'onReview': 'Waiting',
+      'needRevision': 'Revision', 
+      'approved': 'Approved'
+    }
+    
+    const displayStatus = statusMap[report.report_status] || 'Waiting'
+    
+    return {
+      report_id: report.report_id,
+      date: report.report_date || 'N/A',
+      location: report.location || 'N/A',
+      batch: getBatchName(report.batch_id),
+      coa: getCoACode(report.activity_id),
+      activity: getActivityName(report.activity_id),
+      status: displayStatus,
+      raw: report
+    }
+  })
+
+  if (filterDate.value) {
+    reports = reports.filter(r => r.date === filterDate.value)
+  }
+
+  return reports
+})
+
+// Group production and sales by date and batch
+const productionSalesList = computed(() => {
+  const groupedMap = new Map()
+
+  productionStore.productions.forEach(prod => {
+    const key = `${prod.date}_${prod.batch_id}`
+    if (!groupedMap.has(key)) {
+      groupedMap.set(key, {
+        date: prod.date || 'N/A',
+        batch: getBatchName(prod.batch_id),
+        batch_id: prod.batch_id,
+        location: getLocationName(prod.location_id),
+        status: 'Waiting', // TODO: Ambil dari database jika ada field status
+        production: [],
+        sales: []
+      })
+    }
+    groupedMap.get(key).production.push({
+      category: prod.category || 'N/A',
+      owner: prod.owner || 'N/A',
+      quantity: prod.qty || 0,
+      raw: prod
+    })
+  })
+
+  salesStore.sales.forEach(sale => {
+    const key = `${sale.date}_${sale.batch_id}`
+    if (!groupedMap.has(key)) {
+      groupedMap.set(key, {
+        date: sale.date || 'N/A',
+        batch: getBatchName(sale.batch_id),
+        batch_id: sale.batch_id,
+        location: getLocationName(sale.location_id),
+        status: 'Waiting',
+        production: [],
+        sales: []
+      })
+    }
+    groupedMap.get(key).sales.push({
+      category: sale.category || 'N/A',
+      quantity: sale.qty || 0,
+      unit: 'perkg',
+      price: sale.price || 0,
+      raw: sale
+    })
+  })
+
+  let result = Array.from(groupedMap.values())
+
+  if (filterDateProduction.value) {
+    result = result.filter(r => r.date === filterDateProduction.value)
+  }
+
+  result.sort((a, b) => new Date(b.date) - new Date(a.date))
+
+  return result
+})
+
+const isLoading = computed(() => {
+  return activityReportStore.loading || 
+         productionStore.loading || 
+         salesStore.loading || 
+         batchStore.loading || 
+         locationStore.loading || 
+         potatoActivityStore.loading
+})
 </script>
 
 <template>
@@ -129,8 +297,16 @@ const productionSalesList = ref([
     <!-- Main Content -->
     <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
       
+      <!-- Loading State -->
+      <div v-if="isLoading" class="flex items-center justify-center py-20">
+        <div class="text-center">
+          <div class="inline-block w-12 h-12 border-4 border-[#0071f3] border-t-transparent rounded-full animate-spin"></div>
+          <p class="mt-4 text-gray-600 font-semibold">Memuat data...</p>
+        </div>
+      </div>
+
       <!-- Report Activity List -->
-      <div v-if="selectedReport === 'activity'">
+      <div v-else-if="selectedReport === 'activity'">
         <!-- Filter & Action Bar -->
         <div class="mb-8">
           <h2 class="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-3">Filter & Actions</h2>
@@ -143,7 +319,11 @@ const productionSalesList = ref([
                   <svg class="w-5 h-5 text-[#0071f3]" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512" fill="currentColor">
                     <path d="M128 0c17.7 0 32 14.3 32 32l0 32 128 0 0-32c0-17.7 14.3-32 32-32s32 14.3 32 32l0 32 48 0c26.5 0 48 21.5 48 48l0 48L0 160l0-48C0 85.5 21.5 64 48 64l48 0 0-32c0-17.7 14.3-32 32-32zM0 192l448 0 0 272c0 26.5-21.5 48-48 48L48 512c-26.5 0-48-21.5-48-48L0 192z"/>
                   </svg>
-                  <input type="date" class="outline-none text-gray-700 bg-transparent font-medium" />
+                  <input 
+                    type="date" 
+                    v-model="filterDate"
+                    class="outline-none text-gray-700 bg-transparent font-medium" 
+                  />
                 </div>
               </div>
 
@@ -166,16 +346,21 @@ const productionSalesList = ref([
           <h2 class="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-3">
             Laporan Aktivitas ({{ activityReports.length }})
           </h2>
-          <div class="grid grid-cols-1 gap-5">
-            <RouterLink 
-              v-for="(report, index) in activityReports" 
-              :key="index"
-              :to="{
-                Waiting: '/reportActivityReview',
-                Approved: '/reportActivityView',
-                Revision: '/formReportActivity'
-              }[report.status]"
-              class="group"
+          
+          <!-- Empty State -->
+          <div v-if="activityReports.length === 0" class="bg-white rounded-2xl border-2 border-gray-100 shadow-sm p-12 text-center">
+            <div class="text-6xl mb-4">📋</div>
+            <p class="text-gray-500 font-semibold">Belum ada laporan aktivitas</p>
+            <p class="text-sm text-gray-400 mt-2">Klik tombol "Tambah Laporan Baru" untuk membuat laporan</p>
+          </div>
+
+          <div v-else class="grid grid-cols-1 gap-5">
+            <!-- 🔥 FIXED: Gunakan @click handler instead of RouterLink -->
+            <div 
+              v-for="report in activityReports" 
+              :key="report.report_id"
+              @click="handleReportClick(report)"
+              class="group cursor-pointer"
             >
               <div 
                 class="bg-white rounded-2xl border-2 border-gray-100 hover:border-[#0071f3] shadow-sm hover:shadow-xl transition-all p-6 transform hover:-translate-y-1"
@@ -187,19 +372,15 @@ const productionSalesList = ref([
                         📋
                       </div>
                       <div>
-                        <p class="font-bold text-gray-900 text-lg">{{ report.activity }}</p>
-                        <p class="text-sm text-gray-500">{{ report.coa }}</p>
+                        <p class="font-bold text-gray-900 text-lg">{{ report.location }}</p>
+                        <p class="text-sm text-gray-500">#{{ report.report_id }}</p>
                       </div>
                     </div>
 
-                    <div class="grid grid-cols-1 sm:grid-cols-3 gap-3 mt-4">
+                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-4">
                       <div class="bg-gray-50 rounded-lg p-3">
                         <p class="text-xs text-gray-500 font-semibold mb-1">Tanggal</p>
                         <p class="text-sm font-bold text-gray-900">{{ report.date }}</p>
-                      </div>
-                      <div class="bg-gray-50 rounded-lg p-3">
-                        <p class="text-xs text-gray-500 font-semibold mb-1">Lokasi</p>
-                        <p class="text-sm font-bold text-gray-900">{{ report.location }}</p>
                       </div>
                       <div class="bg-gray-50 rounded-lg p-3">
                         <p class="text-xs text-gray-500 font-semibold mb-1">Batch</p>
@@ -225,13 +406,13 @@ const productionSalesList = ref([
                   </div>
                 </div>
               </div>
-            </RouterLink>
+            </div>
           </div>
         </div>
       </div>
 
       <!-- Report Production & Sales List -->
-      <div v-if="selectedReport === 'production'">
+      <div v-else-if="selectedReport === 'production'">
         <!-- Filter Bar -->
         <div class="mb-8">
           <h2 class="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-3">Filter</h2>
@@ -242,7 +423,11 @@ const productionSalesList = ref([
                 <svg class="w-5 h-5 text-[#0071f3]" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512" fill="currentColor">
                   <path d="M128 0c17.7 0 32 14.3 32 32l0 32 128 0 0-32c0-17.7 14.3-32 32-32s32 14.3 32 32l0 32 48 0c26.5 0 48 21.5 48 48l0 48L0 160l0-48C0 85.5 21.5 64 48 64l48 0 0-32c0-17.7 14.3-32 32-32zM0 192l448 0 0 272c0 26.5-21.5 48-48 48L48 512c-26.5 0-48-21.5-48-48L0 192z"/>
                 </svg>
-                <input type="date" class="outline-none text-gray-700 bg-transparent font-medium" />
+                <input 
+                  type="date" 
+                  v-model="filterDateProduction"
+                  class="outline-none text-gray-700 bg-transparent font-medium" 
+                />
               </div>
             </div>
           </div>
@@ -253,16 +438,21 @@ const productionSalesList = ref([
           <h2 class="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-3">
             Laporan Produksi & Penjualan ({{ productionSalesList.length }})
           </h2>
-          <div class="grid grid-cols-1 gap-6">
-            <RouterLink 
+
+          <!-- Empty State -->
+          <div v-if="productionSalesList.length === 0" class="bg-white rounded-2xl border-2 border-gray-100 shadow-sm p-12 text-center">
+            <div class="text-6xl mb-4">📊</div>
+            <p class="text-gray-500 font-semibold">Belum ada laporan produksi & penjualan</p>
+            <p class="text-sm text-gray-400 mt-2">Data akan muncul ketika ada produksi atau penjualan</p>
+          </div>
+
+          <div v-else class="grid grid-cols-1 gap-6">
+            <!-- 🔥 FIXED: Gunakan @click handler -->
+            <div 
               v-for="(item, index) in productionSalesList" 
               :key="index"
-              :to="{
-                Waiting: '/reportProductionReview',
-                Approved: '/reportProductionView',
-                Revision: '/reportProductionReview'
-              }[item.status]"
-              class="group"
+              @click="handleProductionClick(item)"
+              class="group cursor-pointer"
             >
               <div class="bg-white rounded-2xl border-2 border-gray-100 hover:border-[#0071f3] shadow-sm hover:shadow-xl transition-all p-6 transform hover:-translate-y-1">
                 <!-- Header -->
@@ -273,7 +463,7 @@ const productionSalesList = ref([
                     </div>
                     <div>
                       <p class="font-bold text-gray-900 text-lg">{{ item.batch }}</p>
-                      <p class="text-sm text-gray-500">{{ item.date }}</p>
+                      <p class="text-sm text-gray-500">{{ item.date }} • {{ item.location }}</p>
                     </div>
                   </div>
                   <div class="flex items-center gap-3">
@@ -301,7 +491,7 @@ const productionSalesList = ref([
                       <span class="text-xl">🏭</span>
                       Produksi
                     </p>
-                    <ul class="space-y-3">
+                    <ul v-if="item.production.length > 0" class="space-y-3">
                       <li v-for="(p, pi) in item.production" :key="pi" class="text-sm bg-white/10 rounded-lg p-3">
                         <div class="flex justify-between items-center">
                           <span>{{ p.category }}</span>
@@ -310,6 +500,7 @@ const productionSalesList = ref([
                         <p class="text-xs opacity-75 mt-1">{{ p.owner }}</p>
                       </li>
                     </ul>
+                    <p v-else class="text-sm opacity-75 text-center py-4">Tidak ada data produksi</p>
                   </div>
 
                   <!-- Penjualan -->
@@ -318,7 +509,7 @@ const productionSalesList = ref([
                       <span class="text-xl">💰</span>
                       Penjualan
                     </p>
-                    <ul class="space-y-3">
+                    <ul v-if="item.sales.length > 0" class="space-y-3">
                       <li v-for="(s, si) in item.sales" :key="si" class="text-sm bg-white/10 rounded-lg p-3">
                         <div class="flex justify-between items-center mb-1">
                           <span>{{ s.category }}</span>
@@ -330,10 +521,11 @@ const productionSalesList = ref([
                         </div>
                       </li>
                     </ul>
+                    <p v-else class="text-sm opacity-75 text-center py-4">Tidak ada data penjualan</p>
                   </div>
                 </div>
               </div>
-            </RouterLink>
+            </div>
           </div>
         </div>
       </div>

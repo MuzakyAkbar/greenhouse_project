@@ -1,7 +1,7 @@
 // /src/stores/production.js
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
-import { supabase } from "../lib/supabase"
+import { supabase } from "@/lib/supabase.js"
 
 export const useProductionStore = defineStore('production', () => {
   const productions = ref([])
@@ -11,7 +11,7 @@ export const useProductionStore = defineStore('production', () => {
   async function fetchAll(batch_id = null) {
     loading.value = true
     error.value = null
-    let q = supabase.from('public.gh_production').select('*')
+    let q = supabase.from('gh_production').select('*')
     if (batch_id) q = q.eq('batch_id', batch_id)
     const { data, error: err } = await q.order('production_id', { ascending: false })
     if (err) error.value = err
@@ -22,7 +22,7 @@ export const useProductionStore = defineStore('production', () => {
 
   async function fetchById(id) {
     const { data, error: err } = await supabase
-      .from('public.gh_production')
+      .from('gh_production')
       .select('*')
       .eq('production_id', id)
       .single()
@@ -31,7 +31,7 @@ export const useProductionStore = defineStore('production', () => {
 
   async function create(payload) {
     const { data, error: err } = await supabase
-      .from('public.gh_production')
+      .from('gh_production')
       .insert([payload])
       .select()
     if (!err) await fetchAll(payload.batch_id)
@@ -40,7 +40,7 @@ export const useProductionStore = defineStore('production', () => {
 
   async function update(id, payload) {
     const { data, error: err } = await supabase
-      .from('public.gh_production')
+      .from('gh_production')
       .update(payload)
       .eq('production_id', id)
       .select()
@@ -50,7 +50,7 @@ export const useProductionStore = defineStore('production', () => {
 
   async function remove(id) {
     const { data, error: err } = await supabase
-      .from('public.gh_production')
+      .from('gh_production')
       .delete()
       .eq('production_id', id)
     if (!err) await fetchAll()

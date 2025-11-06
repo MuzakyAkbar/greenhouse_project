@@ -11,7 +11,8 @@ export const useSalesStore = defineStore('sales', () => {
   async function fetchAll(batch_id = null) {
     loading.value = true
     error.value = null
-    let q = supabase.from('public.gh_sales').select('*')
+    // ✅ FIXED: Hapus 'public.'
+    let q = supabase.from('gh_sales').select('*')
     if (batch_id) q = q.eq('batch_id', batch_id)
     const { data, error: err } = await q.order('sales_id', { ascending: false })
     if (err) error.value = err
@@ -22,7 +23,7 @@ export const useSalesStore = defineStore('sales', () => {
 
   async function fetchById(id) {
     const { data, error: err } = await supabase
-      .from('public.gh_sales')
+      .from('gh_sales')
       .select('*')
       .eq('sales_id', id)
       .single()
@@ -31,7 +32,7 @@ export const useSalesStore = defineStore('sales', () => {
 
   async function create(payload) {
     const { data, error: err } = await supabase
-      .from('public.gh_sales')
+      .from('gh_sales')
       .insert([payload])
       .select()
     if (!err) await fetchAll(payload.batch_id)
@@ -40,7 +41,7 @@ export const useSalesStore = defineStore('sales', () => {
 
   async function update(id, payload) {
     const { data, error: err } = await supabase
-      .from('public.gh_sales')
+      .from('gh_sales')
       .update(payload)
       .eq('sales_id', id)
       .select()
@@ -50,7 +51,7 @@ export const useSalesStore = defineStore('sales', () => {
 
   async function remove(id) {
     const { data, error: err } = await supabase
-      .from('public.gh_sales')
+      .from('gh_sales')
       .delete()
       .eq('sales_id', id)
     if (!err) await fetchAll()
@@ -59,4 +60,3 @@ export const useSalesStore = defineStore('sales', () => {
 
   return { sales, loading, error, fetchAll, fetchById, create, update, remove }
 })
-
