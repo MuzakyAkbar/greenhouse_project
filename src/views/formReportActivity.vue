@@ -129,31 +129,57 @@ const startScanner = async () => {
   }
 };
 
-const onScanSuccess = (decodedText) => {
-  console.log("QR Code detected:", decodedText);
+const onScanSuccess = async (decodedText) => {
+  console.log("📸 QR Code detected:", decodedText);
 
   try {
     const data = JSON.parse(decodedText);
+    console.log("✅ Parsed QR data:", data);
 
-    // Auto-fill lokasi dan batch berdasarkan ID
-    if (data.location_id) {
-      selectedLocation.value = data.location_id;
-    }
-    if (data.batch_id) {
-      selectedBatch.value = data.batch_id;
+    const locationId = Number(data.location_id);
+    const batchId = Number(data.batch_id);
+
+    // Set lokasi
+    selectedLocation.value = locationId;
+    selectedBatch.value = batchId;
+
+    // Cari nama lokasi dari store
+    let locationItem = locations.value.find(l => Number(l.location_id) === locationId);
+    const locationName = locationItem?.location || "Lokasi tidak ditemukan";
+
+    // 🔍 Coba cari batch di store dulu
+    let batchItem = batches.value.find(b => Number(b.batch_id) === batchId);
+
+    // Kalau tidak ada, ambil dari Supabase
+    if (!batchItem) {
+      console.log("⏳ Fetching batch name from Supabase...");
+      const { data: batchData, error } = await supabase
+        .from("gh_batch")
+        .select("batch_id, batch_name, location_id")
+        .eq("batch_id", batchId)
+        .single();
+
+      if (error) {
+        console.error("❌ Gagal ambil batch dari Supabase:", error.message);
+      } else if (batchData) {
+        console.log("✅ Batch ditemukan di DB:", batchData);
+        batches.value.push(batchData); // Tambahkan ke store agar reaktif
+        batchItem = batchData;
+      }
     }
 
-    const locationName = locations.value.find(l => l.location_id == data.location_id)?.location || data.location;
-    const batchName = batches.value.find(b => b.batch_id == data.batch_id)?.batch_name || data.batch;
+    const batchName = batchItem?.batch_name || "Batch tidak ditemukan";
 
     alert(`✅ QR Code berhasil di-scan!\n📍 Lokasi: ${locationName}\n🏷️ Batch: ${batchName}`);
 
     stopScanner();
   } catch (err) {
-    console.error("Invalid QR Code data:", err);
-    alert("❌ QR Code tidak valid!");
+    console.error("❌ Invalid QR data:", err);
+    alert("❌ QR Code tidak valid atau tidak sesuai format JSON!");
   }
 };
+
+
 
 const onScanError = (errorMessage) => {
   // Tidak log setiap error untuk menghindari spam
@@ -477,19 +503,9 @@ function getBatchName(batchId) {
                 <span class="text-lg">📍</span>
                 Lokasi
               </label>
-              <select
-                v-model="selectedLocation"
-                class="px-4 py-3 border-2 border-gray-200 rounded-xl bg-white text-gray-700 font-medium focus:outline-none focus:border-[#0071f3] focus:ring-2 focus:ring-[#0071f3]/20 transition appearance-none cursor-pointer"
-              >
-                <option value="" disabled>Pilih Lokasi</option>
-                <option 
-                  v-for="loc in locations" 
-                  :key="loc.location_id" 
-                  :value="loc.location_id"
-                >
-                  {{ loc.location }}
-                </option>
-              </select>
+              <div class="px-4 py-3 border-2 border-gray-200 rounded-xl bg-gray-50 text-gray-700 font-medium min-h-[48px] flex items-center">
+                {{ selectedLocation ? getLocationName(selectedLocation) : 'Scan QR Code untuk mengisi lokasi' }}
+              </div>
             </div>
 
             <!-- Batch -->
@@ -498,19 +514,9 @@ function getBatchName(batchId) {
                 <span class="text-lg">🏷️</span>
                 Batch
               </label>
-              <select
-                v-model="selectedBatch"
-                class="px-4 py-3 border-2 border-gray-200 rounded-xl bg-white text-gray-700 font-medium focus:outline-none focus:border-[#0071f3] focus:ring-2 focus:ring-[#0071f3]/20 transition appearance-none cursor-pointer"
-              >
-                <option value="" disabled>Pilih Batch</option>
-                <option 
-                  v-for="batch in batches" 
-                  :key="batch.batch_id" 
-                  :value="batch.batch_id"
-                >
-                  {{ batch.batch_name }}
-                </option>
-              </select>
+              <div class="px-4 py-3 border-2 border-gray-200 rounded-xl bg-gray-50 text-gray-700 font-medium min-h-[48px] flex items-center">
+                {{ selectedBatch ? getBatchName(selectedBatch) : 'Scan QR Code untuk mengisi batch' }}
+              </div>
             </div>
           </div>
 

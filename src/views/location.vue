@@ -508,35 +508,56 @@ const confirmDeleteBatch = async (batch) => {
 }
 
 // QR Code Generation
-const generateQR = async (location, batch) => {
-  selectedQRInfo.value = { location, batch }
+const generateQR = async (locationName, batchName) => {
+  console.log("🔄 Generating QR Code...");
+  console.log("📍 Location Name:", locationName);
+  console.log("🏷️ Batch Name:", batchName);
+  
+  // ✅ Cari location_id dari nama lokasi
+  const location = locationStore.locations.find(loc => loc.location === locationName);
+  if (!location) {
+    alert(`❌ Lokasi "${locationName}" tidak ditemukan!`);
+    return;
+  }
+  
+  // ✅ Cari batch_id dari nama batch
+  const batch = batchStore.batches.find(b => b.batch_name === batchName && b.location_id === location.location_id);
+  if (!batch) {
+    alert(`❌ Batch "${batchName}" tidak ditemukan di lokasi "${locationName}"!`);
+    return;
+  }
+  
+  console.log("✅ Found Location ID:", location.location_id);
+  console.log("✅ Found Batch ID:", batch.batch_id);
+  
+  selectedQRInfo.value = { location: locationName, batch: batchName }
   showQRModal.value = true
-  
+
   await nextTick()
-  
-  const qrData = JSON.stringify({ 
-    location_id: locationStore.locations.find(l => l.location === location)?.location_id,
-    location, 
-    batch 
+
+  // ✅ QR Code berisi location_id dan batch_id (sesuai dengan yang diharapkan FormReportActivity)
+  const qrContent = JSON.stringify({
+    location_id: location.location_id,
+    batch_id: batch.batch_id
   })
   
-  try {
-    await QRCode.toCanvas(qrCanvas.value, qrData, {
-      width: 300,
-      margin: 2,
-      color: {
-        dark: '#000000',
-        light: '#FFFFFF'
-      },
-      errorCorrectionLevel: 'H'
-    })
-    
-    qrDataURL.value = qrCanvas.value.toDataURL('image/png')
-  } catch (err) {
-    console.error('Error generating QR:', err)
-    alert('Gagal generate QR Code')
-  }
+  console.log("📦 QR Content:", qrContent);
+
+  QRCode.toCanvas(qrCanvas.value, qrContent, { 
+    width: 200,
+    margin: 2,
+    errorCorrectionLevel: 'H'
+  }, (error) => {
+    if (error) {
+      console.error("❌ QR Generation Error:", error);
+      alert("❌ Gagal generate QR Code!");
+    } else {
+      qrDataURL.value = qrCanvas.value.toDataURL();
+      console.log("✅ QR Code generated successfully");
+    }
+  })
 }
+
 
 const downloadQR = () => {
   const link = document.createElement('a')
@@ -685,8 +706,10 @@ const downloadAllQRPDF = async () => {
       const batches = getBatchesByLocation(location.location_id)
       batches.forEach(batch => {
         allBatches.push({
-          location: location.location, // ✅ Gunakan 'location' bukan 'location_name'
-          batch: batch.batch_name
+          location_id: location.location_id,  // ✅ Kirim ID
+          batch_id: batch.batch_id,           // ✅ Kirim ID
+          location_name: location.location,    // Untuk display di PDF
+          batch_name: batch.batch_name        // Untuk display di PDF
         })
       })
     })
@@ -699,8 +722,13 @@ const downloadAllQRPDF = async () => {
     for (let i = 0; i < allBatches.length; i++) {
       if (i > 0) pdf.addPage()
       
-      const { location, batch } = allBatches[i]
-      const qrData = JSON.stringify({ location, batch })
+      const item = allBatches[i]
+      
+      // ✅ QR Code berisi ID (untuk scan)
+      const qrData = JSON.stringify({ 
+        location_id: item.location_id, 
+        batch_id: item.batch_id 
+      })
       
       const tempCanvas = document.createElement('canvas')
       await QRCode.toCanvas(tempCanvas, qrData, {
@@ -731,7 +759,7 @@ const downloadAllQRPDF = async () => {
       
       let yPos = 60
       
-      // Lokasi Box
+      // Lokasi Box (display nama untuk manusia)
       pdf.setFillColor(240, 245, 255)
       pdf.roundedRect(margin, yPos, pageWidth - (margin * 2), 20, 3, 3, 'F')
       
@@ -739,18 +767,18 @@ const downloadAllQRPDF = async () => {
       pdf.setFont('helvetica', 'bold')
       pdf.text('Lokasi:', margin + 5, yPos + 8)
       pdf.setFont('helvetica', 'normal')
-      pdf.text(location, margin + 5, yPos + 15)
+      pdf.text(item.location_name, margin + 5, yPos + 15)
       
       yPos += 25
       
-      // Batch Box
+      // Batch Box (display nama untuk manusia)
       pdf.setFillColor(240, 255, 245)
       pdf.roundedRect(margin, yPos, pageWidth - (margin * 2), 20, 3, 3, 'F')
       
       pdf.setFont('helvetica', 'bold')
       pdf.text('Batch:', margin + 5, yPos + 8)
       pdf.setFont('helvetica', 'normal')
-      pdf.text(batch, margin + 5, yPos + 15)
+      pdf.text(item.batch_name, margin + 5, yPos + 15)
       
       yPos += 30
       
