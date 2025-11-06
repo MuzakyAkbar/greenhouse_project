@@ -7,7 +7,7 @@ import { useSalesStore } from '../stores/sales'
 import { useBatchStore } from '../stores/batch'
 import { useLocationStore } from '../stores/location'
 import { usePotatoActivityStore } from '../stores/potatoActivity'
-import { onMounted, ref, computed } from 'vue'
+import { onMounted, ref, computed, watch } from 'vue'
 
 const authStore = useAuthStore()
 const activityReportStore = useActivityReportStore()
@@ -22,6 +22,36 @@ const router = useRouter()
 const selectedReport = ref('activity')
 const filterDate = ref('')
 const filterDateProduction = ref('')
+const isRefreshing = ref(false)
+
+// 🔥 FIXED: Fungsi untuk refresh data
+const refreshData = async () => {
+  console.log('🔄 Refreshing all data...')
+  isRefreshing.value = true
+  
+  try {
+    // Fetch semua data secara parallel
+    await Promise.all([
+      activityReportStore.fetchAll(),
+      productionStore.fetchAll(),
+      salesStore.fetchAll(),
+      batchStore.getBatches(),
+      locationStore.fetchAll(),
+      potatoActivityStore.fetchAll()
+    ])
+    
+    console.log('✅ Data refreshed successfully. Reports count:', activityReportStore.reports.length)
+    
+    // Debug: Log status dari semua reports
+    activityReportStore.reports.forEach(report => {
+      console.log(`Report #${report.report_id}: status = ${report.report_status}`)
+    })
+  } catch (error) {
+    console.error('❌ Error refreshing data:', error)
+  } finally {
+    isRefreshing.value = false
+  }
+}
 
 onMounted(async () => {
   if (!authStore.isLoggedIn) {
@@ -29,20 +59,21 @@ onMounted(async () => {
     return
   }
   
-  console.log('ReportActivityList mounted - fetching data...')
-  
-  await Promise.all([
-    activityReportStore.fetchAll(),
-    productionStore.fetchAll(),
-    salesStore.fetchAll(),
-    batchStore.getBatches(),
-    locationStore.fetchAll(),
-    potatoActivityStore.fetchAll()
-  ])
-  
-  console.log('Data loaded. Reports count:', activityReportStore.reports.length)
-  if (activityReportStore.reports.length > 0) {
-    console.log('First report status:', activityReportStore.reports[0].report_status)
+  console.log('📋 ReportActivityList mounted - fetching data...')
+  await refreshData()
+})
+
+// 🔥 FIXED: Watch route changes untuk auto-refresh
+watch(() => router.currentRoute.value, (newRoute, oldRoute) => {
+  // Jika kembali dari halaman review/edit/view ke list, refresh data
+  if (newRoute.name === 'reportActivityList') {
+    const fromPages = ['reportActivityReview', 'reportActivityEdit', 'reportActivityView']
+    if (oldRoute && fromPages.includes(oldRoute.name)) {
+      console.log('🔙 Returning from', oldRoute.name, '- refreshing data')
+      setTimeout(() => {
+        refreshData()
+      }, 300) // Small delay untuk memastikan navigation selesai
+    }
   }
 })
 
@@ -80,9 +111,9 @@ const mapStatusToDisplay = (dbStatus) => {
 // 🔥 FIXED: Fungsi untuk mendapatkan route berdasarkan status dari database
 const getReportRoute = (report) => {
   const reportId = String(report.report_id)
-  const dbStatus = report.raw.report_status || 'onReview'
+  const dbStatus = report.report_status || 'onReview'
   
-  console.log(`Report #${reportId} - DB Status: ${dbStatus}`) // Debug
+  console.log(`🔍 Report #${reportId} - DB Status: ${dbStatus}`)
   
   const routes = {
     'onReview': { name: 'reportActivityReview', query: { id: reportId } },
@@ -97,10 +128,10 @@ const getReportRoute = (report) => {
 const handleReportClick = (report) => {
   try {
     const route = getReportRoute(report)
-    console.log('Navigating to:', route) // Debug
+    console.log('➡️ Navigating to:', route)
     router.push(route)
   } catch (err) {
-    console.error('Navigation error:', err)
+    console.error('❌ Navigation error:', err)
     alert('Gagal membuka laporan. Silakan coba lagi.')
   }
 }
@@ -123,10 +154,10 @@ const getProductionRoute = (item) => {
 const handleProductionClick = (item) => {
   try {
     const route = getProductionRoute(item)
-    console.log('Navigating to production:', route) // Debug
+    console.log('➡️ Navigating to production:', route)
     router.push(route)
   } catch (err) {
-    console.error('Navigation error:', err)
+    console.error('❌ Navigation error:', err)
     alert('Gagal membuka laporan produksi. Silakan coba lagi.')
   }
 }
@@ -145,7 +176,7 @@ const activityReports = computed(() => {
       coa: getCoACode(report.activity_id),
       activity: getActivityName(report.activity_id),
       status: displayStatus,
-      dbStatus: dbStatus, // Keep original DB status for debugging
+      report_status: dbStatus, // 🔥 Gunakan nama yang sama dengan database
       raw: report
     }
   })
@@ -226,39 +257,6 @@ const isLoading = computed(() => {
          locationStore.loading || 
          potatoActivityStore.loading
 })
-
-// 🔥 Function to refresh data (dipanggil setelah kembali dari edit/review)
-const refreshData = async () => {
-  console.log('Refreshing data...')
-  await activityReportStore.fetchAll()
-  console.log('Data refreshed. Reports count:', activityReportStore.reports.length)
-}
-
-// Auto-refresh when returning from other pages
-onMounted(() => {
-  // Set up visibility change listener
-  const handleVisibilityChange = () => {
-    if (document.visibilityState === 'visible') {
-      console.log('Page became visible - refreshing data')
-      refreshData()
-    }
-  }
-  
-  document.addEventListener('visibilitychange', handleVisibilityChange)
-  
-  // Cleanup
-  return () => {
-    document.removeEventListener('visibilitychange', handleVisibilityChange)
-  }
-})
-
-// Listen for route changes to refresh data
-router.afterEach((to, from) => {
-  if (from.name?.includes('reportActivity') && to.name === 'reportActivityList') {
-    console.log('Returning from report page - refreshing data')
-    refreshData()
-  }
-})
 </script>
 
 <template>
@@ -338,7 +336,7 @@ router.afterEach((to, from) => {
     <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
       
       <!-- Loading State -->
-      <div v-if="isLoading" class="flex items-center justify-center py-20">
+      <div v-if="isLoading && !isRefreshing" class="flex items-center justify-center py-20">
         <div class="text-center">
           <div class="inline-block w-12 h-12 border-4 border-[#0071f3] border-t-transparent rounded-full animate-spin"></div>
           <p class="mt-4 text-gray-600 font-semibold">Memuat data...</p>
@@ -369,13 +367,18 @@ router.afterEach((to, from) => {
                 <!-- Refresh Button -->
                 <button
                   @click="refreshData"
-                  class="px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg transition flex items-center gap-2 font-semibold"
+                  :disabled="isRefreshing"
+                  class="px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg transition flex items-center gap-2 font-semibold disabled:opacity-50 disabled:cursor-not-allowed"
                   title="Refresh data"
                 >
-                  <svg class="w-5 h-5" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" fill="currentColor">
+                  <svg 
+                    class="w-5 h-5" 
+                    :class="{ 'animate-spin': isRefreshing }"
+                    xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" fill="currentColor"
+                  >
                     <path d="M142.9 142.9c-17.5 17.5-30.1 38-37.8 59.8c-5.9 16.7-24.2 25.4-40.8 19.5s-25.4-24.2-19.5-40.8C55.6 150.7 73.2 122 97.6 97.6c87.2-87.2 228.3-87.5 315.8-1L455 55c6.9-6.9 17.2-8.9 26.2-5.2s14.8 12.5 14.8 22.2l0 128c0 13.3-10.7 24-24 24l-8.4 0c0 0 0 0 0 0L344 224c-9.7 0-18.5-5.8-22.2-14.8s-1.7-19.3 5.2-26.2l41.1-41.1c-62.6-61.5-163.1-61.2-225.3 1zM16 312c0-13.3 10.7-24 24-24l7.6 0 .7 0L168 288c9.7 0 18.5 5.8 22.2 14.8s1.7 19.3-5.2 26.2l-41.1 41.1c62.6 61.5 163.1 61.2 225.3-1c17.5-17.5 30.1-38 37.8-59.8c5.9-16.7 24.2-25.4 40.8-19.5s25.4 24.2 19.5 40.8c-10.8 30.6-28.4 59.3-52.9 83.8c-87.2 87.2-228.3 87.5-315.8 1L57 457c-6.9 6.9-17.2 8.9-26.2 5.2S16 449.7 16 440l0-119.6 0-.7 0-7.6z"/>
                   </svg>
-                  Refresh
+                  {{ isRefreshing ? 'Refreshing...' : 'Refresh' }}
                 </button>
               </div>
 
@@ -445,9 +448,9 @@ router.afterEach((to, from) => {
                       </div>
                     </div>
                     
-                    <!-- Debug Info (can be removed in production) -->
-                    <div class="mt-3 text-xs text-gray-400 font-mono">
-                      DB Status: {{ report.dbStatus || 'undefined' }}
+                    <!-- Debug Info -->
+                    <div class="mt-3 text-xs text-gray-400 font-mono bg-gray-50 p-2 rounded">
+                      DB Status: {{ report.report_status }}
                     </div>
                   </div>
 
@@ -559,6 +562,24 @@ router.afterEach((to, from) => {
                           <span class="font-bold text-lg">{{ p.quantity }}</span>
                         </div>
                         <p class="text-xs opacity-75 mt-1">{{ p.owner }}</p>
+                      </li>
+                    </ul>
+                    <p v-else class="text-sm opacity-75 text-center py-4">Tidak ada data produksi</p>
+                  </div>
+
+                  <!-- Sales -->
+                  <div class="bg-gradient-to-br from-green-500 to-green-600 text-white p-5 rounded-xl">
+                    <p class="font-bold text-base mb-4 flex items-center gap-2">
+                      <span class="text-xl">💰</span>
+                      Penjualan
+                    </p>
+                    <ul v-if="item.sales.length > 0" class="space-y-3">
+                      <li v-for="(s, si) in item.sales" :key="si" class="text-sm bg-white/10 rounded-lg p-3">
+                        <div class="flex justify-between items-center">
+                          <span>{{ s.category }}</span>
+                          <span class="font-bold text-lg">{{ s.quantity }}</span>
+                        </div>
+                        <p class="text-xs opacity-75 mt-1">Rp {{ s.price.toLocaleString('id-ID') }}/{{ s.unit }}</p>
                       </li>
                     </ul>
                     <p v-else class="text-sm opacity-75 text-center py-4">Tidak ada data penjualan</p>

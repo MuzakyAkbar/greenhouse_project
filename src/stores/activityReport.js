@@ -27,7 +27,7 @@ export const useActivityReportStore = defineStore('activityReport', () => {
         error.value = err
       } else {
         reports.value = data || []
-        console.log(`Fetched ${data?.length || 0} reports`) // Debug
+        console.log(`Fetched ${data?.length || 0} reports`)
       }
       
       return { data, error: err }
@@ -51,7 +51,7 @@ export const useActivityReportStore = defineStore('activityReport', () => {
       if (err) {
         console.error('Error fetching report by ID:', err)
       } else {
-        console.log('Fetched report:', data) // Debug
+        console.log('Fetched report:', data)
       }
       
       return { data, error: err }
@@ -63,7 +63,6 @@ export const useActivityReportStore = defineStore('activityReport', () => {
 
   async function create(payload) {
     try {
-      // Ensure report_status is set to onReview for new reports
       const newPayload = {
         ...payload,
         report_status: 'onReview'
@@ -78,7 +77,6 @@ export const useActivityReportStore = defineStore('activityReport', () => {
         console.error('Error creating report:', err)
       } else {
         console.log('Report created successfully:', data)
-        // Refresh list after creation
         await fetchAll(payload.batch_id)
       }
       
@@ -91,7 +89,7 @@ export const useActivityReportStore = defineStore('activityReport', () => {
 
   async function update(report_id, payload) {
     try {
-      console.log(`Updating report #${report_id} with:`, payload) // Debug
+      console.log(`Updating report #${report_id} with:`, payload)
       
       const { data, error: err } = await supabase
         .from('gh_activity_report')
@@ -103,13 +101,143 @@ export const useActivityReportStore = defineStore('activityReport', () => {
         console.error('Error updating report:', err)
       } else {
         console.log('Report updated successfully:', data)
-        // Refresh list after update
         await fetchAll(payload.batch_id || null)
       }
       
       return { data, error: err }
     } catch (err) {
       console.error('Exception updating report:', err)
+      return { data: null, error: err }
+    }
+  }
+
+  /**
+   * ✅ APPROVE REPORT
+   * Mengubah status menjadi 'approved' dan menambahkan qty ke gh_type_damage
+   */
+  async function approve(report_id, approved_by) {
+    try {
+      // 1. Ambil data report
+      const { data: report, error: fetchErr } = await supabase
+        .from('gh_activity_report')
+        .select('*')
+        .eq('report_id', report_id)
+        .single()
+
+      if (fetchErr) throw fetchErr
+      if (!report) throw new Error('Report tidak ditemukan')
+
+      // 2. Update status report menjadi approved
+      const { error: updateErr } = await supabase
+        .from('gh_activity_report')
+        .update({
+          report_status: 'approved',
+          approved_by: approved_by,
+          approved_at: new Date().toISOString()
+        })
+        .eq('report_id', report_id)
+
+      if (updateErr) throw updateErr
+
+      // 3. Jika ada typedamage_id dan qty, tambahkan ke total di gh_type_damage
+      if (report.typedamage_id && report.qty) {
+        // Ambil data type_damage saat ini
+        const { data: typeDamage, error: damageErr } = await supabase
+          .from('gh_type_damage')
+          .select('qty')
+          .eq('typedamage_id', report.typedamage_id)
+          .single()
+
+        if (damageErr) {
+          console.error('Error fetching type_damage:', damageErr)
+          throw damageErr
+        }
+
+        // Update total qty
+        const newQty = (typeDamage.qty || 0) + report.qty
+        const { error: updateDamageErr } = await supabase
+          .from('gh_type_damage')
+          .update({ qty: newQty })
+          .eq('typedamage_id', report.typedamage_id)
+
+        if (updateDamageErr) throw updateDamageErr
+
+        console.log(`✅ Type damage #${report.typedamage_id} qty updated: ${typeDamage.qty} → ${newQty}`)
+      }
+
+      console.log('✅ Report approved successfully')
+      await fetchAll(report.batch_id)
+      
+      return { data: report, error: null }
+    } catch (err) {
+      console.error('Exception approving report:', err)
+      return { data: null, error: err }
+    }
+  }
+
+  /**
+   * ✅ REQUEST REVISION
+   * Mengubah status menjadi 'needRevision' dengan catatan revisi
+   */
+  async function requestRevision(report_id, revision_notes, requested_by) {
+    try {
+      const { data, error: err } = await supabase
+        .from('gh_activity_report')
+        .update({
+          report_status: 'needRevision',
+          revision_notes: revision_notes,
+          revision_requested_by: requested_by,
+          revision_requested_at: new Date().toISOString()
+        })
+        .eq('report_id', report_id)
+        .select()
+
+      if (err) {
+        console.error('Error requesting revision:', err)
+      } else {
+        console.log('✅ Revision requested successfully')
+        await fetchAll()
+      }
+
+      return { data, error: err }
+    } catch (err) {
+      console.error('Exception requesting revision:', err)
+      return { data: null, error: err }
+    }
+  }
+
+  /**
+   * ✅ REVISE REPORT
+   * User memperbaiki report yang diminta revisi
+   */
+  async function revise(report_id, payload, revised_by) {
+    try {
+      const updatePayload = {
+        ...payload,
+        report_status: 'onReview', // Kembali ke review setelah diperbaiki
+        revised_by: revised_by,
+        revised_at: new Date().toISOString(),
+        revision_notes: null, // Clear revision notes
+        revision_requested_by: null,
+        revision_requested_at: null
+      }
+
+      const { data, error: err } = await supabase
+        .from('gh_activity_report')
+        .update(updatePayload)
+        .eq('report_id', report_id)
+        .select()
+
+      if (err) {
+        console.error('Error revising report:', err)
+      } else {
+        console.log('✅ Report revised successfully')
+        await fetchAll(payload.batch_id || null)
+      }
+
+      return { data, error: err }
+    } catch (err) {
+      console.error('Exception revising report:', err)
       return { data: null, error: err }
     }
   }
@@ -125,7 +253,6 @@ export const useActivityReportStore = defineStore('activityReport', () => {
         console.error('Error deleting report:', err)
       } else {
         console.log('Report deleted successfully')
-        // Refresh list after deletion
         await fetchAll()
       }
       
@@ -136,7 +263,6 @@ export const useActivityReportStore = defineStore('activityReport', () => {
     }
   }
 
-  // Helper function to get report status display text
   function getStatusDisplay(dbStatus) {
     const statusMap = {
       'onReview': 'Waiting Review',
@@ -146,7 +272,6 @@ export const useActivityReportStore = defineStore('activityReport', () => {
     return statusMap[dbStatus] || 'Unknown'
   }
 
-  // Helper function to get status color class
   function getStatusColorClass(dbStatus) {
     const colorMap = {
       'onReview': 'bg-yellow-100 text-yellow-800',
@@ -165,6 +290,9 @@ export const useActivityReportStore = defineStore('activityReport', () => {
     create, 
     update, 
     remove,
+    approve,           // ✅ New
+    requestRevision,   // ✅ New
+    revise,           // ✅ New
     getStatusDisplay,
     getStatusColorClass
   }

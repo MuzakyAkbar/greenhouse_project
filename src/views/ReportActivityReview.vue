@@ -7,7 +7,6 @@ import { useBatchStore } from '../stores/batch'
 import { useLocationStore } from '../stores/location'
 import { usePotatoActivityStore } from '../stores/potatoActivity'
 import { useMaterialStore } from '../stores/material'
-import { useTypeDamageStore } from '../stores/typeDamage'
 
 const router = useRouter()
 const route = useRoute()
@@ -17,7 +16,6 @@ const batchStore = useBatchStore()
 const locationStore = useLocationStore()
 const potatoActivityStore = usePotatoActivityStore()
 const materialStore = useMaterialStore()
-const typeDamageStore = useTypeDamageStore()
 
 const reportId = ref(route.query.id || null)
 const loading = ref(true)
@@ -25,6 +23,7 @@ const processing = ref(false)
 const error = ref(null)
 
 const reportData = ref(null)
+const groupedReports = ref([])
 const revisionNotes = ref('')
 const showRevisionModal = ref(false)
 
@@ -43,16 +42,13 @@ onMounted(async () => {
   try {
     loading.value = true
     
-    // Fetch reference data
     await Promise.all([
       batchStore.getBatches(),
       locationStore.fetchAll(),
       potatoActivityStore.fetchAll(),
-      materialStore.fetchAll(),
-      typeDamageStore.fetchAll()
+      materialStore.fetchAll()
     ])
 
-    // Fetch report data
     const { data, error: fetchError } = await activityReportStore.fetchById(reportId.value)
     
     if (fetchError) {
@@ -63,14 +59,7 @@ onMounted(async () => {
       throw new Error('Laporan tidak ditemukan')
     }
 
-    reportData.value = data
-    
-    console.log('Report loaded:', {
-      id: data.report_id,
-      status: data.report_status
-    })
-    
-    // Check if report status is onReview
+    // Check status
     if (data.report_status === 'approved') {
       alert('⚠️ Laporan ini sudah disetujui dan tidak dapat direview lagi')
       router.push('/reportActivityList')
@@ -84,6 +73,44 @@ onMounted(async () => {
       router.push('/reportActivityList')
       return
     }
+
+    reportData.value = data
+    
+    // Fetch all related reports (same batch, date, location - TANPA filter typedamage_id)
+    const { data: allReports } = await activityReportStore.fetchAll()
+    
+    const relatedReports = allReports.filter(r => 
+      r.batch_id === data.batch_id &&
+      r.report_date === data.report_date &&
+      r.location === data.location &&
+      r.report_status === 'onReview'
+    )
+
+    // Group by activity
+    const grouped = relatedReports.reduce((acc, report) => {
+      const activityId = report.activity_id
+      if (!acc[activityId]) {
+        acc[activityId] = {
+          activity_id: activityId,
+          CoA: report.CoA,
+          manpower: report.manpower,
+          materials: []
+        }
+      }
+      
+      if (report.material_id) {
+        acc[activityId].materials.push({
+          material_id: report.material_id,
+          qty: report.qty,
+          UoM: report.UoM
+        })
+      }
+      
+      return acc
+    }, {})
+
+    groupedReports.value = Object.values(grouped)
+    
   } catch (err) {
     console.error('Error loading data:', err)
     error.value = err.message
@@ -116,10 +143,34 @@ const getMaterialName = (materialId) => {
   return material?.material_name || '-'
 }
 
-const getTypeDamageName = (typeDamageId) => {
-  if (!typeDamageId) return 'Tidak Ada'
-  const damage = typeDamageStore.typeDamages.find(d => d.typedamage_id === typeDamageId)
-  return damage?.type_damage || 'Tidak Ada'
+// ✅ UPDATED: Read from columns instead of gh_type_damage table
+const getDamageInfo = () => {
+  if (!reportData.value) return []
+  
+  const damages = []
+  
+  if (reportData.value.type_damage_kuning > 0) {
+    damages.push({
+      type: 'Kuning',
+      qty: reportData.value.type_damage_kuning
+    })
+  }
+  
+  if (reportData.value.type_damage_kutilang > 0) {
+    damages.push({
+      type: 'Kutilang',
+      qty: reportData.value.type_damage_kutilang
+    })
+  }
+  
+  if (reportData.value.type_damage_busuk > 0) {
+    damages.push({
+      type: 'Busuk',
+      qty: reportData.value.type_damage_busuk
+    })
+  }
+  
+  return damages
 }
 
 const formatDate = (dateStr) => {
@@ -150,33 +201,25 @@ const handleApprove = async () => {
   try {
     processing.value = true
     
-    console.log('Approving report:', reportId.value)
+    // Update all related reports (same batch, date, location)
+    const { data: allReports } = await activityReportStore.fetchAll()
     
-    // Update status to approved
-    const updatePayload = {
-      report_status: 'approved',
-      approved_by: authStore.user?.username || authStore.user?.email || 'Admin',
-      approved_at: new Date().toISOString(),
-      // Clear any previous revision data
-      revision_notes: null,
-      revision_requested_by: null,
-      revision_requested_at: null
-    }
-    
-    const { data, error: updateError } = await activityReportStore.update(
-      reportId.value, 
-      updatePayload
+    const relatedReports = allReports.filter(r => 
+      r.batch_id === reportData.value.batch_id &&
+      r.report_date === reportData.value.report_date &&
+      r.location === reportData.value.location &&
+      r.report_status === 'onReview'
     )
 
-    if (updateError) {
-      throw new Error(updateError.message)
+    // Approve all related reports using the approve function
+    for (const report of relatedReports) {
+      await activityReportStore.approve(
+        report.report_id, 
+        authStore.user?.username || authStore.user?.email || 'Admin'
+      )
     }
-
-    console.log('Report approved successfully:', data)
     
     alert('✅ Laporan berhasil disetujui!')
-    
-    // Navigate back to list
     router.push('/reportActivityList')
   } catch (err) {
     console.error('Error approving report:', err)
@@ -214,33 +257,31 @@ const handleRevision = async () => {
   try {
     processing.value = true
     
-    console.log('Requesting revision for report:', reportId.value)
+    // Update all related reports
+    const { data: allReports } = await activityReportStore.fetchAll()
     
-    // Update status to needRevision with notes
+    const relatedReports = allReports.filter(r => 
+      r.batch_id === reportData.value.batch_id &&
+      r.report_date === reportData.value.report_date &&
+      r.location === reportData.value.location &&
+      r.report_status === 'onReview'
+    )
+
     const updatePayload = {
       report_status: 'needRevision',
       revision_notes: notes,
       revision_requested_by: authStore.user?.username || authStore.user?.email || 'Admin',
       revision_requested_at: new Date().toISOString(),
-      // Clear approval data if any
       approved_by: null,
       approved_at: null
     }
-    
-    const { data, error: updateError } = await activityReportStore.update(
-      reportId.value,
-      updatePayload
-    )
 
-    if (updateError) {
-      throw new Error(updateError.message)
+    // Update all related reports
+    for (const report of relatedReports) {
+      await activityReportStore.update(report.report_id, updatePayload)
     }
-
-    console.log('Revision requested successfully:', data)
     
-    alert('✅ Permintaan revisi berhasil dikirim!\n\nStaff akan mendapatkan notifikasi untuk memperbaiki laporan.')
-    
-    // Navigate back to list
+    alert('✅ Permintaan revisi berhasil dikirim!')
     router.push('/reportActivityList')
   } catch (err) {
     console.error('Error requesting revision:', err)
@@ -251,26 +292,12 @@ const handleRevision = async () => {
   }
 }
 
-// Computed properties
-const currentStatus = computed(() => {
-  if (!reportData.value) return null
-  return reportData.value.report_status
-})
-
 const statusBadge = computed(() => {
-  const status = currentStatus.value
+  const status = reportData.value?.report_status
   const badges = {
     'onReview': {
       text: '⏳ Waiting Review',
       class: 'bg-yellow-100 text-yellow-800 border-yellow-200'
-    },
-    'needRevision': {
-      text: '🔄 Need Revision',
-      class: 'bg-red-100 text-red-800 border-red-200'
-    },
-    'approved': {
-      text: '✅ Approved',
-      class: 'bg-green-100 text-green-800 border-green-200'
     }
   }
   return badges[status] || badges['onReview']
@@ -300,7 +327,6 @@ const statusBadge = computed(() => {
             </h1>
             <p class="text-sm text-gray-500 mt-1">Tinjau & Approve Laporan Aktivitas</p>
           </div>
-          <!-- Status Badge in Header -->
           <div v-if="reportData && !loading">
             <span 
               :class="statusBadge.class"
@@ -353,9 +379,9 @@ const statusBadge = computed(() => {
           </div>
         </div>
 
-        <!-- Info Section -->
+        <!-- Basic Info Section -->
         <div class="mb-8">
-          <h2 class="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-3">Informasi Laporan</h2>
+          <h2 class="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-3">Informasi Dasar</h2>
           <div class="bg-white rounded-2xl border-2 border-gray-100 shadow-sm p-6">
             <div class="grid grid-cols-1 md:grid-cols-3 gap-5">
               <!-- Date -->
@@ -396,61 +422,92 @@ const statusBadge = computed(() => {
           </div>
         </div>
 
-        <!-- Activity Details -->
+        <!-- Damage Types Section -->
+        <div class="mb-8" v-if="getDamageInfo().length > 0">
+          <h2 class="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-3">Jenis Kerusakan Tanaman</h2>
+          <div class="bg-white rounded-2xl border-2 border-gray-100 shadow-sm p-6">
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-5">
+              <div v-for="damage in getDamageInfo()" :key="damage.type" class="flex flex-col">
+                <label class="text-sm font-semibold text-gray-700 mb-2 flex items-center gap-2">
+                  <span v-if="damage.type === 'Kuning'" class="w-6 h-6 bg-yellow-100 rounded-full flex items-center justify-center text-xs">🟡</span>
+                  <span v-else-if="damage.type === 'Kutilang'" class="w-6 h-6 bg-orange-100 rounded-full flex items-center justify-center text-xs">🟠</span>
+                  <span v-else-if="damage.type === 'Busuk'" class="w-6 h-6 bg-red-100 rounded-full flex items-center justify-center text-xs">🔴</span>
+                  {{ damage.type }}
+                </label>
+                <div class="px-4 py-3 border-2 border-gray-200 rounded-xl bg-gray-50 text-gray-700 font-medium text-center">
+                  {{ damage.qty || 0 }}
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Activities Section -->
         <div class="mb-8">
           <h2 class="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-3">Detail Aktivitas</h2>
-          <div class="bg-white rounded-2xl border-2 border-gray-100 shadow-sm p-6">
-            <div class="space-y-5">
-              <!-- Activity -->
-              <div class="flex flex-col">
-                <label class="text-sm font-semibold text-gray-700 mb-2">Activity</label>
-                <div class="px-4 py-3 border-2 border-gray-200 rounded-xl bg-gray-50 text-gray-700 font-medium">
-                  {{ getActivityName(reportData.activity_id) }}
-                  <span v-if="getActivitySubactivity(reportData.activity_id)" class="text-gray-500 text-sm ml-2">
-                    - {{ getActivitySubactivity(reportData.activity_id) }}
-                  </span>
+          <div class="space-y-6">
+            <div
+              v-for="(activity, index) in groupedReports"
+              :key="index"
+              class="bg-white rounded-2xl border-2 border-gray-100 shadow-sm p-6"
+            >
+              <!-- Activity Header -->
+              <div class="flex items-center gap-3 mb-6 pb-4 border-b-2 border-gray-100">
+                <div class="w-10 h-10 bg-gradient-to-br from-[#0071f3] to-[#8FABD4] rounded-lg flex items-center justify-center text-white font-bold">
+                  {{ index + 1 }}
+                </div>
+                <div>
+                  <h3 class="text-lg font-bold text-gray-900">{{ getActivityName(activity.activity_id) }}</h3>
+                  <p v-if="getActivitySubactivity(activity.activity_id)" class="text-sm text-gray-500">
+                    {{ getActivitySubactivity(activity.activity_id) }}
+                  </p>
                 </div>
               </div>
 
-              <!-- CoA -->
-              <div class="flex flex-col">
-                <label class="text-sm font-semibold text-gray-700 mb-2">Chart of Account (CoA)</label>
-                <div class="px-4 py-3 border-2 border-gray-200 rounded-xl bg-gray-50 text-gray-700 font-medium">
-                  {{ reportData.CoA || '-' }}
-                </div>
-              </div>
-
-              <!-- Material Section -->
-              <div class="bg-gray-50 rounded-xl p-5">
-                <h4 class="text-base font-bold text-gray-900 flex items-center gap-2 mb-4">
-                  <span class="text-lg">📦</span>
-                  Material
-                </h4>
-                <div class="flex flex-col sm:flex-row gap-4 bg-white rounded-lg p-4 border border-gray-200">
-                  <div class="flex-1 flex flex-col">
-                    <label class="text-xs font-semibold text-gray-600 mb-2">Nama Material</label>
-                    <div class="px-4 py-2.5 border-2 border-gray-200 rounded-lg bg-gray-50 text-gray-700 text-sm font-medium">
-                      {{ getMaterialName(reportData.material_id) }}
-                    </div>
-                  </div>
-                  <div class="w-full sm:w-32 flex flex-col">
-                    <label class="text-xs font-semibold text-gray-600 mb-2">Qty</label>
-                    <div class="px-4 py-2.5 border-2 border-gray-200 rounded-lg bg-gray-50 text-gray-700 text-sm font-medium text-center">
-                      {{ reportData.qty || 0 }}
-                    </div>
-                  </div>
-                  <div class="w-full sm:w-32 flex flex-col">
-                    <label class="text-xs font-semibold text-gray-600 mb-2">Unit</label>
-                    <div class="px-4 py-2.5 border-2 border-gray-200 rounded-lg bg-gray-50 text-gray-700 text-sm font-medium text-center">
-                      {{ reportData.UoM || '-' }}
-                    </div>
+              <div class="space-y-5">
+                <!-- CoA -->
+                <div class="flex flex-col">
+                  <label class="text-sm font-semibold text-gray-700 mb-2">Chart of Account (CoA)</label>
+                  <div class="px-4 py-3 border-2 border-gray-200 rounded-xl bg-gray-50 text-gray-700 font-medium">
+                    {{ activity.CoA || '-' }}
                   </div>
                 </div>
-              </div>
 
-              <!-- Worker & Damage Section -->
-              <div class="grid grid-cols-1 md:grid-cols-2 gap-5">
-                <!-- Worker -->
+                <!-- Materials Section -->
+                <div v-if="activity.materials.length > 0" class="bg-gray-50 rounded-xl p-5">
+                  <h4 class="text-base font-bold text-gray-900 flex items-center gap-2 mb-4">
+                    <span class="text-lg">📦</span>
+                    Material
+                  </h4>
+                  <div class="space-y-3">
+                    <div
+                      v-for="(mat, matIdx) in activity.materials"
+                      :key="matIdx"
+                      class="flex flex-col sm:flex-row gap-4 bg-white rounded-lg p-4 border border-gray-200"
+                    >
+                      <div class="flex-1 flex flex-col">
+                        <label class="text-xs font-semibold text-gray-600 mb-2">Nama Material</label>
+                        <div class="px-4 py-2.5 border-2 border-gray-200 rounded-lg bg-gray-50 text-gray-700 text-sm font-medium">
+                          {{ getMaterialName(mat.material_id) }}
+                        </div>
+                      </div>
+                      <div class="w-full sm:w-32 flex flex-col">
+                        <label class="text-xs font-semibold text-gray-600 mb-2">Qty</label>
+                        <div class="px-4 py-2.5 border-2 border-gray-200 rounded-lg bg-gray-50 text-gray-700 text-sm font-medium text-center">
+                          {{ mat.qty || 0 }}
+                        </div>
+                      </div>
+                      <div class="w-full sm:w-32 flex flex-col">
+                        <label class="text-xs font-semibold text-gray-600 mb-2">Unit</label>
+                        <div class="px-4 py-2.5 border-2 border-gray-200 rounded-lg bg-gray-50 text-gray-700 text-sm font-medium text-center">
+                          {{ mat.UoM || '-' }}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <!-- Manpower Section -->
                 <div class="bg-gray-50 rounded-xl p-5">
                   <h4 class="text-base font-bold text-gray-900 flex items-center gap-2 mb-4">
                     <span class="text-lg">👷</span>
@@ -460,23 +517,7 @@ const statusBadge = computed(() => {
                     <div class="flex flex-col">
                       <label class="text-xs font-semibold text-gray-600 mb-2">Jumlah Pekerja</label>
                       <div class="px-4 py-2.5 border-2 border-gray-200 rounded-lg bg-gray-50 text-gray-700 text-sm font-medium text-center">
-                        {{ reportData.manpower || 0 }}
-                      </div>
-                    </div>
-                  </div>
-                </div>
-
-                <!-- Type Damage -->
-                <div class="bg-gray-50 rounded-xl p-5">
-                  <h4 class="text-base font-bold text-gray-900 flex items-center gap-2 mb-4">
-                    <span class="text-lg">⚠️</span>
-                    Kerusakan
-                  </h4>
-                  <div class="bg-white rounded-lg p-4 border border-gray-200">
-                    <div class="flex flex-col">
-                      <label class="text-xs font-semibold text-gray-600 mb-2">Tipe Kerusakan</label>
-                      <div class="px-4 py-2.5 border-2 border-gray-200 rounded-lg bg-gray-50 text-gray-700 text-sm font-medium">
-                        {{ getTypeDamageName(reportData.typedamage_id) }}
+                        {{ activity.manpower || 0 }}
                       </div>
                     </div>
                   </div>
@@ -499,7 +540,7 @@ const statusBadge = computed(() => {
                 <svg class="w-5 h-5" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512" fill="currentColor">
                   <path d="M438.6 105.4c12.5 12.5 12.5 32.8 0 45.3l-256 256c-12.5 12.5-32.8 12.5-45.3 0l-128-128c-12.5-12.5-12.5-32.8 0-45.3s32.8-12.5 45.3 0L160 338.7 393.4 105.4c12.5-12.5 32.8-12.5 45.3 0z"/>
                 </svg>
-                {{ processing ? 'Processing...' : '✅ Approve Report' }}
+                {{ processing ? 'Processing...' : ' Approve Report' }}
               </button>
 
               <button
@@ -510,11 +551,10 @@ const statusBadge = computed(() => {
                 <svg class="w-5 h-5" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" fill="currentColor">
                   <path d="M142.9 142.9c-17.5 17.5-30.1 38-37.8 59.8c-5.9 16.7-24.2 25.4-40.8 19.5s-25.4-24.2-19.5-40.8C55.6 150.7 73.2 122 97.6 97.6c87.2-87.2 228.3-87.5 315.8-1L455 55c6.9-6.9 17.2-8.9 26.2-5.2s14.8 12.5 14.8 22.2l0 128c0 13.3-10.7 24-24 24l-8.4 0c0 0 0 0 0 0L344 224c-9.7 0-18.5-5.8-22.2-14.8s-1.7-19.3 5.2-26.2l41.1-41.1c-62.6-61.5-163.1-61.2-225.3 1zM16 312c0-13.3 10.7-24 24-24l7.6 0 .7 0L168 288c9.7 0 18.5 5.8 22.2 14.8s1.7 19.3-5.2 26.2l-41.1 41.1c62.6 61.5 163.1 61.2 225.3-1c17.5-17.5 30.1-38 37.8-59.8c5.9-16.7 24.2-25.4 40.8-19.5s25.4 24.2 19.5 40.8c-10.8 30.6-28.4 59.3-52.9 83.8c-87.2 87.2-228.3 87.5-315.8 1L57 457c-6.9 6.9-17.2 8.9-26.2 5.2S16 449.7 16 440l0-119.6 0-.7 0-7.6z"/>
                 </svg>
-                🔄 Request Revision
+                Request Revision
               </button>
             </div>
             
-            <!-- Guidance Text -->
             <div class="mt-4 pt-4 border-t border-gray-200">
               <p class="text-sm text-gray-600 text-center">
                 <span class="font-semibold">💡 Tip:</span> Pastikan semua data sudah benar sebelum menyetujui. 
