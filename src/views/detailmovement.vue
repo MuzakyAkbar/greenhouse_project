@@ -208,9 +208,8 @@
               </button>
             </template>
 
-            <!-- Jika belum approved -->
-            <template v-else>
-              <!-- Button Edit - Tampil untuk semua user -->
+            <!-- Jika belum approved - HANYA UNTUK MANAGER -->
+            <template v-else-if="isManager">
               <button
                 @click="handleEdit"
                 class="flex items-center gap-2 bg-gray-100 hover:bg-gray-200 text-gray-700 font-semibold px-6 py-2.5 rounded-xl transition-all"
@@ -220,28 +219,25 @@
                 </svg>
                 Edit
               </button>
+              <button
+                @click="handleApprove"
+                class="flex items-center gap-2 bg-gradient-to-r from-green-500 to-green-600 hover:from-green-600 hover:to-green-700 text-white font-semibold px-6 py-2.5 rounded-xl transition-all shadow-md hover:shadow-lg"
+              >
+                <svg class="w-4 h-4" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512" fill="currentColor">
+                  <path d="M438.6 105.4c12.5 12.5 12.5 32.8 0 45.3l-256 256c-12.5 12.5-32.8 12.5-45.3 0l-128-128c-12.5-12.5-12.5-32.8 0-45.3s32.8-12.5 45.3 0L160 338.7 393.4 105.4c12.5-12.5 32.8-12.5 45.3 0z"/>
+                </svg>
+                Approve
+              </button>
+            </template>
 
-              <!-- Button Reject & Approve - Hanya untuk Manager -->
-              <template v-if="isManager">
-                <button
-                  @click="handleReject"
-                  class="flex items-center gap-2 bg-red-100 hover:bg-red-200 text-red-700 font-semibold px-6 py-2.5 rounded-xl transition-all"
-                >
-                  <svg class="w-4 h-4" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 384 512" fill="currentColor">
-                    <path d="M342.6 150.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0L192 210.7 86.6 105.4c-12.5-12.5-32.8-12.5-45.3 0s-12.5 32.8 0 45.3L146.7 256 41.4 361.4c-12.5 12.5-12.5 32.8 0 45.3s32.8 12.5 45.3 0L192 301.3 297.4 406.6c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L237.3 256 342.6 150.6z"/>
-                  </svg>
-                  Reject
-                </button>
-                <button
-                  @click="handleApprove"
-                  class="flex items-center gap-2 bg-gradient-to-r from-green-500 to-green-600 hover:from-green-600 hover:to-green-700 text-white font-semibold px-6 py-2.5 rounded-xl transition-all shadow-md hover:shadow-lg"
-                >
-                  <svg class="w-4 h-4" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512" fill="currentColor">
-                    <path d="M438.6 105.4c12.5 12.5 12.5 32.8 0 45.3l-256 256c-12.5 12.5-32.8 12.5-45.3 0l-128-128c-12.5-12.5-12.5-32.8 0-45.3s32.8-12.5 45.3 0L160 338.7 393.4 105.4c12.5-12.5 32.8-12.5 45.3 0z"/>
-                  </svg>
-                  Approve
-                </button>
-              </template>
+            <!-- Jika staff dan belum approved - HANYA TOMBOL KEMBALI -->
+            <template v-else>
+              <button
+                @click="goBack"
+                class="flex items-center gap-2 bg-gradient-to-r from-[#0071f3] to-[#0060d1] hover:from-[#0060d1] hover:to-[#0050b1] text-white font-semibold px-6 py-2.5 rounded-xl transition-all shadow-md hover:shadow-lg"
+              >
+                Kembali
+              </button>
             </template>
           </div>
         </div>
@@ -263,15 +259,39 @@
 import { ref, onMounted, computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import openbravoApi from '@/lib/openbravo'
+import { useAuthStore } from '@/stores/auth'
 
 const route = useRoute()
 const router = useRouter()
+const authStore = useAuthStore()
 
 const loading = ref(true)
 const movement = ref(null)
 
-// ===== TAMBAHKAN: User role (sesuaikan dengan auth system Anda)
-const currentUserRole = ref('user') // default 'user', bisa diambil dari store/auth
+// ===== User Role Management - Ambil dari Pinia Store
+const getUserRole = () => {
+  try {
+    // Method 1: Dari Pinia Store (PRIORITAS UTAMA)
+    if (authStore.role) {
+      console.log('Role from Pinia Store:', authStore.role)
+      return authStore.role
+    }
+
+    // Method 2: Dari localStorage 'user'
+    const userData = localStorage.getItem('user')
+    if (userData) {
+      const parsed = JSON.parse(userData)
+      console.log('User Data from localStorage:', parsed)
+      return parsed.role || 'staff'
+    }
+
+  } catch (e) {
+    console.error('Error getting user role:', e)
+  }
+  return 'staff'
+}
+
+const currentUserRole = ref(getUserRole())
 
 // ===== Helpers
 const fmtDateID = (yyyyMmDd) => {
@@ -284,6 +304,7 @@ const fmtDateID = (yyyyMmDd) => {
     year: 'numeric',
   }).format(dt)
 }
+
 const formatNumber = (n) => new Intl.NumberFormat('id-ID').format(n ?? 0)
 
 const computeStatus = (row) => {
@@ -293,7 +314,27 @@ const computeStatus = (row) => {
   return 'On Review'
 }
 
-// ===== API: Header by movement id
+// ===== Computed Properties
+const isApproved = computed(() => {
+  if (!movement.value) return false
+  const processed = !!movement.value.processed
+  const posted = (movement.value.posted ?? '').toString().trim().toUpperCase()
+  return processed && (posted === 'Y' || posted === 'D')
+})
+
+const isManager = computed(() => {
+  const role = currentUserRole.value?.toLowerCase()
+  console.log('🔍 Role Check:', {
+    raw: currentUserRole.value,
+    lowercase: role,
+    isManager: role === 'manager',
+    fromStore: authStore.role
+  })
+  // Cek apakah role adalah 'manager'
+  return role === 'manager'
+})
+
+// ===== API Functions
 const fetchMovementById = async (id) => {
   const { data } = await openbravoApi.get(
     '/org.openbravo.service.json.jsonrest/MaterialMgmtInternalMovement',
@@ -318,7 +359,6 @@ const fetchMovementById = async (id) => {
   }
 }
 
-// ===== API: Locator -> Warehouse
 const fetchLocatorWarehouse = async (locatorId) => {
   if (!locatorId) return { warehouseId: null, warehouseName: null, locatorName: null }
   const { data } = await openbravoApi.get('/org.openbravo.service.json.jsonrest/Locator', {
@@ -337,7 +377,6 @@ const fetchLocatorWarehouse = async (locatorId) => {
   }
 }
 
-// ===== API: Lines
 const fetchGudangByMovementId = async (movementId) => {
   const { data } = await openbravoApi.get(
     '/org.openbravo.service.json.jsonrest/MaterialMgmtInternalMovementLine',
@@ -364,7 +403,6 @@ const fetchGudangByMovementId = async (movementId) => {
   }))
 }
 
-// ===== API: Materials
 const fetchMaterialByMovementId = async (movementId) => {
   const { data } = await openbravoApi.get(
     '/org.openbravo.service.json.jsonrest/MaterialMgmtInternalMovementLine',
@@ -386,8 +424,15 @@ const fetchMaterialByMovementId = async (movementId) => {
   }))
 }
 
+// ===== Lifecycle
 onMounted(async () => {
   loading.value = true
+  
+  // Debug: log role saat mounted
+  console.log('=== DETAIL MOVEMENT DEBUG ===')
+  console.log('Current User Role:', currentUserRole.value)
+  console.log('Is Manager:', isManager.value)
+  
   try {
     const movementId = route.params.id
 
@@ -416,38 +461,39 @@ onMounted(async () => {
     const materials = await fetchMaterialByMovementId(movementId)
     movement.value.materials = materials
   } catch (e) {
-    console.error(e)
+    console.error('Error loading movement:', e)
     movement.value = null
   } finally {
     loading.value = false
   }
 })
 
-const isApproved = computed(() => {
-  if (!movement.value) return false
-  const processed = !!movement.value.processed
-  const posted = (movement.value.posted ?? '').toString().trim().toUpperCase()
-  return processed && (posted === 'Y' || posted === 'D')
-})
-
-const isManager = computed(() => {
-  return currentUserRole.value?.toLowerCase() === 'manager'
-})
-
-// ===== TAMBAHKAN: Handler reject
+// ===== Action Handlers
 const handleReject = () => {
   if (confirm('Apakah Anda yakin ingin reject movement ini?')) {
     console.log('Reject clicked for', movement.value?.id)
-    // TODO: panggil API untuk reject
+    // TODO: Implementasi API reject
+    // Contoh:
+    // await openbravoApi.post('/reject-endpoint', { movementId: movement.value.id })
     alert('Movement telah di-reject (placeholder)')
+    goBack()
   }
 }
 
-const handleApprove = () => {
+const handleApprove = async () => {
   if (confirm('Apakah Anda yakin ingin approve movement ini?')) {
     console.log('Approve clicked for', movement.value?.id)
-    // TODO: panggil API Openbravo untuk proses & post dokumen
-    alert('Movement telah di-approve (placeholder)')
+    try {
+      // TODO: Implementasi API approve
+      // Contoh:
+      // await openbravoApi.post('/approve-endpoint', { movementId: movement.value.id })
+      alert('Movement telah di-approve (placeholder)')
+      // Refresh data atau redirect
+      goBack()
+    } catch (error) {
+      console.error('Error approving movement:', error)
+      alert('Gagal approve movement')
+    }
   }
 }
 

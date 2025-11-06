@@ -307,7 +307,7 @@ onMounted(() => {
               <span class="w-10 h-10 bg-gradient-to-br from-[#ffffff] to-[#ffffff] rounded-lg flex items-center justify-center text-white text-lg">
                 🌱
               </span>
-              Dashboard Kentang GreenHouse
+              Dashboard MHN GreenHouse
             </h1>
             <p class="text-sm text-gray-500 mt-1 ml-13">Monitoring & Analisis Produksi</p>
           </div>

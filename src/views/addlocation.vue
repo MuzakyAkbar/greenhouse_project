@@ -41,7 +41,7 @@
             </div>
             <div>
               <h2 class="text-xl font-bold text-white">Step 1: Nama Lokasi</h2>
-              <p class="text-sm text-blue-100 mt-0.5">Masukkan nama lokasi untuk OpenBravo</p>
+              <p class="text-sm text-blue-100 mt-0.5">Masukkan nama lokasi untuk OpenBravo (Warehouse & Locator)</p>
             </div>
           </div>
         </div>
@@ -84,7 +84,7 @@
                 <ul class="text-xs text-gray-600 space-y-1 list-disc list-inside">
                   <li>Gunakan nama yang deskriptif dan jelas</li>
                   <li>Hindari karakter khusus yang rumit</li>
-                  <li>Pertimbangkan untuk menambahkan nomor atau kode area</li>
+                  <li>Nama akan digunakan untuk Warehouse dan Locator</li>
                 </ul>
               </div>
             </div>
@@ -150,7 +150,7 @@
             </div>
             <div class="flex-1">
               <h3 class="text-lg font-bold text-green-900 mb-1">✅ Lokasi berhasil ditambahkan!</h3>
-              <p class="text-sm text-green-700">Lokasi telah berhasil didaftarkan di OpenBravo dengan ID berikut:</p>
+              <p class="text-sm text-green-700">Warehouse dan Locator telah berhasil didaftarkan di OpenBravo dengan ID Locator berikut:</p>
             </div>
           </div>
         </div>
@@ -163,15 +163,15 @@
                 🔑
               </div>
               <div>
-                <h2 class="text-xl font-bold text-white">OpenBravo ID</h2>
-                <p class="text-sm text-purple-100 mt-0.5">ID yang dihasilkan dari OpenBravo</p>
+                <h2 class="text-xl font-bold text-white">OpenBravo Locator ID</h2>
+                <p class="text-sm text-purple-100 mt-0.5">ID Locator yang dihasilkan dari OpenBravo</p>
               </div>
             </div>
           </div>
 
           <div class="p-8 space-y-4">
             <div class="bg-gray-50 rounded-xl p-6 border-2 border-gray-200">
-              <p class="text-xs text-gray-500 font-semibold mb-2">ID OPENBRAVO:</p>
+              <p class="text-xs text-gray-500 font-semibold mb-2">ID LOCATOR OPENBRAVO:</p>
               <div class="flex items-center gap-3">
                 <code class="flex-1 text-lg font-mono font-bold text-gray-900 bg-white px-4 py-3 rounded-lg border border-gray-300">
                   {{ openbravoId }}
@@ -188,6 +188,13 @@
                 </button>
               </div>
             </div>
+            
+            <!-- Info Warehouse ID -->
+            <div v-if="createdWarehouseId" class="bg-blue-50 rounded-xl p-4 border border-blue-200">
+              <p class="text-xs text-blue-600 font-semibold mb-1">INFO: ID WAREHOUSE</p>
+              <code class="text-sm font-mono text-blue-800">{{ createdWarehouseId }}</code>
+              <p class="text-xs text-blue-600 mt-1">Warehouse telah dibuat dan terhubung dengan Locator di atas</p>
+            </div>
           </div>
         </div>
 
@@ -199,8 +206,8 @@
                 💾
               </div>
               <div>
-                <h2 class="text-xl font-bold text-white">Step 2: Masukkan ID Open Bravo</h2>
-                <p class="text-sm text-blue-100 mt-0.5">Simpan lokasi ke database</p>
+                <h2 class="text-xl font-bold text-white">Step 2: Masukkan ID Locator</h2>
+                <p class="text-sm text-blue-100 mt-0.5">Simpan lokasi ke database Supabase</p>
               </div>
             </div>
           </div>
@@ -217,16 +224,16 @@
               />
             </div>
 
-            <!-- ID OpenBravo (Read-only) -->
+            <!-- ID OpenBravo Locator (Read-only) -->
             <div class="space-y-2">
-              <label class="text-sm font-semibold text-gray-700">ID OpenBravo</label>
+              <label class="text-sm font-semibold text-gray-700">ID OpenBravo Locator</label>
               <input
                 :value="openbravoId"
                 type="text"
                 readonly
                 class="w-full bg-gray-100 border-2 border-gray-200 rounded-xl py-3 px-4 text-gray-900 font-mono font-medium cursor-not-allowed"
               />
-              <p class="text-xs text-gray-500">ID ini otomatis diambil dari OpenBravo</p>
+              <p class="text-xs text-gray-500">ID Locator yang otomatis diambil dari OpenBravo</p>
             </div>
 
             <!-- Message Display -->
@@ -310,7 +317,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref } from 'vue'
 import { useRouter } from 'vue-router'
 import openbravoApi from '@/lib/openbravo'
 import { supabase } from '@/lib/supabase'
@@ -321,6 +328,7 @@ const router = useRouter()
 const step = ref(1)
 const locationName = ref('')
 const openbravoId = ref('')
+const createdWarehouseId = ref('')
 const loading = ref(false)
 const loadingStep2 = ref(false)
 const message = ref('')
@@ -328,52 +336,13 @@ const messageStep2 = ref('')
 const isError = ref(false)
 const isErrorStep2 = ref(false)
 
-// Warehouse ID default (akan diambil dari warehouse pertama)
-const defaultWarehouseId = ref('')
+// Location Address ID default untuk warehouse
+const defaultLocationAddressId = ref('59449235C796429B884EB9BC2229AF81')
 
-// ===== LIFECYCLE: Load Default Warehouse =====
-onMounted(async () => {
-  await loadDefaultWarehouse()
-})
-
-// ===== FUNCTION: Load Warehouse Pertama sebagai Default =====
-async function loadDefaultWarehouse() {
-  try {
-    const { data } = await openbravoApi.get(
-      '/org.openbravo.service.json.jsonrest/Warehouse',
-      {
-        params: {
-          _startRow: 0,
-          _endRow: 1,
-          _selectedProperties: 'id,name'
-        }
-      }
-    )
-    
-    const warehouse = data?.response?.data?.[0]
-    if (warehouse?.id) {
-      defaultWarehouseId.value = warehouse.id
-      console.log('Default Warehouse loaded:', warehouse.name, warehouse.id)
-    } else {
-      console.warn('Tidak ada warehouse ditemukan di OpenBravo')
-    }
-  } catch (err) {
-    console.error('Gagal load default warehouse:', err)
-  }
-}
-
-// ===== FUNCTION: Step 1 - Submit ke OpenBravo =====
+// ===== FUNCTION: Step 1 - Submit ke OpenBravo (Warehouse + Locator) =====
 async function submitToOpenBravo() {
-  // Validasi input
   if (!locationName.value.trim()) {
     message.value = 'Mohon isi nama lokasi terlebih dahulu.'
-    isError.value = true
-    return
-  }
-
-  // Validasi warehouse tersedia
-  if (!defaultWarehouseId.value) {
-    message.value = 'Gagal mendapatkan warehouse default dari OpenBravo. Coba refresh halaman.'
     isError.value = true
     return
   }
@@ -383,46 +352,75 @@ async function submitToOpenBravo() {
   isError.value = false
 
   try {
-    // Buat payload untuk Locator (bin/lokasi) di OpenBravo
-    // Format payload harus sesuai dengan struktur yang diterima OpenBravo
-    const payload = {
+    // STEP 1A: Buat Warehouse terlebih dahulu
+    console.log('Step 1A: Creating Warehouse...')
+    
+    const warehousePayload = {
+      data: [
+        {
+          _entityName: 'Warehouse',
+          searchKey: locationName.value,
+          name: locationName.value,
+          locationAddress: defaultLocationAddressId.value
+        }
+      ]
+    }
+
+    console.log('Sending warehouse payload:', warehousePayload)
+
+    const warehouseResponse = await openbravoApi.post(
+      '/org.openbravo.service.json.jsonrest/Warehouse',
+      warehousePayload
+    )
+
+    console.log('Warehouse response:', warehouseResponse.data)
+
+    const createdWarehouse = warehouseResponse.data?.response?.data?.[0]
+    const warehouseId = createdWarehouse?.id
+
+    if (!warehouseId) {
+      throw new Error('Tidak menerima ID Warehouse dari OpenBravo.')
+    }
+
+    createdWarehouseId.value = warehouseId
+    console.log('Warehouse created with ID:', warehouseId)
+
+    // STEP 1B: Buat Locator menggunakan Warehouse ID
+    console.log('Step 1B: Creating Locator with Warehouse ID:', warehouseId)
+    
+    const locatorPayload = {
       data: [
         {
           _entityName: 'Locator',
           searchKey: locationName.value,
           _identifier: locationName.value,
-          warehouse: defaultWarehouseId.value
+          warehouse: warehouseId
         }
       ]
     }
 
-    console.log('Sending payload to OpenBravo:', payload)
+    console.log('Sending locator payload:', locatorPayload)
 
-    // POST ke endpoint Locator OpenBravo
-    const { data } = await openbravoApi.post(
+    const locatorResponse = await openbravoApi.post(
       '/org.openbravo.service.json.jsonrest/Locator',
-      payload
+      locatorPayload
     )
 
-    console.log('OpenBravo response:', data)
+    console.log('Locator response:', locatorResponse.data)
 
-    // Ambil ID yang dikembalikan dari OpenBravo
-    // Response structure: data.response.data[0].id
-    const createdLocator = data?.response?.data?.[0]
-    const createdId = createdLocator?.id
+    const createdLocator = locatorResponse.data?.response?.data?.[0]
+    const locatorId = createdLocator?.id
 
-    if (!createdId) {
-      throw new Error('Tidak menerima ID dari OpenBravo. Response tidak valid.')
+    if (!locatorId) {
+      throw new Error('Tidak menerima ID Locator dari OpenBravo.')
     }
 
-    // Simpan ID OpenBravo
-    openbravoId.value = createdId
-    message.value = '✅ Berhasil disimpan ke OpenBravo!'
+    openbravoId.value = locatorId
+    message.value = '✅ Berhasil disimpan ke OpenBravo! (Warehouse & Locator)'
     isError.value = false
 
-    console.log('Locator created successfully with ID:', createdId)
+    console.log('Locator created with ID:', locatorId)
 
-    // Pindah ke step 2 setelah 1.5 detik
     setTimeout(() => {
       step.value = 2
       message.value = ''
@@ -431,7 +429,6 @@ async function submitToOpenBravo() {
   } catch (err) {
     console.error('Error submitting to OpenBravo:', err)
     
-    // Extract error message
     const errorMsg = err.response?.data?.error?.message 
       || err.response?.data?.message 
       || err.message 
@@ -451,7 +448,6 @@ async function submitToSupabase() {
   isErrorStep2.value = false
 
   try {
-    // Insert data ke Supabase
     const { data, error } = await supabase
       .from('gh_location')
       .insert([
@@ -472,7 +468,6 @@ async function submitToSupabase() {
     messageStep2.value = '✅ Lokasi berhasil disimpan ke database!'
     isErrorStep2.value = false
 
-    // Redirect ke halaman location setelah 2 detik
     setTimeout(() => {
       router.push('/location')
     }, 2000)
@@ -508,6 +503,7 @@ function resetForm() {
   step.value = 1
   locationName.value = ''
   openbravoId.value = ''
+  createdWarehouseId.value = ''
   message.value = ''
   messageStep2.value = ''
   isError.value = false
