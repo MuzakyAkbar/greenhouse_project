@@ -11,6 +11,39 @@ import { usePotatoActivityStore } from "@/stores/potatoActivity";
 import { useActivityReportStore } from "@/stores/activityReport";
 import { useTypeDamageStore } from "@/stores/typeDamage";
 
+
+// ======================
+// LOAD MATERIAL & ACTIVITY
+// ======================
+async function loadMaterialAndActivity() {
+  try {
+    console.log("⏳ Memuat data material & activity...");
+
+    // Ambil data dari Supabase melalui store
+    const [{ data: matData, error: matError }, { data: actData, error: actError }] = await Promise.all([
+      materialStore.fetchAll(),
+      potatoActivityStore.fetchAll(),
+    ]);
+
+    if (matError) throw matError;
+    if (actError) throw actError;
+
+    materials.value = matData || [];
+    potatoActivities.value = actData || [];
+
+    console.log("✅ Material:", materials.value);
+    console.log("✅ Activity:", potatoActivities.value);
+  } catch (err) {
+    console.error("❌ Gagal memuat data:", err.message);
+    alert("Gagal memuat data material atau activity dari database.");
+  }
+}
+
+onMounted(async () => {
+  await materialStore.fetchAll(); // <- penting
+});
+
+
 // Initialize stores
 const locationStore = useLocationStore();
 const batchStore = useBatchStore();
@@ -62,22 +95,18 @@ const isSubmitting = ref(false);
 // ======================
 onMounted(async () => {
   console.log("🚀 Memuat data awal...");
-  
-  // Set tanggal hari ini
   selectedDate.value = new Date().toISOString().split("T")[0];
-  
-  // Load data dari stores
+
   try {
+    // ✅ load semua data dari store (termasuk material dari Supabase)
     await Promise.all([
       locationStore.fetchAll(),
       batchStore.getBatches(),
-      materialStore.fetchAll(),
-      potatoActivityStore.fetchAll(),
+      materialStore.fetchAll(),          // ambil data material dari tabel gh_material
+      potatoActivityStore.fetchAll(),    // ambil data activity dari tabel gh_potato_activity
     ]);
-    
+
     console.log("✅ Data berhasil dimuat");
-    console.log("Locations:", locations.value);
-    console.log("Batches:", batches.value);
     console.log("Materials:", materials.value);
     console.log("Activities:", potatoActivities.value);
   } catch (error) {
@@ -236,16 +265,6 @@ function removeMaterialRow(sectionIndex, matIndex) {
   }
 }
 
-function addWorkerRow(i) {
-  formSections.value[i].workers.push({ qty: "" });
-}
-
-function removeWorkerRow(sectionIndex, workerIndex) {
-  if (formSections.value[sectionIndex].workers.length > 1) {
-    formSections.value[sectionIndex].workers.splice(workerIndex, 1);
-  }
-}
-
 // ======================
 // WATCHER - Auto-fill CoA
 // ======================
@@ -262,6 +281,82 @@ watch(
   { deep: true }
 );
 
+// Tambahkan watcher - unit material
+watch(
+  formSections,
+  (sections) => {
+    sections.forEach((section) => {
+      // Auto-fill CoA dari activity
+      const selectedActivity = potatoActivities.value.find(
+        (a) => a.activity_id == section.activity_id
+      );
+      section.coa = selectedActivity ? selectedActivity.CoA_code : "";
+
+      // Auto-fill unit dari material
+        section.materials.forEach((material) => {
+        if (material.material_id) {
+          const selectedMaterial = materials.value.find(
+            (m) => m.material_id == material.material_id
+          );
+          
+          if (selectedMaterial) {
+            // Kolom di database adalah 'uom' (huruf kecil)
+            material.unit = selectedMaterial.uom || "";
+          }
+          
+          console.log("🔍 Auto-fill unit (watcher):", {
+            material_id: material.material_id,
+            selectedMaterial: selectedMaterial,
+            unit: material.unit
+          });
+        } else {
+          material.unit = "";
+        }
+      });
+    });
+  },
+  { deep: true }
+);
+
+function onMaterialChange(sectionIndex, materialIndex) {
+  const material = formSections.value[sectionIndex].materials[materialIndex];
+  
+  console.log("=" .repeat(50));
+  console.log("🔍 onMaterialChange DIPANGGIL!");
+  console.log("Section:", sectionIndex, "Material:", materialIndex);
+  console.log("Material ID dipilih:", material.material_id);
+  console.log("Semua materials:", materials.value);
+  
+  if (material.material_id) {
+    const selectedMaterial = materials.value.find(
+      (m) => m.material_id == material.material_id
+    );
+    
+    console.log("✅ Material ditemukan:", selectedMaterial);
+    
+    if (selectedMaterial) {
+      // Coba semua kemungkinan nama kolom
+      const unitValue = selectedMaterial.uom || 
+                        selectedMaterial.UoM || 
+                        selectedMaterial.unit || 
+                        selectedMaterial.satuan || "";
+      
+      console.log("Nilai unit yang ditemukan:", unitValue);
+      console.log("Keys material:", Object.keys(selectedMaterial));
+      
+      material.unit = unitValue;
+      
+      console.log("✅ Unit BERHASIL di-set ke:", material.unit);
+      console.log("=" .repeat(50));
+    } else {
+      console.warn("⚠️ Material tidak ditemukan di array!");
+    }
+  } else {
+    material.unit = "";
+    console.log("Material ID kosong, unit di-reset");
+  }
+}
+
 // ======================
 // SUBMIT TO DATABASE
 // ======================
@@ -271,133 +366,64 @@ const submitActivityReport = async () => {
     return;
   }
 
-  // Validasi form sections
-  const hasEmptyActivity = formSections.value.some(s => !s.activity_id);
-  if (hasEmptyActivity) {
-    alert("⚠️ Harap pilih aktivitas untuk setiap form!");
-    return;
+  // Validasi isi form sederhana
+  for (const section of formSections.value) {
+    if (!section.activity_id) {
+      alert("⚠️ Harap pilih Activity untuk setiap form!");
+      return;
+    }
+    for (const mat of section.materials) {
+      if (!mat.material_id) {
+        alert("⚠️ Harap pilih Material!");
+        return;
+      }
+      if (!mat.qty || parseFloat(mat.qty) <= 0) {
+        alert("⚠️ Qty Material harus lebih dari 0!");
+        return;
+      }
+    }
   }
 
   isSubmitting.value = true;
 
   try {
-    console.log("📤 Memulai submit data...");
+    console.log("📤 Menyimpan laporan aktivitas ke gh_activity_report...");
 
-    // 1️⃣ Simpan type damage
-    const typeDamageData = [
-      { 
-        type_damage: "Kuning", 
-        qty: parseInt(typeDamage.value.kuning) || 0,
-        batch_id: parseInt(selectedBatch.value)
-      },
-      { 
-        type_damage: "Kutilang", 
-        qty: parseInt(typeDamage.value.kutilang) || 0,
-        batch_id: parseInt(selectedBatch.value)
-      },
-      { 
-        type_damage: "Busuk", 
-        qty: parseInt(typeDamage.value.busuk) || 0,
-        batch_id: parseInt(selectedBatch.value)
-      },
-    ];
-
-    console.log("Saving type damage:", typeDamageData);
-
-    const damageResults = [];
-    for (const damage of typeDamageData) {
-      const { data, error } = await typeDamageStore.create(damage);
-      if (error) {
-        console.error("Error saving damage:", error);
-        throw new Error(`Gagal menyimpan data kerusakan: ${error.message}`);
-      }
-      if (data && data.length > 0) {
-        damageResults.push(data[0]);
-      }
-    }
-
-    const lastDamageId = damageResults.length > 0 
-      ? damageResults[damageResults.length - 1].typedamage_id 
-      : null;
-
-    console.log("✅ Type damage saved. Last ID:", lastDamageId);
-
-    // 2️⃣ Simpan activity reports
-    let successCount = 0;
-    
     for (const section of formSections.value) {
       const manpowerTotal = section.workers.reduce(
-        (a, w) => a + (parseInt(w.qty) || 0),
+        (sum, w) => sum + (parseInt(w.qty) || 0),
         0
       );
 
-      // Jika tidak ada material, tetap simpan dengan material_id null
-      if (section.materials.length === 0 || !section.materials[0].material_id) {
+      for (const mat of section.materials) {
         const payload = {
           location: selectedLocation.value,
-          batch_id: parseInt(selectedBatch.value),
-          activity_id: parseInt(section.activity_id),
-          material_id: null,
-          qty: 0,
-          UoM: null,
+          batch_id: Number(selectedBatch.value),
+          activity_id: Number(section.activity_id),
+          material_id: Number(mat.material_id),
+          qty: parseFloat(mat.qty),
+          uom: mat.unit || null,
           manpower: manpowerTotal,
           CoA: section.coa ? parseFloat(section.coa) : null,
-          typedamage_id: lastDamageId,
           report_date: selectedDate.value,
         };
 
-        console.log("Saving activity report (no material):", payload);
-
-        const { data, error } = await activityReportStore.create(payload);
-        if (error) {
-          console.error("Error saving report:", error);
-          throw new Error(`Gagal menyimpan laporan aktivitas: ${error.message}`);
-        }
-        successCount++;
-      } else {
-        // Simpan untuk setiap material
-        for (const mat of section.materials) {
-          if (!mat.material_id) continue;
-
-          const payload = {
-            location: selectedLocation.value,
-            batch_id: parseInt(selectedBatch.value),
-            activity_id: parseInt(section.activity_id),
-            material_id: parseInt(mat.material_id),
-            qty: parseFloat(mat.qty) || 0,
-            UoM: mat.unit || null,
-            manpower: manpowerTotal,
-            CoA: section.coa ? parseFloat(section.coa) : null,
-            typedamage_id: lastDamageId,
-            report_date: selectedDate.value,
-          };
-
-          console.log("Saving activity report:", payload);
-
-          const { data, error } = await activityReportStore.create(payload);
-          if (error) {
-            console.error("Error saving report:", error);
-            throw new Error(`Gagal menyimpan laporan aktivitas: ${error.message}`);
-          }
-          successCount++;
-        }
+        console.log("📦 Insert payload:", payload);
+        const { error } = await supabase.from("gh_activity_report").insert([payload]);
+        if (error) throw error;
       }
     }
 
-    console.log(`✅ ${successCount} activity reports saved successfully`);
-
-    alert(`✅ Data berhasil disimpan!\n\n📊 Total: ${successCount} laporan aktivitas\n🌱 Kerusakan tanaman tercatat`);
-
-    // Reset form
+    alert("✅ Data berhasil disimpan ke database!");
     resetForm();
-
   } catch (err) {
-    console.error("❌ Error:", err);
-    alert(`❌ Terjadi kesalahan:\n${err.message}`);
+    console.error("❌ Gagal menyimpan report:", err);
+    alert(`❌ Terjadi kesalahan: ${err.message}`);
   } finally {
     isSubmitting.value = false;
   }
 };
+
 
 // ======================
 // RESET FORM
@@ -659,12 +685,12 @@ function getBatchName(batchId) {
                     >
                       <option value="" disabled>Pilih Material</option>
                       <option
-                        v-for="mat in materials"
-                        :key="mat.material_id"
-                        :value="mat.material_id"
-                      >
-                        {{ mat.material_name || mat.name || 'Material' }}
-                      </option>
+                      v-for="mat in materials"
+                      :key="mat.material_id"
+                      :value="mat.material_id"
+                    >
+                      {{ mat.material_name }}
+                    </option>
                     </select>
                   </div>
 
@@ -682,8 +708,8 @@ function getBatchName(batchId) {
                     <label class="text-xs font-semibold text-gray-600 mb-2">Unit</label>
                     <input
                       v-model="material.unit"
-                      type="text"
-                      placeholder="kg"
+                      placeholder="Auto-filled"
+                      readonly
                       class="px-4 py-2.5 border-2 border-gray-200 rounded-lg bg-white text-gray-700 text-sm font-medium focus:outline-none focus:border-[#0071f3] focus:ring-2 focus:ring-[#0071f3]/20 transition"
                     />
                   </div>
@@ -739,13 +765,6 @@ function getBatchName(batchId) {
                   </button>
                 </div>
               </div>
-
-              <button
-                @click="addWorkerRow(index)"
-                class="w-full mt-3 bg-gradient-to-r from-[#0071f3] to-[#0060d1] hover:from-[#0060d1] hover:to-[#0050b1] text-white font-semibold px-4 py-2.5 rounded-lg transition shadow-md hover:shadow-lg text-sm"
-              >
-                + Tambah Pekerja
-              </button>
             </div>
           </div>
         </div>

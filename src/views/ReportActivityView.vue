@@ -1,4 +1,6 @@
 <script setup>
+import jsPDF from 'jspdf'
+import html2canvas from 'html2canvas'
 import { ref, onMounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useAuthStore } from '../stores/auth'
@@ -168,10 +170,65 @@ const formatDateTime = (dateStr) => {
     timeZone: 'Asia/Jakarta'
   }) + ' WIB'
 }
+
+const printReport = async () => {
+  const element = document.getElementById('print-area')
+  if (!element) {
+    alert('Elemen laporan tidak ditemukan')
+    return
+  }
+
+  // Tambahkan loading sementara
+  const loadingText = document.createElement('div')
+  loadingText.textContent = 'Sedang membuat PDF...'
+  loadingText.style.position = 'fixed'
+  loadingText.style.top = '50%'
+  loadingText.style.left = '50%'
+  loadingText.style.transform = 'translate(-50%, -50%)'
+  loadingText.style.background = 'rgba(255,255,255,0.9)'
+  loadingText.style.padding = '20px 40px'
+  loadingText.style.borderRadius = '10px'
+  loadingText.style.zIndex = '9999'
+  document.body.appendChild(loadingText)
+
+  try {
+    // Tangkap tampilan dengan html2canvas
+    const canvas = await html2canvas(element, {
+      scale: 2,
+      useCORS: true,
+      logging: false,
+      backgroundColor: '#ffffff'
+    })
+
+    const imgData = canvas.toDataURL('image/png')
+
+    // Hitung ukuran A4
+    const pdf = new jsPDF('p', 'mm', 'a4')
+    const pdfWidth = pdf.internal.pageSize.getWidth()
+    const pdfHeight = pdf.internal.pageSize.getHeight()
+
+    // Rasio gambar agar proporsional di 1 halaman
+    const imgWidth = pdfWidth
+    const imgHeight = (canvas.height * pdfWidth) / canvas.width
+
+    // Jika terlalu tinggi, kecilkan agar muat di 1 halaman
+    const scaleFactor = Math.min(1, pdfHeight / imgHeight)
+    const finalHeight = imgHeight * scaleFactor
+
+    pdf.addImage(imgData, 'PNG', 0, 0, pdfWidth, finalHeight)
+    pdf.save(`ReportActivity_${reportData.value?.report_date || 'Laporan'}.pdf`)
+  } catch (err) {
+    console.error('Gagal membuat PDF:', err)
+    alert('Gagal membuat PDF')
+  } finally {
+    document.body.removeChild(loadingText)
+  }
+}
+
 </script>
 
 <template>
-  <div class="min-h-screen bg-gradient-to-br from-gray-50 to-white">
+  <div id="print-area" class="min-h-screen bg-gradient-to-br from-gray-50 to-white">
     <!-- Header Bar -->
     <div class="bg-white border-b border-gray-200 shadow-sm sticky top-0 z-40">
       <div class="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-5">
@@ -400,8 +457,17 @@ const formatDateTime = (dateStr) => {
           </div>
         </div>
 
-        <!-- Action Button -->
-        <div class="flex justify-center mb-8">
+        <!-- Action Buttons -->
+        <div class="flex flex-wrap gap-3 justify-center mb-8">
+          <button
+            @click="printReport"
+            class="flex items-center gap-2 bg-gray-100 hover:bg-gray-200 text-gray-700 font-semibold px-6 py-2.5 rounded-xl transition-all"
+          >
+            <svg class="w-4 h-4" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" fill="currentColor">
+              <path d="M128 0C92.7 0 64 28.7 64 64l0 96 64 0 0-96 226.7 0L384 93.3l0 66.7 64 0 0-66.7c0-17-6.7-33.3-18.7-45.3L400 18.7C388 6.7 371.7 0 354.7 0L128 0zM384 352l0 32 0 64-256 0 0-64 0-16 0-16 256 0zm64 32l32 0c17.7 0 32-14.3 32-32l0-96c0-35.3-28.7-64-64-64L64 192c-35.3 0-64 28.7-64 64l0 96c0 17.7 14.3 32 32 32l32 0 0 64c0 35.3 28.7 64 64 64l256 0c35.3 0 64-28.7 64-64l0-64zM432 248a24 24 0 1 1 0 48 24 24 0 1 1 0-48z"/>
+            </svg>
+            Cetak
+          </button>
           <button
             @click="router.push('/reportActivityList')"
             class="bg-white hover:bg-gray-50 text-gray-700 font-semibold px-8 py-3 rounded-xl border-2 border-gray-200 hover:border-[#0071f3] shadow-sm hover:shadow-lg transition-all flex items-center gap-2"
@@ -426,6 +492,7 @@ const formatDateTime = (dateStr) => {
   </div>
 </template>
 
+
 <style scoped>
 .ml-13 {
   margin-left: 3.25rem;
@@ -436,4 +503,17 @@ const formatDateTime = (dateStr) => {
     margin-left: 0;
   }
 }
+#print-area {
+  background: white;
+  padding: 10mm;
+}
+
+@media print {
+  #print-area {
+    box-shadow: none !important;
+    background: white !important;
+  }
+}
+
+
 </style>

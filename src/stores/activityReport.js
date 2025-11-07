@@ -116,64 +116,164 @@ export const useActivityReportStore = defineStore('activityReport', () => {
    * Mengubah status menjadi 'approved' dan menambahkan qty ke gh_type_damage
    */
   async function approve(report_id, approved_by) {
-    try {
-      // 1. Ambil data report
-      const { data: report, error: fetchErr } = await supabase
-        .from('gh_activity_report')
-        .select('*')
-        .eq('report_id', report_id)
+  try {
+    // 1. Ambil data report utama
+    const { data: report, error: fetchErr } = await supabase
+      .from('gh_activity_report')
+      .select('*')
+      .eq('report_id', report_id)
+      .single()
+
+    if (fetchErr) throw fetchErr
+    if (!report) throw new Error('Report tidak ditemukan')
+
+    console.log('📋 Approving report:', report_id)
+    console.log('👤 Approved by:', approved_by)
+
+    // 2. Ambil SEMUA report yang related (batch + date + location yang sama)
+    const { data: relatedReports, error: relatedErr } = await supabase
+      .from('gh_activity_report')
+      .select('*')
+      .eq('batch_id', report.batch_id)
+      .eq('report_date', report.report_date)
+      .eq('location', report.location)
+      .eq('report_status', 'onReview')
+
+    if (relatedErr) throw relatedErr
+
+    console.log(`📝 Found ${relatedReports.length} related reports to approve`)
+
+    // 3. Update SEMUA related reports menjadi approved
+    const { error: updateErr } = await supabase
+      .from('gh_activity_report')
+      .update({
+        report_status: 'approved',
+        approved_by: approved_by,
+        approved_at: new Date().toISOString()
+      })
+      .eq('batch_id', report.batch_id)
+      .eq('report_date', report.report_date)
+      .eq('location', report.location)
+      .eq('report_status', 'onReview')
+
+    if (updateErr) {
+      console.error('❌ Error updating reports:', updateErr)
+      throw updateErr
+    }
+
+    console.log('✅ All related reports updated to approved')
+
+    // 4. Get master type_damage IDs dynamically
+    const { data: masterDamages, error: masterErr } = await supabase
+      .from('gh_type_damage')
+      .select('typedamage_id, type_damage')
+      .order('typedamage_id', { ascending: true })
+
+    if (masterErr) {
+      console.error('⚠️ Error fetching master damages:', masterErr)
+      throw masterErr
+    }
+
+    // Create mapping: type_damage name -> typedamage_id
+    const damageMap = {}
+    masterDamages.forEach(d => {
+      damageMap[d.type_damage] = d.typedamage_id
+    })
+
+    console.log('🗺️ Damage mapping:', damageMap)
+
+    // 5. Hitung TOTAL damage dari semua related reports
+    let totalKuning = 0
+    let totalKutilang = 0
+    let totalBusuk = 0
+
+    relatedReports.forEach(r => {
+      totalKuning += r.type_damage_kuning || 0
+      totalKutilang += r.type_damage_kutilang || 0
+      totalBusuk += r.type_damage_busuk || 0
+    })
+
+    console.log(`📊 Total damages - Kuning: ${totalKuning}, Kutilang: ${totalKutilang}, Busuk: ${totalBusuk}`)
+
+    // 6. Update qty di gh_type_damage (master table)
+    // Kuning
+    if (totalKuning > 0 && damageMap['Kuning']) {
+      const { data: kuningData, error: kuningFetchErr } = await supabase
+        .from('gh_type_damage')
+        .select('qty')
+        .eq('typedamage_id', damageMap['Kuning'])
         .single()
 
-      if (fetchErr) throw fetchErr
-      if (!report) throw new Error('Report tidak ditemukan')
-
-      // 2. Update status report menjadi approved
-      const { error: updateErr } = await supabase
-        .from('gh_activity_report')
-        .update({
-          report_status: 'approved',
-          approved_by: approved_by,
-          approved_at: new Date().toISOString()
-        })
-        .eq('report_id', report_id)
-
-      if (updateErr) throw updateErr
-
-      // 3. Jika ada typedamage_id dan qty, tambahkan ke total di gh_type_damage
-      if (report.typedamage_id && report.qty) {
-        // Ambil data type_damage saat ini
-        const { data: typeDamage, error: damageErr } = await supabase
-          .from('gh_type_damage')
-          .select('qty')
-          .eq('typedamage_id', report.typedamage_id)
-          .single()
-
-        if (damageErr) {
-          console.error('Error fetching type_damage:', damageErr)
-          throw damageErr
-        }
-
-        // Update total qty
-        const newQty = (typeDamage.qty || 0) + report.qty
-        const { error: updateDamageErr } = await supabase
+      if (!kuningFetchErr && kuningData) {
+        const newQty = (kuningData.qty || 0) + totalKuning
+        const { error: kuningUpdateErr } = await supabase
           .from('gh_type_damage')
           .update({ qty: newQty })
-          .eq('typedamage_id', report.typedamage_id)
-
-        if (updateDamageErr) throw updateDamageErr
-
-        console.log(`✅ Type damage #${report.typedamage_id} qty updated: ${typeDamage.qty} → ${newQty}`)
+          .eq('typedamage_id', damageMap['Kuning'])
+        
+        if (kuningUpdateErr) {
+          console.error('❌ Error updating Kuning:', kuningUpdateErr)
+        } else {
+          console.log(`✅ Kuning (ID ${damageMap['Kuning']}) updated: ${kuningData.qty} → ${newQty}`)
+        }
       }
-
-      console.log('✅ Report approved successfully')
-      await fetchAll(report.batch_id)
-      
-      return { data: report, error: null }
-    } catch (err) {
-      console.error('Exception approving report:', err)
-      return { data: null, error: err }
     }
+
+    // Kutilang
+    if (totalKutilang > 0 && damageMap['Kutilang']) {
+      const { data: kutilangData, error: kutilangFetchErr } = await supabase
+        .from('gh_type_damage')
+        .select('qty')
+        .eq('typedamage_id', damageMap['Kutilang'])
+        .single()
+
+      if (!kutilangFetchErr && kutilangData) {
+        const newQty = (kutilangData.qty || 0) + totalKutilang
+        const { error: kutilangUpdateErr } = await supabase
+          .from('gh_type_damage')
+          .update({ qty: newQty })
+          .eq('typedamage_id', damageMap['Kutilang'])
+        
+        if (kutilangUpdateErr) {
+          console.error('❌ Error updating Kutilang:', kutilangUpdateErr)
+        } else {
+          console.log(`✅ Kutilang (ID ${damageMap['Kutilang']}) updated: ${kutilangData.qty} → ${newQty}`)
+        }
+      }
+    }
+
+    // Busuk
+    if (totalBusuk > 0 && damageMap['Busuk']) {
+      const { data: busukData, error: busukFetchErr } = await supabase
+        .from('gh_type_damage')
+        .select('qty')
+        .eq('typedamage_id', damageMap['Busuk'])
+        .single()
+
+      if (!busukFetchErr && busukData) {
+        const newQty = (busukData.qty || 0) + totalBusuk
+        const { error: busukUpdateErr } = await supabase
+          .from('gh_type_damage')
+          .update({ qty: newQty })
+          .eq('typedamage_id', damageMap['Busuk'])
+        
+        if (busukUpdateErr) {
+          console.error('❌ Error updating Busuk:', busukUpdateErr)
+        } else {
+          console.log(`✅ Busuk (ID ${damageMap['Busuk']}) updated: ${busukData.qty} → ${newQty}`)
+        }
+      }
+    }
+
+    console.log('✅ Report approved successfully')
+    await fetchAll(report.batch_id)
+    
+    return { data: relatedReports, error: null }
+  } catch (err) {
+    console.error('❌ Exception approving report:', err)
+    return { data: null, error: err }
   }
+}
 
   /**
    * ✅ REQUEST REVISION
@@ -290,9 +390,9 @@ export const useActivityReportStore = defineStore('activityReport', () => {
     create, 
     update, 
     remove,
-    approve,           // ✅ New
-    requestRevision,   // ✅ New
-    revise,           // ✅ New
+    approve,
+    requestRevision,
+    revise,
     getStatusDisplay,
     getStatusColorClass
   }

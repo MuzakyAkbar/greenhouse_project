@@ -41,7 +41,7 @@ const formSections = ref([
     id: Date.now(),
     activity_id: null,
     CoA: null,
-    materials: [{ material_id: null, qty: null, UoM: '' }],
+    materials: [{ material_id: null, qty: null, uom: '' }],
     manpower: null
   }
 ])
@@ -113,7 +113,7 @@ onMounted(async () => {
       if (!acc[activityId]) {
         acc[activityId] = {
           activity_id: activityId,
-          CoA: report.CoA,
+          CoA: report.CoA || report.CoA,  // Handle both cases
           manpower: report.manpower,
           materials: []
         }
@@ -123,7 +123,7 @@ onMounted(async () => {
         acc[activityId].materials.push({
           material_id: report.material_id,
           qty: report.qty,
-          UoM: report.UoM
+          uom: report.uom || report.uom  // Handle both cases
         })
       }
       
@@ -136,7 +136,7 @@ onMounted(async () => {
       CoA: activity.CoA,
       materials: activity.materials.length > 0 
         ? activity.materials 
-        : [{ material_id: null, qty: null, UoM: '' }],
+        : [{ material_id: null, qty: null, uom: '' }],
       manpower: activity.manpower
     }))
 
@@ -179,7 +179,7 @@ function addFormSection() {
     id: Date.now(),
     activity_id: null,
     CoA: null,
-    materials: [{ material_id: null, qty: null, UoM: '' }],
+    materials: [{ material_id: null, qty: null, uom: '' }],
     manpower: null
   })
 }
@@ -191,7 +191,7 @@ function removeFormSection(index) {
 }
 
 function addMaterialRow(sectionIndex) {
-  formSections.value[sectionIndex].materials.push({ material_id: null, qty: null, UoM: '' })
+  formSections.value[sectionIndex].materials.push({ material_id: null, qty: null, uom: '' })
 }
 
 function removeMaterialRow(sectionIndex, matIndex) {
@@ -215,30 +215,29 @@ const handleSubmit = async () => {
       throw new Error('Semua aktivitas wajib dipilih')
     }
 
-    // 1. Delete old reports
+    // 1. Get all old reports yang perlu di-update
     const { data: oldReports } = await activityReportStore.fetchAll()
-    const toDelete = oldReports.filter(r => 
+    const reportsToUpdate = oldReports.filter(r => 
       r.batch_id === originalData.value.batch_id &&
       r.report_date === originalData.value.report_date &&
       r.location === originalData.value.location &&
       r.report_status === 'needRevision'
     )
 
-    for (const report of toDelete) {
-      await activityReportStore.remove(report.report_id)
-    }
+    console.log('📋 Old reports to update:', reportsToUpdate.length)
 
-    // 2. Create new activity reports with type_damage columns
+    // 2. Build array of all new report payloads
+    const newReportPayloads = []
+    
     for (const section of formSections.value) {
       if (section.materials.length === 0 || !section.materials[0].material_id) {
-        // ✅ UPDATED: Include type_damage columns
-        const payload = {
+        newReportPayloads.push({
           location: form.value.location,
           batch_id: parseInt(form.value.batch_id),
           activity_id: parseInt(section.activity_id),
           material_id: null,
           qty: 0,
-          UoM: null,
+          uom: null,
           manpower: parseInt(section.manpower) || 0,
           CoA: section.CoA ? parseFloat(section.CoA) : null,
           type_damage_kuning: parseInt(typeDamage.value.kuning) || 0,
@@ -251,22 +250,18 @@ const handleSubmit = async () => {
           revision_requested_at: null,
           revised_by: authStore.user?.username || authStore.user?.email || 'Staff',
           revised_at: new Date().toISOString()
-        }
-
-        const { error: createError } = await activityReportStore.create(payload)
-        if (createError) throw new Error(`Gagal menyimpan laporan: ${createError.message}`)
+        })
       } else {
         for (const mat of section.materials) {
           if (!mat.material_id) continue
 
-          // ✅ UPDATED: Include type_damage columns
-          const payload = {
+          newReportPayloads.push({
             location: form.value.location,
             batch_id: parseInt(form.value.batch_id),
             activity_id: parseInt(section.activity_id),
             material_id: parseInt(mat.material_id),
             qty: parseFloat(mat.qty) || 0,
-            UoM: mat.UoM || null,
+            uom: mat.uom || null,
             manpower: parseInt(section.manpower) || 0,
             CoA: section.CoA ? parseFloat(section.CoA) : null,
             type_damage_kuning: parseInt(typeDamage.value.kuning) || 0,
@@ -279,10 +274,43 @@ const handleSubmit = async () => {
             revision_requested_at: null,
             revised_by: authStore.user?.username || authStore.user?.email || 'Staff',
             revised_at: new Date().toISOString()
-          }
+          })
+        }
+      }
+    }
 
-          const { error: createError } = await activityReportStore.create(payload)
-          if (createError) throw new Error(`Gagal menyimpan laporan: ${createError.message}`)
+    console.log('📝 New payloads to save:', newReportPayloads.length)
+
+    // 3. UPDATE existing reports or DELETE extra ones
+    for (let i = 0; i < reportsToUpdate.length; i++) {
+      if (i < newReportPayloads.length) {
+        // UPDATE existing report dengan data baru
+        console.log(`🔄 Updating report_id ${reportsToUpdate[i].report_id}`)
+        const { error: updateError } = await activityReportStore.update(
+          reportsToUpdate[i].report_id, 
+          newReportPayloads[i]
+        )
+        
+        if (updateError) {
+          console.error('Update error:', updateError)
+          throw new Error(`Gagal update laporan #${reportsToUpdate[i].report_id}: ${updateError.message}`)
+        }
+      } else {
+        // DELETE extra old reports (jika jumlah berkurang)
+        console.log(`🗑️ Deleting extra report_id ${reportsToUpdate[i].report_id}`)
+        await activityReportStore.remove(reportsToUpdate[i].report_id)
+      }
+    }
+
+    // 4. CREATE new reports jika ada penambahan
+    if (newReportPayloads.length > reportsToUpdate.length) {
+      for (let i = reportsToUpdate.length; i < newReportPayloads.length; i++) {
+        console.log(`➕ Creating new report (${i + 1})`)
+        const { error: createError } = await activityReportStore.create(newReportPayloads[i])
+        
+        if (createError) {
+          console.error('Create error:', createError)
+          throw new Error(`Gagal membuat laporan baru: ${createError.message}`)
         }
       }
     }
@@ -589,7 +617,7 @@ const handleCancel = () => {
                   <div class="w-full md:w-32 flex flex-col">
                     <label class="text-xs font-semibold text-gray-600 mb-2">Unit</label>
                     <input
-                      v-model="material.UoM"
+                      v-model="material.uom"
                       type="text"
                       placeholder="kg"
                       class="w-full px-4 py-2.5 border-2 border-gray-200 rounded-lg focus:border-[#0071f3] focus:outline-none transition"
@@ -700,6 +728,9 @@ input[type="number"] {
 }
 
 select {
+  appearance: none;
+  -webkit-appearance: none;
+  -moz-appearance: none;
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3E%3Cpath stroke='%236b7280' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.5' d='m6 8 4 4 4-4'/%3E%3C/svg%3E");
   background-position: right 0.75rem center;
   background-repeat: no-repeat;
