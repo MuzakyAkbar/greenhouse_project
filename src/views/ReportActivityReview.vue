@@ -102,7 +102,7 @@ onMounted(async () => {
         acc[activityId].materials.push({
           material_id: report.material_id,
           qty: report.qty,
-          UoM: report.UoM
+          uom: report.uom
         })
       }
       
@@ -146,32 +146,23 @@ const getMaterialName = (materialId) => {
 // ✅ UPDATED: Read from columns instead of gh_type_damage table
 const getDamageInfo = () => {
   if (!reportData.value) return []
-  
-  const damages = []
-  
-  if (reportData.value.type_damage_kuning > 0) {
-    damages.push({
+
+  return [
+    {
       type: 'Kuning',
-      qty: reportData.value.type_damage_kuning
-    })
-  }
-  
-  if (reportData.value.type_damage_kutilang > 0) {
-    damages.push({
+      qty: reportData.value.type_damage_kuning || 0
+    },
+    {
       type: 'Kutilang',
-      qty: reportData.value.type_damage_kutilang
-    })
-  }
-  
-  if (reportData.value.type_damage_busuk > 0) {
-    damages.push({
+      qty: reportData.value.type_damage_kutilang || 0
+    },
+    {
       type: 'Busuk',
-      qty: reportData.value.type_damage_busuk
-    })
-  }
-  
-  return damages
+      qty: reportData.value.type_damage_busuk || 0
+    }
+  ]
 }
+
 
 const formatDate = (dateStr) => {
   if (!dateStr) return '-'
@@ -306,7 +297,6 @@ const statusBadge = computed(() => {
 
 <template>
   <div class="min-h-screen bg-gradient-to-br from-gray-50 to-white">
-    <!-- Header Bar -->
     <div class="bg-white border-b border-gray-200 shadow-sm sticky top-0 z-40">
       <div class="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-5">
         <div class="flex items-center gap-4">
@@ -339,10 +329,8 @@ const statusBadge = computed(() => {
       </div>
     </div>
 
-    <!-- Main Content -->
     <div class="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
       
-      <!-- Loading State -->
       <div v-if="loading" class="flex items-center justify-center py-20">
         <div class="text-center">
           <div class="inline-block w-12 h-12 border-4 border-[#0071f3] border-t-transparent rounded-full animate-spin"></div>
@@ -350,7 +338,6 @@ const statusBadge = computed(() => {
         </div>
       </div>
 
-      <!-- Error State -->
       <div v-else-if="error" class="bg-red-50 border-2 border-red-200 rounded-2xl p-6 mb-6">
         <div class="flex items-center gap-3">
           <span class="text-3xl">❌</span>
@@ -361,9 +348,7 @@ const statusBadge = computed(() => {
         </div>
       </div>
 
-      <!-- Content -->
       <template v-else-if="reportData">
-        <!-- Report Info Banner -->
         <div class="mb-6">
           <div class="bg-gradient-to-r from-blue-50 to-indigo-50 border-2 border-blue-200 rounded-2xl p-5">
             <div class="flex items-center justify-between flex-wrap gap-4">
@@ -379,12 +364,10 @@ const statusBadge = computed(() => {
           </div>
         </div>
 
-        <!-- Basic Info Section -->
         <div class="mb-8">
           <h2 class="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-3">Informasi Dasar</h2>
           <div class="bg-white rounded-2xl border-2 border-gray-100 shadow-sm p-6">
             <div class="grid grid-cols-1 md:grid-cols-3 gap-5">
-              <!-- Date -->
               <div class="flex flex-col">
                 <label class="text-sm font-semibold text-gray-700 mb-2 flex items-center gap-2">
                   <svg class="w-4 h-4 text-[#0071f3]" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512" fill="currentColor">
@@ -397,7 +380,6 @@ const statusBadge = computed(() => {
                 </div>
               </div>
 
-              <!-- Location -->
               <div class="flex flex-col">
                 <label class="text-sm font-semibold text-gray-700 mb-2 flex items-center gap-2">
                   <span class="text-lg">📍</span>
@@ -408,7 +390,6 @@ const statusBadge = computed(() => {
                 </div>
               </div>
 
-              <!-- Batch -->
               <div class="flex flex-col">
                 <label class="text-sm font-semibold text-gray-700 mb-2 flex items-center gap-2">
                   <span class="text-lg">🏷️</span>
@@ -423,26 +404,25 @@ const statusBadge = computed(() => {
         </div>
 
         <!-- Damage Types Section -->
-        <div class="mb-8" v-if="getDamageInfo().length > 0">
-          <h2 class="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-3">Jenis Kerusakan Tanaman</h2>
-          <div class="bg-white rounded-2xl border-2 border-gray-100 shadow-sm p-6">
-            <div class="grid grid-cols-1 md:grid-cols-3 gap-5">
-              <div v-for="damage in getDamageInfo()" :key="damage.type" class="flex flex-col">
-                <label class="text-sm font-semibold text-gray-700 mb-2 flex items-center gap-2">
-                  <span v-if="damage.type === 'Kuning'" class="w-6 h-6 bg-yellow-100 rounded-full flex items-center justify-center text-xs">🟡</span>
-                  <span v-else-if="damage.type === 'Kutilang'" class="w-6 h-6 bg-orange-100 rounded-full flex items-center justify-center text-xs">🟠</span>
-                  <span v-else-if="damage.type === 'Busuk'" class="w-6 h-6 bg-red-100 rounded-full flex items-center justify-center text-xs">🔴</span>
-                  {{ damage.type }}
-                </label>
-                <div class="px-4 py-3 border-2 border-gray-200 rounded-xl bg-gray-50 text-gray-700 font-medium text-center">
-                  {{ damage.qty || 0 }}
-                </div>
+        <div class="mb-8">
+        <h2 class="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-3">Jenis Kerusakan Tanaman</h2>
+        <div class="bg-white rounded-2xl border-2 border-gray-100 shadow-sm p-6">
+          <div class="grid grid-cols-1 md:grid-cols-3 gap-5">
+            <div v-for="damage in getDamageInfo()" :key="damage.type" class="flex flex-col">
+              <label class="text-sm font-semibold text-gray-700 mb-2 flex items-center gap-2">
+                <span v-if="damage.type === 'Kuning'" class="w-6 h-6 bg-yellow-100 rounded-full flex items-center justify-center text-xs">🟡</span>
+                <span v-else-if="damage.type === 'Kutilang'" class="w-6 h-6 bg-orange-100 rounded-full flex items-center justify-center text-xs">🟠</span>
+                <span v-else-if="damage.type === 'Busuk'" class="w-6 h-6 bg-red-100 rounded-full flex items-center justify-center text-xs">🔴</span>
+                {{ damage.type }}
+              </label>
+              <div class="px-4 py-3 border-2 border-gray-200 rounded-xl bg-gray-50 text-gray-700 font-medium text-center">
+                {{ damage.qty }}
               </div>
             </div>
           </div>
         </div>
-
-        <!-- Activities Section -->
+      </div>
+      
         <div class="mb-8">
           <h2 class="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-3">Detail Aktivitas</h2>
           <div class="space-y-6">
@@ -451,7 +431,6 @@ const statusBadge = computed(() => {
               :key="index"
               class="bg-white rounded-2xl border-2 border-gray-100 shadow-sm p-6"
             >
-              <!-- Activity Header -->
               <div class="flex items-center gap-3 mb-6 pb-4 border-b-2 border-gray-100">
                 <div class="w-10 h-10 bg-gradient-to-br from-[#0071f3] to-[#8FABD4] rounded-lg flex items-center justify-center text-white font-bold">
                   {{ index + 1 }}
@@ -465,7 +444,6 @@ const statusBadge = computed(() => {
               </div>
 
               <div class="space-y-5">
-                <!-- CoA -->
                 <div class="flex flex-col">
                   <label class="text-sm font-semibold text-gray-700 mb-2">Chart of Account (CoA)</label>
                   <div class="px-4 py-3 border-2 border-gray-200 rounded-xl bg-gray-50 text-gray-700 font-medium">
@@ -473,7 +451,6 @@ const statusBadge = computed(() => {
                   </div>
                 </div>
 
-                <!-- Materials Section -->
                 <div v-if="activity.materials.length > 0" class="bg-gray-50 rounded-xl p-5">
                   <h4 class="text-base font-bold text-gray-900 flex items-center gap-2 mb-4">
                     <span class="text-lg">📦</span>
@@ -500,14 +477,13 @@ const statusBadge = computed(() => {
                       <div class="w-full sm:w-32 flex flex-col">
                         <label class="text-xs font-semibold text-gray-600 mb-2">Unit</label>
                         <div class="px-4 py-2.5 border-2 border-gray-200 rounded-lg bg-gray-50 text-gray-700 text-sm font-medium text-center">
-                          {{ mat.UoM || '-' }}
+                          {{ mat.uom || '-' }}
                         </div>
                       </div>
                     </div>
                   </div>
                 </div>
 
-                <!-- Manpower Section -->
                 <div class="bg-gray-50 rounded-xl p-5">
                   <h4 class="text-base font-bold text-gray-900 flex items-center gap-2 mb-4">
                     <span class="text-lg">👷</span>
@@ -527,7 +503,6 @@ const statusBadge = computed(() => {
           </div>
         </div>
 
-        <!-- Action Buttons -->
         <div class="mb-8">
           <h2 class="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-3">Review Action</h2>
           <div class="bg-white rounded-2xl border-2 border-gray-100 shadow-sm p-6">
@@ -565,7 +540,6 @@ const statusBadge = computed(() => {
         </div>
       </template>
 
-      <!-- Footer -->
       <footer class="text-center py-10 mt-8 border-t border-gray-200">
         <div class="flex items-center justify-center gap-2 mb-2">
           <span class="text-2xl">🌱</span>
@@ -575,7 +549,6 @@ const statusBadge = computed(() => {
       </footer>
     </div>
 
-    <!-- Revision Modal -->
     <div v-if="showRevisionModal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
       <div class="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl animate-fade-in">
         <div class="flex items-center justify-between mb-4">
