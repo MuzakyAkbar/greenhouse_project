@@ -192,6 +192,10 @@ const printReport = async () => {
   document.body.appendChild(loadingText)
 
   try {
+    // Sembunyikan tombol yang tidak ingin dicetak
+    const hiddenElements = element.querySelectorAll('.no-print')
+    hiddenElements.forEach(el => el.style.display = 'none')
+
     // Tangkap tampilan dengan html2canvas
     const canvas = await html2canvas(element, {
       scale: 2,
@@ -210,8 +214,6 @@ const printReport = async () => {
     // Rasio gambar agar proporsional di 1 halaman
     const imgWidth = pdfWidth
     const imgHeight = (canvas.height * pdfWidth) / canvas.width
-
-    // Jika terlalu tinggi, kecilkan agar muat di 1 halaman
     const scaleFactor = Math.min(1, pdfHeight / imgHeight)
     const finalHeight = imgHeight * scaleFactor
 
@@ -221,10 +223,13 @@ const printReport = async () => {
     console.error('Gagal membuat PDF:', err)
     alert('Gagal membuat PDF')
   } finally {
+    // Tampilkan kembali tombol
+    const hiddenElements = element.querySelectorAll('.no-print')
+    hiddenElements.forEach(el => (el.style.display = ''))
+
     document.body.removeChild(loadingText)
   }
 }
-
 </script>
 
 <template>

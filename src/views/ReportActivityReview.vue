@@ -542,7 +542,6 @@ const statusBadge = computed(() => {
                 </svg>
                 {{ processing ? 'Processing...' : ' Approve Report' }}
               </button>
-
               <button
                 @click="openRevisionModal"
                 :disabled="processing"
