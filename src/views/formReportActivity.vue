@@ -9,40 +9,8 @@ import { useBatchStore } from "@/stores/batch";
 import { useMaterialStore } from "@/stores/material";
 import { usePotatoActivityStore } from "@/stores/potatoActivity";
 import { useActivityReportStore } from "@/stores/activityReport";
+import { useActivityStore } from "@/stores/activity"; // ✅ ADDED
 import { useTypeDamageStore } from "@/stores/typeDamage";
-
-
-// ======================
-// LOAD MATERIAL & ACTIVITY
-// ======================
-async function loadMaterialAndActivity() {
-  try {
-    console.log("⏳ Memuat data material & activity...");
-
-    // Ambil data dari Supabase melalui store
-    const [{ data: matData, error: matError }, { data: actData, error: actError }] = await Promise.all([
-      materialStore.fetchAll(),
-      potatoActivityStore.fetchAll(),
-    ]);
-
-    if (matError) throw matError;
-    if (actError) throw actError;
-
-    materials.value = matData || [];
-    potatoActivities.value = actData || [];
-
-    console.log("✅ Material:", materials.value);
-    console.log("✅ Activity:", potatoActivities.value);
-  } catch (err) {
-    console.error("❌ Gagal memuat data:", err.message);
-    alert("Gagal memuat data material atau activity dari database.");
-  }
-}
-
-onMounted(async () => {
-  await materialStore.fetchAll(); // <- penting
-});
-
 
 // Initialize stores
 const locationStore = useLocationStore();
@@ -50,6 +18,7 @@ const batchStore = useBatchStore();
 const materialStore = useMaterialStore();
 const potatoActivityStore = usePotatoActivityStore();
 const activityReportStore = useActivityReportStore();
+const activityStore = useActivityStore(); // ✅ ADDED
 const typeDamageStore = useTypeDamageStore();
 
 // ======================
@@ -59,11 +28,17 @@ const selectedDate = ref("");
 const selectedLocation = ref("");
 const selectedBatch = ref("");
 
-const typeDamage = ref({
-  kuning: 0,
-  kutilang: 0,
-  busuk: 0,
-});
+const typeDamages = ref([
+  {
+    type_damage: '',
+    kuning: 0,
+    kutilang: 0,
+    busuk: 0
+  }
+])
+
+
+
 
 // QR Scanner
 const showScanner = ref(false);
@@ -76,7 +51,7 @@ const formSections = ref([
     id: Date.now(),
     activity_id: "",
     coa: "",
-    materials: [{ material_id: "", qty: "", unit: "" }],
+    materials: [{ material_name: "", qty: "", uom: "" }],
     workers: [{ qty: "" }],
   },
 ]);
@@ -84,7 +59,7 @@ const formSections = ref([
 // Computed properties untuk data dari stores
 const locations = computed(() => locationStore.locations);
 const batches = computed(() => batchStore.batches);
-const materials = computed(() => materialStore.materials);
+const materialStocks = computed(() => materialStore.materialStock);
 const potatoActivities = computed(() => potatoActivityStore.activities);
 
 // Loading states
@@ -98,16 +73,13 @@ onMounted(async () => {
   selectedDate.value = new Date().toISOString().split("T")[0];
 
   try {
-    // ✅ load semua data dari store (termasuk material dari Supabase)
     await Promise.all([
       locationStore.fetchAll(),
       batchStore.getBatches(),
-      materialStore.fetchAll(),          // ambil data material dari tabel gh_material
-      potatoActivityStore.fetchAll(),    // ambil data activity dari tabel gh_potato_activity
+      potatoActivityStore.fetchAll(),
     ]);
 
     console.log("✅ Data berhasil dimuat");
-    console.log("Materials:", materials.value);
     console.log("Activities:", potatoActivities.value);
   } catch (error) {
     console.error("❌ Gagal memuat data:", error);
@@ -118,6 +90,34 @@ onMounted(async () => {
 onUnmounted(() => {
   stopScanner();
 });
+
+// ======================
+// LOAD MATERIAL STOCK BY LOCATION
+// ======================
+watch(selectedLocation, async (newLocationId) => {
+  if (newLocationId) {
+    console.log("📦 Loading material stock for location:", newLocationId);
+    
+    try {
+      const result = await materialStore.fetchStock({ location_id: Number(newLocationId) });
+      
+      if (result.error) {
+        console.error("❌ Error loading material stock:", result.error);
+        alert(`Gagal memuat material stock: ${result.error.message}`);
+      } else {
+        console.log("✅ Material stocks loaded:", materialStocks.value);
+        console.log(`📊 Total materials: ${materialStocks.value.length}`);
+      }
+    } catch (error) {
+      console.error("❌ Exception loading material stock:", error);
+      alert(`Terjadi kesalahan saat memuat stock: ${error.message}`);
+    }
+  } else {
+    // Clear material stocks when location is deselected
+    materialStore.materialStock = [];
+    console.log("🧹 Material stocks cleared");
+  }
+}, { immediate: false });
 
 // ======================
 // QR SCANNER FUNCTIONS
@@ -168,23 +168,19 @@ const onScanSuccess = async (decodedText) => {
     const locationId = Number(data.location_id);
     const batchId = Number(data.batch_id);
 
-    // Set lokasi
     selectedLocation.value = locationId;
     selectedBatch.value = batchId;
 
-    // Cari nama lokasi dari store
     let locationItem = locations.value.find(l => Number(l.location_id) === locationId);
     const locationName = locationItem?.location || "Lokasi tidak ditemukan";
 
-    // 🔍 Coba cari batch di store dulu
     let batchItem = batches.value.find(b => Number(b.batch_id) === batchId);
 
-    // Kalau tidak ada, ambil dari Supabase
     if (!batchItem) {
       console.log("⏳ Fetching batch name from Supabase...");
       const { data: batchData, error } = await supabase
         .from("gh_batch")
-        .select("batch_id, batch_name, location_id")
+        .select("batch_id, batch_name, location_id, location")
         .eq("batch_id", batchId)
         .single();
 
@@ -192,7 +188,7 @@ const onScanSuccess = async (decodedText) => {
         console.error("❌ Gagal ambil batch dari Supabase:", error.message);
       } else if (batchData) {
         console.log("✅ Batch ditemukan di DB:", batchData);
-        batches.value.push(batchData); // Tambahkan ke store agar reaktif
+        batches.value.push(batchData);
         batchItem = batchData;
       }
     }
@@ -207,8 +203,6 @@ const onScanSuccess = async (decodedText) => {
     alert("❌ QR Code tidak valid atau tidak sesuai format JSON!");
   }
 };
-
-
 
 const onScanError = (errorMessage) => {
   // Tidak log setiap error untuk menghindari spam
@@ -237,6 +231,25 @@ const stopScanner = () => {
 };
 
 // ======================
+// TYPE DAMAGE FUNCTIONS
+// ======================
+function addTypeDamageRow() {
+  typeDamages.value.push({
+    id: Date.now(),
+    type_damage: "",
+    kuning: 0,
+    kutilang: 0,
+    busuk: 0
+  });
+}
+
+function removeTypeDamageRow(index) {
+  if (typeDamages.value.length > 1) {
+    typeDamages.value.splice(index, 1);
+  }
+}
+
+// ======================
 // FORM HANDLERS
 // ======================
 function addFormSection() {
@@ -244,7 +257,7 @@ function addFormSection() {
     id: Date.now(),
     activity_id: "",
     coa: "",
-    materials: [{ material_id: "", qty: "", unit: "" }],
+    materials: [{ material_name: "", qty: "", uom: "" }],
     workers: [{ qty: "" }],
   });
 }
@@ -256,12 +269,22 @@ function removeFormSection(index) {
 }
 
 function addMaterialRow(i) {
-  formSections.value[i].materials.push({ material_id: "", qty: "", unit: "" });
+  formSections.value[i].materials.push({ material_name: "", qty: "", uom: "" });
 }
 
 function removeMaterialRow(sectionIndex, matIndex) {
   if (formSections.value[sectionIndex].materials.length > 1) {
     formSections.value[sectionIndex].materials.splice(matIndex, 1);
+  }
+}
+
+function addWorkerRow(sectionIndex) {
+  formSections.value[sectionIndex].workers.push({ qty: "" });
+}
+
+function removeWorkerRow(sectionIndex, workerIndex) {
+  if (formSections.value[sectionIndex].workers.length > 1) {
+    formSections.value[sectionIndex].workers.splice(workerIndex, 1);
   }
 }
 
@@ -281,81 +304,33 @@ watch(
   { deep: true }
 );
 
-// Tambahkan watcher - unit material
+// Watcher untuk auto-fill UoM
 watch(
   formSections,
   (sections) => {
     sections.forEach((section) => {
-      // Auto-fill CoA dari activity
-      const selectedActivity = potatoActivities.value.find(
-        (a) => a.activity_id == section.activity_id
-      );
-      section.coa = selectedActivity ? selectedActivity.CoA_code : "";
-
-      // Auto-fill unit dari material
-        section.materials.forEach((material) => {
-        if (material.material_id) {
-          const selectedMaterial = materials.value.find(
-            (m) => m.material_id == material.material_id
+      section.materials.forEach((material) => {
+        if (material.material_name) {
+          const selectedMaterial = materialStocks.value.find(
+            (m) => m.material_name === material.material_name
           );
           
           if (selectedMaterial) {
-            // Kolom di database adalah 'uom' (huruf kecil)
-            material.unit = selectedMaterial.uom || "";
+            material.uom = selectedMaterial.uom || "";
           }
           
-          console.log("🔍 Auto-fill unit (watcher):", {
-            material_id: material.material_id,
-            selectedMaterial: selectedMaterial,
-            unit: material.unit
+          console.log("🔍 Auto-fill UoM:", {
+            material_name: material.material_name,
+            uom: material.uom
           });
         } else {
-          material.unit = "";
+          material.uom = "";
         }
       });
     });
   },
   { deep: true }
 );
-
-function onMaterialChange(sectionIndex, materialIndex) {
-  const material = formSections.value[sectionIndex].materials[materialIndex];
-  
-  console.log("=" .repeat(50));
-  console.log("🔍 onMaterialChange DIPANGGIL!");
-  console.log("Section:", sectionIndex, "Material:", materialIndex);
-  console.log("Material ID dipilih:", material.material_id);
-  console.log("Semua materials:", materials.value);
-  
-  if (material.material_id) {
-    const selectedMaterial = materials.value.find(
-      (m) => m.material_id == material.material_id
-    );
-    
-    console.log("✅ Material ditemukan:", selectedMaterial);
-    
-    if (selectedMaterial) {
-      // Coba semua kemungkinan nama kolom
-      const unitValue = selectedMaterial.uom || 
-                        selectedMaterial.UoM || 
-                        selectedMaterial.unit || 
-                        selectedMaterial.satuan || "";
-      
-      console.log("Nilai unit yang ditemukan:", unitValue);
-      console.log("Keys material:", Object.keys(selectedMaterial));
-      
-      material.unit = unitValue;
-      
-      console.log("✅ Unit BERHASIL di-set ke:", material.unit);
-      console.log("=" .repeat(50));
-    } else {
-      console.warn("⚠️ Material tidak ditemukan di array!");
-    }
-  } else {
-    material.unit = "";
-    console.log("Material ID kosong, unit di-reset");
-  }
-}
 
 // ======================
 // SUBMIT TO DATABASE
@@ -365,20 +340,36 @@ const submitActivityReport = async () => {
     alert("⚠️ Pilih lokasi dan batch terlebih dahulu!");
     return;
   }
+  if (isSubmitting.value) {
+    console.log("⚠️ Submission already in progress, ignoring...");
+    return;
+  }
 
-  // Validasi isi form sederhana
+  // Validasi form activities
   for (const section of formSections.value) {
     if (!section.activity_id) {
       alert("⚠️ Harap pilih Activity untuk setiap form!");
       return;
     }
+  }
+
+  // ✅ Validasi stock sebelum submit
+  for (const section of formSections.value) {
     for (const mat of section.materials) {
-      if (!mat.material_id) {
-        alert("⚠️ Harap pilih Material!");
+      const stockItem = materialStocks.value.find(
+        s => s.material_name === mat.material_name
+      );
+      
+      if (!stockItem) {
+        alert(`⚠️ Material ${mat.material_name} tidak ditemukan di stock!`);
         return;
       }
-      if (!mat.qty || parseFloat(mat.qty) <= 0) {
-        alert("⚠️ Qty Material harus lebih dari 0!");
+      
+      const requestedQty = parseFloat(mat.qty);
+      const availableQty = parseFloat(stockItem.qty);
+      
+      if (requestedQty > availableQty) {
+        alert(`⚠️ Stock ${mat.material_name} tidak cukup!\n\nDibutuhkan: ${requestedQty} ${mat.uom}\nTersedia: ${availableQty} ${stockItem.uom}`);
         return;
       }
     }
@@ -387,35 +378,128 @@ const submitActivityReport = async () => {
   isSubmitting.value = true;
 
   try {
-    console.log("📤 Menyimpan laporan aktivitas ke gh_activity_report...");
+    console.log("📤 Menyimpan laporan aktivitas...");
 
+    // 1. Create gh_report
+    const reportPayload = {
+      batch_id: Number(selectedBatch.value),
+      location_id: Number(selectedLocation.value),
+      report_date: selectedDate.value,
+      report_status: 'onReview'
+    };
+
+    console.log("📋 Creating report:", reportPayload);
+
+    const { data: reportData, error: reportErr } = await supabase
+      .from('gh_report')
+      .insert([reportPayload])
+      .select()
+      .single();
+
+    if (reportErr) throw reportErr;
+
+    const report_id = reportData.report_id;
+    console.log("✅ Report created with ID:", report_id);
+
+    // 2. Create type_damages
+    const validDamages = typeDamages.value.filter(damage => {
+      const hasKuning = damage.kuning && parseFloat(damage.kuning) > 0;
+      const hasKutilang = damage.kutilang && parseFloat(damage.kutilang) > 0;
+      const hasBusuk = damage.busuk && parseFloat(damage.busuk) > 0;
+      return hasKuning || hasKutilang || hasBusuk;
+    });
+
+    if (validDamages.length > 0) {
+      const damagePayloads = validDamages.map(damage => ({
+        report_id,
+        type_damage: damage.type_damage || null,
+        kuning: damage.kuning ? parseInt(damage.kuning) : null,
+        kutilang: damage.kutilang ? parseInt(damage.kutilang) : null,
+        busuk: damage.busuk ? parseInt(damage.busuk) : null
+      }));
+
+      console.log("🔍 Creating type damages:", damagePayloads);
+
+      const { error: tdErr } = await supabase
+        .from('gh_type_damage')
+        .insert(damagePayloads);
+
+      if (tdErr) {
+        console.error("⚠️ Error creating type_damages:", tdErr);
+        throw tdErr;
+      }
+      
+      console.log(`✅ ${damagePayloads.length} Type damage(s) created`);
+    }
+
+    // 3. Create activities + material_used
     for (const section of formSections.value) {
       const manpowerTotal = section.workers.reduce(
         (sum, w) => sum + (parseInt(w.qty) || 0),
         0
       );
 
-      for (const mat of section.materials) {
-        const payload = {
-          location: selectedLocation.value,
-          batch_id: Number(selectedBatch.value),
-          activity_id: Number(section.activity_id),
-          material_id: Number(mat.material_id),
-          qty: parseFloat(mat.qty),
-          uom: mat.unit || null,
-          manpower: manpowerTotal,
-          CoA: section.coa ? parseFloat(section.coa) : null,
-          report_date: selectedDate.value,
-        };
+      const selectedActivity = potatoActivities.value.find(
+        a => a.activity_id == section.activity_id
+      );
 
-        console.log("📦 Insert payload:", payload);
-        const { error } = await supabase.from("gh_activity_report").insert([payload]);
-        if (error) throw error;
+      const activityPayload = {
+        report_id,
+        act_name: selectedActivity?.activity || "",
+        CoA: section.coa ? parseFloat(section.coa) : null,
+        manpower: manpowerTotal.toString()
+      };
+
+      console.log("📝 Creating activity:", activityPayload);
+
+      const { data: activityData, error: actErr } = await supabase
+        .from('gh_activity')
+        .insert([activityPayload])
+        .select()
+        .single();
+
+      if (actErr) {
+        console.error("❌ Error creating activity:", actErr);
+        throw actErr;
+      }
+
+      const activity_id = activityData.activity_id;
+      console.log("✅ Activity created with ID:", activity_id);
+
+      // 4. Create material_used setelah activity_id tersedia
+      if (section.materials && section.materials.length > 0) {
+        const validMaterials = section.materials.filter(mat =>
+          mat.material_name && mat.qty && parseFloat(mat.qty) > 0
+        );
+
+        if (validMaterials.length > 0) {
+          const materialPayloads = validMaterials.map(mat => ({
+            activity_id,
+            material_name: mat.material_name,
+            qty: parseFloat(mat.qty),
+            uom: mat.uom || null
+          }));
+
+          console.log("📦 Creating material used records:", materialPayloads);
+
+          const { data: matData, error: matErr } = await supabase
+            .from('gh_material_used')
+            .insert(materialPayloads)
+            .select();
+
+          if (matErr) {
+            console.error("❌ Error creating material used:", matErr);
+            throw matErr;
+          }
+
+          console.log(`✅ ${matData.length} Material used record(s) created`);
+        }
       }
     }
 
     alert("✅ Data berhasil disimpan ke database!");
     resetForm();
+
   } catch (err) {
     console.error("❌ Gagal menyimpan report:", err);
     alert(`❌ Terjadi kesalahan: ${err.message}`);
@@ -431,17 +515,24 @@ const submitActivityReport = async () => {
 function resetForm() {
   selectedLocation.value = "";
   selectedBatch.value = "";
-  typeDamage.value = {
-    kuning: 0,
-    kutilang: 0,
-    busuk: 0,
-  };
+  
+  // ✅ Reset type damages
+  typeDamages.value = [
+    {
+      id: Date.now(),
+      type_damage: "",
+      kuning: 0,
+      kutilang: 0,
+      busuk: 0
+    }
+  ];
+  
   formSections.value = [
     {
       id: Date.now(),
       activity_id: "",
       coa: "",
-      materials: [{ material_id: "", qty: "", unit: "" }],
+      materials: [{ material_name: "", qty: "", uom: "" }],
       workers: [{ qty: "" }],
     },
   ];
@@ -558,46 +649,94 @@ function getBatchName(batchId) {
         </div>
       </div>
 
-      <!-- Jenis Kerusakan Tanaman -->
+      <!-- Jenis Kerusakan Tanaman - UPDATED -->
       <div class="mb-8">
-        <h2 class="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-3">Jenis Kerusakan Tanaman</h2>
-        <div class="bg-white rounded-2xl border-2 border-gray-100 shadow-sm hover:shadow-lg transition-all p-6">
-          <div class="grid grid-cols-1 md:grid-cols-3 gap-5">
-            <div class="flex flex-col">
-              <label class="text-sm font-semibold text-gray-700 mb-2 flex items-center gap-2">
-                <span class="w-6 h-6 bg-yellow-100 rounded-full flex items-center justify-center text-xs">🟡</span>
-                Kuning
-              </label>
-              <input
-                v-model="typeDamage.kuning"
-                type="number"
-                placeholder="0"
-                class="px-4 py-3 border-2 border-gray-200 rounded-xl bg-gray-50 text-gray-700 font-medium focus:outline-none focus:border-[#0071f3] focus:ring-2 focus:ring-[#0071f3]/20 transition"
-              />
-            </div>
-            <div class="flex flex-col">
-              <label class="text-sm font-semibold text-gray-700 mb-2 flex items-center gap-2">
-                <span class="w-6 h-6 bg-orange-100 rounded-full flex items-center justify-center text-xs">🟠</span>
-                Kutilang
-              </label>
-              <input
-                v-model="typeDamage.kutilang"
-                type="number"
-                placeholder="0"
-                class="px-4 py-3 border-2 border-gray-200 rounded-xl bg-gray-50 text-gray-700 font-medium focus:outline-none focus:border-[#0071f3] focus:ring-2 focus:ring-[#0071f3]/20 transition"
-              />
-            </div>
-            <div class="flex flex-col">
-              <label class="text-sm font-semibold text-gray-700 mb-2 flex items-center gap-2">
-                <span class="w-6 h-6 bg-red-100 rounded-full flex items-center justify-center text-xs">🔴</span>
-                Busuk
-              </label>
-              <input
-                v-model="typeDamage.busuk"
-                type="number"
-                placeholder="0"
-                class="px-4 py-3 border-2 border-gray-200 rounded-xl bg-gray-50 text-gray-700 font-medium focus:outline-none focus:border-[#0071f3] focus:ring-2 focus:ring-[#0071f3]/20 transition"
-              />
+        <div class="flex justify-between items-center mb-3">
+          <h2 class="text-sm font-semibold text-gray-500 uppercase tracking-wide">Jenis Kerusakan Tanaman</h2>
+          <button
+            @click="addTypeDamageRow"
+            class="flex items-center gap-2 bg-white hover:bg-gray-50 text-gray-700 font-semibold px-4 py-2 rounded-lg border-2 border-gray-200 hover:border-[#0071f3] shadow-sm transition text-sm"
+          >
+            <svg class="w-4 h-4 text-[#0071f3]" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512" fill="currentColor">
+              <path d="M256 80c0-17.7-14.3-32-32-32s-32 14.3-32 32l0 144L48 224c-17.7 0-32 14.3-32 32s14.3 32 32 32l144 0 0 144c0 17.7 14.3 32 32 32s32-14.3 32-32l0-144 144 0c17.7 0 32-14.3 32-32s-14.3-32-32-32l-144 0 0-144z"/>
+            </svg>
+            Tambah Row
+          </button>
+        </div>
+        
+        <div class="space-y-4">
+          <div 
+            v-for="(damage, index) in typeDamages" 
+            :key="damage.id"
+            class="bg-white rounded-2xl border-2 border-gray-100 shadow-sm hover:shadow-lg transition-all p-6 relative"
+          >
+            <!-- Delete Button -->
+            <button
+              @click="removeTypeDamageRow(index)"
+              v-if="typeDamages.length > 1"
+              class="absolute top-4 right-4 bg-red-500 hover:bg-red-600 text-white w-8 h-8 rounded-lg flex items-center justify-center transition shadow-md hover:shadow-lg"
+              title="Hapus Row"
+            >
+              <svg class="w-4 h-4" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512" fill="currentColor">
+                <path d="M135.2 17.7L128 32H32C14.3 32 0 46.3 0 64S14.3 96 32 96H416c17.7 0 32-14.3 32-32s-14.3-32-32-32H320l-7.2-14.3C307.4 6.8 296.3 0 284.2 0H163.8c-12.1 0-23.2 6.8-28.6 17.7zM416 128H32L53.2 467c1.6 25.3 22.6 45 47.9 45H346.9c25.3 0 46.3-19.7 47.9-45L416 128z"/>
+              </svg>
+            </button>
+
+            <div class="grid grid-cols-1 md:grid-cols-4 gap-5">
+              <!-- Type Damage (Optional Description) -->
+              <div class="flex flex-col md:col-span-1">
+                <label class="text-sm font-semibold text-gray-700 mb-2">
+                  Jenis/Catatan (Opsional)
+                </label>
+                <input
+                  v-model="damage.type_damage"
+                  type="text"
+                  placeholder="Misal: Hama, Penyakit, dll"
+                  class="px-4 py-3 border-2 border-gray-200 rounded-xl bg-gray-50 text-gray-700 font-medium focus:outline-none focus:border-[#0071f3] focus:ring-2 focus:ring-[#0071f3]/20 transition"
+                />
+              </div>
+
+              <!-- Kuning -->
+              <div class="flex flex-col">
+                <label class="text-sm font-semibold text-gray-700 mb-2 flex items-center gap-2">
+                  <span class="w-6 h-6 bg-yellow-100 rounded-full flex items-center justify-center text-xs">🟡</span>
+                  Kuning (Qty)
+                </label>
+                <input
+                  v-model="damage.kuning"
+                  type="number"
+                  placeholder="0"
+                  class="px-4 py-3 border-2 border-gray-200 rounded-xl bg-gray-50 text-gray-700 font-medium focus:outline-none focus:border-[#0071f3] focus:ring-2 focus:ring-[#0071f3]/20 transition"
+                />
+              </div>
+
+              <!-- Kutilang -->
+              <div class="flex flex-col">
+                <label class="text-sm font-semibold text-gray-700 mb-2 flex items-center gap-2">
+                  <span class="w-6 h-6 bg-orange-100 rounded-full flex items-center justify-center text-xs">🟠</span>
+                  Kutilang (Qty)
+                </label>
+                <input
+                  v-model="damage.kutilang"
+                  type="number"
+                  placeholder="0"
+                  class="px-4 py-3 border-2 border-gray-200 rounded-xl bg-gray-50 text-gray-700 font-medium focus:outline-none focus:border-[#0071f3] focus:ring-2 focus:ring-[#0071f3]/20 transition"
+                />
+              </div>
+
+              <!-- Busuk -->
+              <div class="flex flex-col">
+                <label class="text-sm font-semibold text-gray-700 mb-2 flex items-center gap-2">
+                  <span class="w-6 h-6 bg-red-100 rounded-full flex items-center justify-center text-xs">🔴</span>
+                  Busuk (Qty)
+                </label>
+                <input
+                  v-model="damage.busuk"
+                  type="number"
+                  placeholder="0"
+                  class="px-4 py-3 border-2 border-gray-200 rounded-xl bg-gray-50 text-gray-700 font-medium focus:outline-none focus:border-[#0071f3] focus:ring-2 focus:ring-[#0071f3]/20 transition"
+                />
+              </div>
             </div>
           </div>
         </div>
@@ -680,17 +819,17 @@ function getBatchName(batchId) {
                   <div class="flex-1 flex flex-col">
                     <label class="text-xs font-semibold text-gray-600 mb-2">Nama Material</label>
                     <select
-                      v-model="material.material_id"
+                      v-model="material.material_name"
                       class="px-4 py-2.5 border-2 border-gray-200 rounded-lg bg-white text-gray-700 text-sm font-medium focus:outline-none focus:border-[#0071f3] focus:ring-2 focus:ring-[#0071f3]/20 transition appearance-none cursor-pointer"
                     >
                       <option value="" disabled>Pilih Material</option>
                       <option
-                      v-for="mat in materials"
-                      :key="mat.material_id"
-                      :value="mat.material_id"
-                    >
-                      {{ mat.material_name }}
-                    </option>
+                        v-for="mat in materialStocks"
+                        :key="mat.material_id"
+                        :value="mat.material_name"
+                      >
+                        {{ mat.material_name }} (Stok: {{ mat.qty }} {{ mat.uom }})
+                      </option>
                     </select>
                   </div>
 
@@ -699,6 +838,7 @@ function getBatchName(batchId) {
                     <input
                       v-model="material.qty"
                       type="number"
+                      step="0.01"
                       placeholder="0"
                       class="px-4 py-2.5 border-2 border-gray-200 rounded-lg bg-white text-gray-700 text-sm font-medium focus:outline-none focus:border-[#0071f3] focus:ring-2 focus:ring-[#0071f3]/20 transition"
                     />
@@ -707,10 +847,10 @@ function getBatchName(batchId) {
                   <div class="w-full md:w-32 flex flex-col">
                     <label class="text-xs font-semibold text-gray-600 mb-2">Unit</label>
                     <input
-                      v-model="material.unit"
+                      v-model="material.uom"
                       placeholder="Auto-filled"
                       readonly
-                      class="px-4 py-2.5 border-2 border-gray-200 rounded-lg bg-white text-gray-700 text-sm font-medium focus:outline-none focus:border-[#0071f3] focus:ring-2 focus:ring-[#0071f3]/20 transition"
+                      class="px-4 py-2.5 border-2 border-gray-200 rounded-lg bg-gray-50 text-gray-700 text-sm font-medium cursor-not-allowed"
                     />
                   </div>
 
@@ -795,6 +935,7 @@ function getBatchName(batchId) {
           <span v-else>📤 Submit Report</span>
         </button>
       </div>
+      </div>
 
       <!-- Footer -->
       <footer class="text-center py-10 mt-8 border-t border-gray-200">
@@ -859,7 +1000,6 @@ function getBatchName(batchId) {
         </div>
       </div>
     </div>
-  </div>
 </template>
 
 <style scoped>
@@ -898,6 +1038,19 @@ select {
   50% {
     opacity: 0.5;
   }
+}
+
+@keyframes spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.animate-spin {
+  animation: spin 1s linear infinite;
 }
 
 .animate-pulse {

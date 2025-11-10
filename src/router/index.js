@@ -3,6 +3,7 @@ import { useAuthStore } from "../stores/auth";
 
 // 🔹 Import tambahan untuk halaman AddBatch
 import AddBatch from "../views/AddBatch.vue";
+import ReportActivityEdit from '../views/ReportActivityEdit.vue'
 
 const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
@@ -31,21 +32,23 @@ const router = createRouter({
       component: () => import("../views/ReportActivityList.vue"),
       meta: { requiresAuth: true },
     },
+    // ✅ FIXED: Gunakan :report_id sebagai params untuk Review
     {
-      path: "/reportActivityReview",
+      path: "/reportActivityReview/:report_id",
       name: "reportActivityReview",
       component: () => import("../views/ReportActivityReview.vue"),
       meta: { requiresAuth: true },
     },
+    // ✅ FIXED: Gunakan :report_id sebagai params untuk View
     {
-      path: "/reportActivityView",
+      path: "/reportActivityView/:report_id",
       name: "reportActivityView",
       component: () => import("../views/ReportActivityView.vue"),
       meta: { requiresAuth: true },
     },
-    // 🔹 FIXED: Edit Activity Report - harus ada :id sebagai params
+    // ✅ FIXED: Gunakan :report_id sebagai params untuk Edit
     {
-      path: "/reportActivityEdit/:id",
+      path: "/reportActivityEdit/:report_id",
       name: "reportActivityEdit",
       component: () => import("../views/ReportActivityEdit.vue"),
       meta: { requiresAuth: true },
@@ -84,10 +87,9 @@ const router = createRouter({
     },
     // 🔹 FIXED: Edit Production Report - harus konsisten pakai params
     {
-      path: "/reportProductionEdit/:batchId/:date",
-      name: "reportProductionEdit",
-      component: () => import("../views/reportProductionEdit.vue"),
-      meta: { requiresAuth: true },
+      path: '/reportActivityEdit/:id',
+      name: 'reportActivityEdit',
+      component: ReportActivityEdit
     },
     {
       path: "/report-production",

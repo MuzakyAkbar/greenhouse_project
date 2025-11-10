@@ -1,3 +1,4 @@
+
 <script setup>
 import { RouterLink, useRouter } from 'vue-router'
 import { useAuthStore } from '../stores/auth'
@@ -18,19 +19,15 @@ const locationStore = useLocationStore()
 const potatoActivityStore = usePotatoActivityStore()
 const router = useRouter()
 
-// Toggle state untuk memilih report
 const selectedReport = ref('activity')
 const filterDate = ref('')
 const filterDateProduction = ref('')
 const isRefreshing = ref(false)
 
-// 🔥 FIXED: Fungsi untuk refresh data
+// 🔁 Refresh semua data
 const refreshData = async () => {
-  console.log('🔄 Refreshing all data...')
   isRefreshing.value = true
-  
   try {
-    // Fetch semua data secara parallel
     await Promise.all([
       activityReportStore.fetchAll(),
       productionStore.fetchAll(),
@@ -39,13 +36,8 @@ const refreshData = async () => {
       locationStore.fetchAll(),
       potatoActivityStore.fetchAll()
     ])
-    
-    console.log('✅ Data refreshed successfully. Reports count:', activityReportStore.reports.length)
-    
-    // Debug: Log status dari semua reports
-    activityReportStore.reports.forEach(report => {
-      console.log(`Report #${report.report_id}: status = ${report.report_status}`)
-    })
+    console.log('✅ All data refreshed')
+    console.log('📋 Total reports loaded:', activityReportStore.reports.length)
   } catch (error) {
     console.error('❌ Error refreshing data:', error)
   } finally {
@@ -53,210 +45,293 @@ const refreshData = async () => {
   }
 }
 
+// 🧭 Saat halaman pertama kali dibuka
 onMounted(async () => {
   if (!authStore.isLoggedIn) {
     router.push('/')
     return
   }
-  
-  console.log('📋 ReportActivityList mounted - fetching data...')
   await refreshData()
 })
 
-// 🔥 FIXED: Watch route changes untuk auto-refresh
+// 🔙 Refresh otomatis ketika kembali dari halaman lain
 watch(() => router.currentRoute.value, (newRoute, oldRoute) => {
-  // Jika kembali dari halaman review/edit/view ke list, refresh data
   if (newRoute.name === 'reportActivityList') {
     const fromPages = ['reportActivityReview', 'reportActivityEdit', 'reportActivityView']
     if (oldRoute && fromPages.includes(oldRoute.name)) {
-      console.log('🔙 Returning from', oldRoute.name, '- refreshing data')
-      setTimeout(() => {
-        refreshData()
-      }, 300) // Small delay untuk memastikan navigation selesai
+      console.log('🔄 Auto-refreshing from:', oldRoute.name)
+      setTimeout(refreshData, 300)
     }
   }
 })
 
-// Helper functions
+// Helper untuk nama batch & lokasi
 const getBatchName = (batchId) => {
   const batch = batchStore.batches.find(b => b.batch_id === batchId)
-  return batch?.batch_name || 'Unknown'
+  return batch?.batch_name || `Batch ${batchId}`
 }
 
 const getLocationName = (locationId) => {
   const location = locationStore.locations.find(l => l.location_id === locationId)
-  return location?.location || 'Unknown'
+  return location?.location || `Location ${locationId}`
 }
 
-const getActivityName = (activityId) => {
-  const activity = potatoActivityStore.activities.find(a => a.activity_id === activityId)
-  return activity?.activity || 'Unknown'
-}
-
-const getCoACode = (activityId) => {
-  const activity = potatoActivityStore.activities.find(a => a.activity_id === activityId)
-  return activity?.CoA_code ? `CoA ${activity.CoA_code}` : 'N/A'
-}
-
-// 🔥 FIXED: Map database status to display status
-const mapStatusToDisplay = (dbStatus) => {
-  const statusMap = {
-    'onReview': 'Waiting',
-    'needRevision': 'Revision',
-    'approved': 'Approved'
-  }
-  return statusMap[dbStatus] || 'Waiting'
-}
-
-// 🔥 FIXED: Fungsi untuk mendapatkan route berdasarkan status dari database
-const getReportRoute = (report) => {
-  const reportId = String(report.report_id)
-  const dbStatus = report.report_status || 'onReview'
+// 📋 Grouped Activity Reports - FIXED LOGIC
+const groupedActivityReports = computed(() => {
+  const grouped = {}
   
-  console.log(`🔍 Report #${reportId} - DB Status: ${dbStatus}`)
+  console.log('📊 Grouping reports, total:', activityReportStore.reports.length)
   
-  const routes = {
-    'onReview': { name: 'reportActivityReview', query: { id: reportId } },
-    'approved': { name: 'reportActivityView', query: { id: reportId } },
-    'needRevision': { name: 'reportActivityEdit', params: { id: reportId } }
-  }
-  
-  return routes[dbStatus] || { name: 'reportActivityReview', query: { id: reportId } }
-}
-
-// 🔥 Handler untuk navigation dengan error handling
-const handleReportClick = (report) => {
-  try {
-    const route = getReportRoute(report)
-    console.log('➡️ Navigating to:', route)
-    router.push(route)
-  } catch (err) {
-    console.error('❌ Navigation error:', err)
-    alert('Gagal membuka laporan. Silakan coba lagi.')
-  }
-}
-
-// 🔥 FIXED: Fungsi untuk mendapatkan route production
-const getProductionRoute = (item) => {
-  const batchId = String(item.batch_id)
-  const date = String(item.date)
-  
-  const routes = {
-    'Waiting': { name: 'reportProductionReview', query: { batchId, date } },
-    'Approved': { name: 'reportProductionView', query: { batchId, date } },
-    'Revision': { name: 'reportProductionEdit', params: { batchId, date } }
-  }
-  
-  return routes[item.status] || { name: 'reportProductionReview', query: { batchId, date } }
-}
-
-// 🔥 Handler untuk navigation production
-const handleProductionClick = (item) => {
-  try {
-    const route = getProductionRoute(item)
-    console.log('➡️ Navigating to production:', route)
-    router.push(route)
-  } catch (err) {
-    console.error('❌ Navigation error:', err)
-    alert('Gagal membuka laporan produksi. Silakan coba lagi.')
-  }
-}
-
-// 🔥 FIXED: Computed untuk format activity reports dengan status dari database
-const activityReports = computed(() => {
-  let reports = activityReportStore.reports.map(report => {
-    const dbStatus = report.report_status || 'onReview'
-    const displayStatus = mapStatusToDisplay(dbStatus)
+  activityReportStore.reports.forEach(report => {
+    // ✅ Group berdasarkan location_id + batch_id + report_date
+    const key = `${report.location_id}_${report.batch_id}_${report.report_date}`
     
-    return {
-      report_id: report.report_id,
-      date: report.report_date || 'N/A',
-      location: report.location || 'N/A',
-      batch: getBatchName(report.batch_id),
-      coa: getCoACode(report.activity_id),
-      activity: getActivityName(report.activity_id),
-      status: displayStatus,
-      report_status: dbStatus, // 🔥 Gunakan nama yang sama dengan database
-      raw: report
+    if (!grouped[key]) {
+      grouped[key] = {
+        location_id: report.location_id,
+        location_name: getLocationName(report.location_id),
+        batch_id: report.batch_id,
+        batch_name: getBatchName(report.batch_id),
+        report_date: report.report_date,
+        reports: [], // Array of individual reports
+        reportIds: [], // Track report IDs
+        totalReports: 0,
+        approvedCount: 0,
+        reviewCount: 0,
+        revisionCount: 0,
+        status: 'onReview' // Default group status
+      }
+    }
+
+    // Add report to group
+    grouped[key].reports.push(report)
+    grouped[key].reportIds.push(report.report_id)
+    grouped[key].totalReports++
+
+    // ✅ Count berdasarkan report_status dari database
+    if (report.report_status === 'approved') {
+      grouped[key].approvedCount++
+    } else if (report.report_status === 'onReview') {
+      grouped[key].reviewCount++
+    } else if (report.report_status === 'needRevision') {
+      grouped[key].revisionCount++
+    }
+    
+    console.log(`📌 Report ${report.report_id} added to group ${key}, status: ${report.report_status}`)
+  })
+
+  // ✅ Tentukan status GROUP berdasarkan PRIORITAS
+  Object.values(grouped).forEach(group => {
+    console.log(`🔍 Group ${group.location_name} - ${group.batch_name} (${group.report_date}):`)
+    console.log(`   - Total: ${group.totalReports}`)
+    console.log(`   - Approved: ${group.approvedCount}`)
+    console.log(`   - OnReview: ${group.reviewCount}`)
+    console.log(`   - NeedRevision: ${group.revisionCount}`)
+    console.log(`   - Report IDs: ${group.reportIds.join(', ')}`)
+    
+    // Priority logic:
+    // 1. Jika ADA yang needRevision → Group status = needRevision
+    // 2. Jika SEMUA approved → Group status = approved
+    // 3. Else → Group status = onReview
+    
+    if (group.revisionCount > 0) {
+      group.status = 'needRevision'
+      console.log(`   ✅ Group status: needRevision (ada ${group.revisionCount} yang perlu revisi)`)
+    } else if (group.approvedCount === group.totalReports && group.totalReports > 0) {
+      group.status = 'approved'
+      console.log(`   ✅ Group status: approved (semua sudah approved)`)
+    } else {
+      group.status = 'onReview'
+      console.log(`   ✅ Group status: onReview (masih ada yang perlu review)`)
     }
   })
 
+  let result = Object.values(grouped)
+  
+  // Filter by date
   if (filterDate.value) {
-    reports = reports.filter(r => r.date === filterDate.value)
+    result = result.filter(g => g.report_date === filterDate.value)
   }
+  
+  // Sort by date (newest first)
+  result.sort((a, b) => new Date(b.report_date) - new Date(a.report_date))
+  
+  console.log('📊 Final grouped reports:', result.length)
+  
+  return result
+})
 
-  // Sort by report_id descending (newest first)
-  reports.sort((a, b) => b.report_id - a.report_id)
-
+// 📋 Activity Reports - Individual per report_id
+const activityReports = computed(() => {
+  console.log('📊 Processing reports, total:', activityReportStore.reports.length)
+  
+  let reports = activityReportStore.reports.map(report => {
+    console.log(`📌 Report ${report.report_id}: status=${report.report_status}, date=${report.report_date}`)
+    
+    // ✅ Ensure report_id is always a string for Vue Router params
+    return {
+      report_id: String(report.report_id), // Convert to string for router params
+      location_id: report.location_id,
+      location_name: getLocationName(report.location_id),
+      batch_id: report.batch_id,
+      batch_name: getBatchName(report.batch_id),
+      report_date: report.report_date,
+      report_status: report.report_status, // Status langsung dari database
+      created_at: report.created_at,
+      updated_at: report.updated_at
+    }
+  })
+  
+  // Filter by date
+  if (filterDate.value) {
+    reports = reports.filter(r => r.report_date === filterDate.value)
+  }
+  
+  // Sort by date (newest first), then by report_id
+  reports.sort((a, b) => {
+    const dateCompare = new Date(b.report_date) - new Date(a.report_date)
+    if (dateCompare !== 0) return dateCompare
+    return Number(b.report_id) - Number(a.report_id)
+  })
+  
+  console.log('📊 Final reports:', reports.length)
+  console.log('📊 First report:', reports[0])
+  
   return reports
 })
 
-// Group production and sales by date and batch
+// 📁 Klik laporan activity
+const handleReportClick = (report) => {
+  console.log('📋 Opening report group:', report)
+  console.log('   Report IDs in group:', report.reportIds)
+
+  if (!report || !report.report_id) {
+    alert("⚠️ Report ID tidak ditemukan!");
+    console.error("❌ Missing report_id in:", report);
+    return;
+  }
+
+  // ✅ Route berdasarkan GROUP status
+  let routeName = 'reportActivityReview'; // default
+
+if (report.report_status === 'approved') {
+  routeName = 'reportActivityView';
+} else if (report.report_status === 'needRevision') {
+  routeName = 'reportActivityEdit';
+}
+
+router.push({ 
+  name: 'reportActivityEdit', 
+  params: { id: report.report_id } // ✅ harus ada
+})
+}
+
+
+// 📦 Data Production & Sales
 const productionSalesList = computed(() => {
   const groupedMap = new Map()
 
+  // Group production data
   productionStore.productions.forEach(prod => {
-    const key = `${prod.date}_${prod.batch_id}`
+    const key = `${prod.date}_${prod.batch_id}_${prod.location_id}`
+    
     if (!groupedMap.has(key)) {
       groupedMap.set(key, {
         date: prod.date || 'N/A',
-        batch: getBatchName(prod.batch_id),
         batch_id: prod.batch_id,
-        location: getLocationName(prod.location_id),
+        batch_name: getBatchName(prod.batch_id),
+        location_id: prod.location_id,
+        location_name: getLocationName(prod.location_id),
         status: 'Waiting',
         production: [],
         sales: []
       })
     }
+    
     groupedMap.get(key).production.push({
       category: prod.category || 'N/A',
-      owner: prod.owner || 'N/A',
-      quantity: prod.qty || 0,
-      raw: prod
+      qty: prod.qty || 0,
+      owner: prod.owner || 'N/A'
     })
   })
 
+  // Group sales data
   salesStore.sales.forEach(sale => {
-    const key = `${sale.date}_${sale.batch_id}`
+    const key = `${sale.date}_${sale.batch_id}_${sale.location_id}`
+    
     if (!groupedMap.has(key)) {
       groupedMap.set(key, {
         date: sale.date || 'N/A',
-        batch: getBatchName(sale.batch_id),
         batch_id: sale.batch_id,
-        location: getLocationName(sale.location_id),
+        batch_name: getBatchName(sale.batch_id),
+        location_id: sale.location_id,
+        location_name: getLocationName(sale.location_id),
         status: 'Waiting',
         production: [],
         sales: []
       })
     }
+    
     groupedMap.get(key).sales.push({
       category: sale.category || 'N/A',
-      quantity: sale.qty || 0,
-      unit: 'perkg',
-      price: sale.price || 0,
-      raw: sale
+      qty: sale.qty || 0,
+      price: sale.price || 0
     })
   })
 
   let result = Array.from(groupedMap.values())
-
+  
+  // Filter by date
   if (filterDateProduction.value) {
     result = result.filter(r => r.date === filterDateProduction.value)
   }
-
+  
+  // Sort by date (newest first)
   result.sort((a, b) => new Date(b.date) - new Date(a.date))
-
+  
   return result
 })
 
-const isLoading = computed(() => {
-  return activityReportStore.loading || 
-         productionStore.loading || 
-         salesStore.loading || 
-         batchStore.loading || 
-         locationStore.loading || 
-         potatoActivityStore.loading
-})
+// 📊 Klik item produksi
+const handleProductionClick = (item) => {
+  console.log('📊 Production item clicked:', item)
+  alert(`Detail produksi ${item.batch_name} - ${item.date}\nLokasi: ${item.location_name}`)
+}
+
+// Get status display text
+const getStatusText = (dbStatus) => {
+  const statusMap = {
+    'onReview': '⏳ Waiting Review',
+    'needRevision': '🔄 Need Revision',
+    'approved': '✅ Approved'
+  }
+  return statusMap[dbStatus] || '❓ Unknown'
+}
+
+// Get status color class
+const getStatusColorClass = (dbStatus) => {
+  const colorMap = {
+    'onReview': 'bg-yellow-100 text-yellow-800',
+    'needRevision': 'bg-red-100 text-red-800',
+    'approved': 'bg-green-100 text-green-800'
+  }
+  return colorMap[dbStatus] || 'bg-gray-100 text-gray-800'
+}
+
+// ⏳ Status loading
+const isLoading = computed(() =>
+  activityReportStore.loading ||
+  productionStore.loading ||
+  salesStore.loading ||
+  batchStore.loading ||
+  locationStore.loading ||
+  potatoActivityStore.loading
+)
+
+// Get current time for debug
+const getCurrentTime = () => {
+  return new Date().toLocaleTimeString('id-ID')
+}
 </script>
 
 <template>
@@ -351,7 +426,7 @@ const isLoading = computed(() => {
           <div class="bg-white rounded-2xl border-2 border-gray-100 shadow-sm p-5">
             <div class="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
               <!-- Date Filter -->
-              <div class="flex items-center gap-3">
+              <div class="flex items-center gap-3 flex-wrap">
                 <label class="text-sm font-semibold text-gray-700">Filter Tanggal:</label>
                 <div class="flex items-center gap-2 px-4 py-2 border-2 border-[#0071f3] rounded-lg bg-gray-50">
                   <svg class="w-5 h-5 text-[#0071f3]" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512" fill="currentColor">
@@ -404,7 +479,7 @@ const isLoading = computed(() => {
             </h2>
             <!-- Debug Info -->
             <div class="text-xs text-gray-500 bg-gray-100 px-3 py-1 rounded-lg">
-              Last updated: {{ new Date().toLocaleTimeString('id-ID') }}
+              Last updated: {{ getCurrentTime() }}
             </div>
           </div>
           
@@ -418,7 +493,7 @@ const isLoading = computed(() => {
           <div v-else class="grid grid-cols-1 gap-5">
             <div 
               v-for="report in activityReports" 
-              :key="report.report_id"
+              :key="`${report.location_id}-${report.batch_id}-${report.report_date}`"
               @click="handleReportClick(report)"
               class="group cursor-pointer"
             >
@@ -432,38 +507,33 @@ const isLoading = computed(() => {
                         📋
                       </div>
                       <div>
-                        <p class="font-bold text-gray-900 text-lg">{{ report.location }}</p>
-                        <p class="text-sm text-gray-500">#{{ report.report_id }}</p>
+                        <p class="font-bold text-gray-900 text-lg">{{ report.location_name }}</p>
+                        <p class="text-sm text-gray-500">{{ report.batch_name }}</p>
                       </div>
                     </div>
 
-                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-4">
+                    <div class="grid grid-cols-1 sm:grid-cols-3 gap-3 mt-4">
                       <div class="bg-gray-50 rounded-lg p-3">
                         <p class="text-xs text-gray-500 font-semibold mb-1">Tanggal</p>
-                        <p class="text-sm font-bold text-gray-900">{{ report.date }}</p>
+                        <p class="text-sm font-bold text-gray-900">{{ report.report_date }}</p>
                       </div>
-                      <div class="bg-gray-50 rounded-lg p-3">
-                        <p class="text-xs text-gray-500 font-semibold mb-1">Batch</p>
-                        <p class="text-sm font-bold text-gray-900">{{ report.batch }}</p>
+                      <div class="bg-blue-50 rounded-lg p-3">
+                        <p class="text-xs text-blue-600 font-semibold mb-1">Total Laporan</p>
+                        <p class="text-sm font-bold text-blue-900">{{ report.totalReports }} laporan</p>
                       </div>
-                    </div>
-                    
-                    <!-- Debug Info -->
-                    <div class="mt-3 text-xs text-gray-400 font-mono bg-gray-50 p-2 rounded">
-                      DB Status: {{ report.report_status }}
+                      <div class="bg-green-50 rounded-lg p-3">
+                        <p class="text-xs text-green-600 font-semibold mb-1">Approved</p>
+                        <p class="text-sm font-bold text-green-900">{{ report.approvedCount }}/{{ report.totalReports }}</p>
+                      </div>
                     </div>
                   </div>
 
                   <div class="flex flex-col items-end gap-3">
                     <span 
                       class="text-xs font-bold px-4 py-2 rounded-lg whitespace-nowrap"
-                      :class="{
-                        'bg-yellow-100 text-yellow-800': report.status === 'Waiting',
-                        'bg-green-100 text-green-800': report.status === 'Approved',
-                        'bg-red-100 text-red-800': report.status === 'Revision'
-                      }"
+                      :class="getStatusColorClass(report.report_status)"
                     >
-                      {{ report.status === 'Waiting' ? '⏳ Waiting Review' : report.status === 'Approved' ? '✅ Approved' : '🔄 Need Revision' }}
+                      {{ getStatusText(report.report_status) }}
                     </span>
                     <svg class="w-5 h-5 text-gray-400 group-hover:text-[#0071f3] transition-colors" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512" fill="currentColor">
                       <path d="M278.6 233.4c12.5 12.5 12.5 32.8 0 45.3l-160 160c-12.5 12.5-32.8 12.5-45.3 0s-12.5-32.8 0-45.3L210.7 256 73.4 118.6c-12.5-12.5-12.5-32.8 0-45.3s32.8-12.5 45.3 0l160 160z"/>
