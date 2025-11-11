@@ -1,6 +1,5 @@
 <script setup>
-import jsPDF from 'jspdf'
-import html2canvas from 'html2canvas'
+import html2pdf from 'html2pdf.js'
 import { ref, onMounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useAuthStore } from '../stores/auth'
@@ -14,9 +13,7 @@ const authStore = useAuthStore()
 const batchStore = useBatchStore()
 const locationStore = useLocationStore()
 
-// ✅ Get report_id from route params
 const report_id = ref(route.params.report_id || null)
-
 const loading = ref(true)
 const error = ref(null)
 const currentReport = ref(null)
@@ -45,7 +42,6 @@ const loadData = async () => {
       locationStore.fetchAll()
     ])
 
-    // ✅ FETCH REPORT BY report_id dengan relasi
     const { data: report, error: fetchError } = await supabase
       .from('gh_report')
       .select(`
@@ -57,7 +53,7 @@ const loadData = async () => {
         )
       `)
       .eq('report_id', report_id.value)
-      .eq('report_status', 'approved') // ✅ HANYA TAMPILKAN YANG APPROVED
+      .eq('report_status', 'approved')
       .single()
     
     if (fetchError) throw fetchError
@@ -112,16 +108,10 @@ const formatDateTime = (dateStr) => {
   })
 }
 
-// Print report as PDF
+// ✅ PERBAIKAN: Fungsi printReport diperbarui
 const printReport = async () => {
-  const element = document.getElementById('print-area')
-  if (!element) {
-    alert('❌ Elemen laporan tidak ditemukan')
-    return
-  }
-
   const loadingText = document.createElement('div')
-  loadingText.textContent = '📄 Sedang membuat PDF...'
+  loadingText.textContent = '📄 Mempersiapkan PDF...'
   loadingText.style.cssText = `
     position: fixed;
     top: 50%;
@@ -136,57 +126,66 @@ const printReport = async () => {
   `
   document.body.appendChild(loadingText)
 
-  try {
-    const hiddenElements = element.querySelectorAll('.no-print')
-    hiddenElements.forEach(el => el.style.display = 'none')
-
-    const canvas = await html2canvas(element, {
-      scale: 2,
-      useCORS: true,
-      logging: false,
-      backgroundColor: '#ffffff'
-    })
-
-    const imgData = canvas.toDataURL('image/png')
-
-    const pdf = new jsPDF('p', 'mm', 'a4')
-    const pdfWidth = pdf.internal.pageSize.getWidth()
-    const pdfHeight = pdf.internal.pageSize.getHeight()
-
-    const imgWidth = pdfWidth
-    const imgHeight = (canvas.height * pdfWidth) / canvas.width
-
-    let heightLeft = imgHeight
-    let position = 0
-
-    pdf.addImage(imgData, 'PNG', 0, position, imgWidth, imgHeight)
-    heightLeft -= pdfHeight
-
-    while (heightLeft > 0) {
-      position = heightLeft - imgHeight
-      pdf.addPage()
-      pdf.addImage(imgData, 'PNG', 0, position, imgWidth, imgHeight)
-      heightLeft -= pdfHeight
+  setTimeout(async () => {
+    const element = document.getElementById('print-area')
+    if (!element) {
+      alert('❌ Elemen laporan tidak ditemukan')
+      document.body.removeChild(loadingText)
+      return
     }
 
-    const filename = `ReportActivity_${currentReport.value?.report_id}_${currentReport.value?.report_date || 'Report'}.pdf`
-    pdf.save(filename)
-    
-    alert('✅ PDF berhasil dibuat!')
-  } catch (err) {
-    console.error('❌ Gagal membuat PDF:', err)
-    alert('❌ Gagal membuat PDF: ' + err.message)
-  } finally {
+    loadingText.textContent = '📄 Sedang membuat PDF...'
+
     const hiddenElements = element.querySelectorAll('.no-print')
-    hiddenElements.forEach(el => (el.style.display = ''))
-    document.body.removeChild(loadingText)
-  }
+    hiddenElements.forEach(el => (el.style.display = 'none'))
+
+    // ✅ PERBAIKAN: Tambahkan kelas untuk mode cetak (mengecilkan font)
+    element.classList.add('printing-mode')
+
+    const filename = `ReportActivity_${currentReport.value?.report_id}_${currentReport.value?.report_date || 'Report'}.pdf`
+
+    const options = {
+      margin: [10, 10, 10, 10],
+      filename: filename,
+      image: { type: 'png', quality: 0.98 },
+      html2canvas: { 
+        // ✅ PERBAIKAN: Hapus 'scale: 2' agar font profesional
+        useCORS: true,
+        logging: false,
+        backgroundColor: '#ffffff'
+      },
+      jsPDF: { 
+        unit: 'mm', 
+        format: 'a4', 
+        orientation: 'portrait' 
+      },
+      pagebreak: { 
+        mode: ['css', 'avoid-all'], 
+        before: '.pdf-page-break-before', // Ini akan kita gunakan
+        after: '.pdf-page-break-after',
+        inside: '.pdf-avoid-break-inside' 
+      }
+    }
+
+    try {
+      await html2pdf().from(element).set(options).save()
+      alert('✅ PDF berhasil dibuat!')
+    } catch (err) {
+      console.error('❌ Gagal membuat PDF:', err)
+      alert('❌ Gagal membuat PDF: ' + err.message)
+    } finally {
+      // ✅ PERBAIKAN: Hapus kelas mode cetak setelah selesai
+      element.classList.remove('printing-mode')
+
+      hiddenElements.forEach(el => (el.style.display = ''))
+      document.body.removeChild(loadingText)
+    }
+  }, 100)
 }
 </script>
 
 <template>
   <div class="min-h-screen bg-gradient-to-br from-gray-50 to-white">
-    <!-- Header Bar -->
     <div class="bg-white border-b border-gray-200 shadow-sm sticky top-0 z-40 no-print">
       <div class="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-5">
         <div class="flex items-center justify-between gap-4">
@@ -210,7 +209,6 @@ const printReport = async () => {
             </div>
           </div>
           
-          <!-- Print Button -->
           <button
             @click="printReport"
             class="flex items-center gap-2 bg-[#0071f3] hover:bg-[#0060d1] text-white font-semibold px-6 py-2.5 rounded-xl transition-all shadow-md hover:shadow-lg"
@@ -224,10 +222,8 @@ const printReport = async () => {
       </div>
     </div>
 
-    <!-- Print Area -->
     <div id="print-area" class="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
       
-      <!-- Loading State -->
       <div v-if="loading" class="flex items-center justify-center py-20">
         <div class="text-center">
           <div class="inline-block w-12 h-12 border-4 border-[#0071f3] border-t-transparent rounded-full animate-spin"></div>
@@ -235,7 +231,6 @@ const printReport = async () => {
         </div>
       </div>
 
-      <!-- Error State -->
       <div v-else-if="error" class="bg-red-50 border-2 border-red-200 rounded-2xl p-6 mb-6">
         <div class="flex items-center gap-3">
           <span class="text-3xl">❌</span>
@@ -246,12 +241,10 @@ const printReport = async () => {
         </div>
       </div>
 
-      <!-- Content -->
       <template v-else-if="currentReport">
         
-        <!-- Status Badge -->
-        <div class="mb-8 flex justify-center">
-          <div class="inline-flex items-center gap-2 bg-green-100 text-green-800 px-6 py-3 rounded-xl font-bold text-base shadow-sm border-2 border-green-200">
+        <div class="mb-8 flex justify-center pdf-avoid-break-inside">
+           <div class="inline-flex items-center gap-2 bg-green-100 text-green-800 px-6 py-3 rounded-xl font-bold text-base shadow-sm border-2 border-green-200">
             <svg class="w-5 h-5" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512" fill="currentColor">
               <path d="M438.6 105.4c12.5 12.5 12.5 32.8 0 45.3l-256 256c-12.5 12.5-32.8 12.5-45.3 0l-128-128c-12.5-12.5-12.5-32.8 0-45.3s32.8-12.5 45.3 0L160 338.7 393.4 105.4c12.5-12.5 32.8-12.5 45.3 0z"/>
             </svg>
@@ -259,12 +252,10 @@ const printReport = async () => {
           </div>
         </div>
 
-        <!-- Basic Info Section -->
-        <div class="mb-8">
-          <h2 class="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-3">📋 Informasi Dasar</h2>
+        <div class="mb-8 pdf-avoid-break-inside">
+           <h2 class="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-3">📋 Informasi Dasar</h2>
           <div class="bg-white rounded-2xl border-2 border-gray-100 shadow-sm p-6">
             <div class="grid grid-cols-1 md:grid-cols-3 gap-5">
-              <!-- Report ID -->
               <div class="flex flex-col">
                 <label class="text-sm font-semibold text-gray-700 mb-2 flex items-center gap-2">
                   <span class="text-lg">🆔</span>
@@ -275,7 +266,6 @@ const printReport = async () => {
                 </div>
               </div>
 
-              <!-- Date -->
               <div class="flex flex-col">
                 <label class="text-sm font-semibold text-gray-700 mb-2 flex items-center gap-2">
                   <svg class="w-4 h-4 text-[#0071f3]" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512" fill="currentColor">
@@ -288,7 +278,6 @@ const printReport = async () => {
                 </div>
               </div>
 
-              <!-- Location -->
               <div class="flex flex-col">
                 <label class="text-sm font-semibold text-gray-700 mb-2 flex items-center gap-2">
                   <span class="text-lg">📍</span>
@@ -301,7 +290,6 @@ const printReport = async () => {
             </div>
 
             <div class="grid grid-cols-1 md:grid-cols-2 gap-5 mt-5">
-              <!-- Batch -->
               <div class="flex flex-col">
                 <label class="text-sm font-semibold text-gray-700 mb-2 flex items-center gap-2">
                   <span class="text-lg">🏷️</span>
@@ -312,7 +300,6 @@ const printReport = async () => {
                 </div>
               </div>
 
-              <!-- Status -->
               <div class="flex flex-col">
                 <label class="text-sm font-semibold text-gray-700 mb-2 flex items-center gap-2">
                   <span class="text-lg">📊</span>
@@ -326,14 +313,13 @@ const printReport = async () => {
           </div>
         </div>
 
-        <!-- Type Damages Section -->
-        <div v-if="currentReport.type_damages && currentReport.type_damages.length > 0" class="mb-8">
+        <div v-if="currentReport.type_damages && currentReport.type_damages.length > 0" class="mb-8 pdf-avoid-break-inside"> 
           <h2 class="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-3">🌾 Kerusakan Tanaman</h2>
           <div class="space-y-4">
             <div
               v-for="damage in currentReport.type_damages"
               :key="damage.typedamage_id"
-              class="bg-white rounded-2xl border-2 border-gray-100 shadow-sm p-6"
+              class="bg-white rounded-2xl border-2 border-gray-100 shadow-sm p-6 pdf-avoid-break-inside"
             >
               <h3 class="font-bold text-gray-900 text-lg mb-4">{{ damage.type_damage || 'Kerusakan' }}</h3>
               <div class="grid grid-cols-3 gap-4">
@@ -360,7 +346,6 @@ const printReport = async () => {
                 </div>
               </div>
 
-              <!-- Approval Info for Type Damage -->
               <div v-if="damage.approved_at" class="mt-4 pt-4 border-t-2 border-gray-100">
                 <div class="bg-green-50 rounded-lg p-3">
                   <p class="text-xs text-green-600 font-semibold mb-1">✅ Disetujui</p>
@@ -374,16 +359,14 @@ const printReport = async () => {
           </div>
         </div>
 
-        <!-- Activities Section -->
-        <div v-if="currentReport.activities && currentReport.activities.length > 0" class="mb-8">
+        <div v-if="currentReport.activities && currentReport.activities.length > 0" class="mb-8 pdf-page-break-before"> 
           <h2 class="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-3">⚙️ Detail Aktivitas</h2>
           <div class="space-y-6">
             <div
               v-for="(activity, index) in currentReport.activities"
               :key="activity.activity_id"
-              class="bg-white rounded-2xl border-2 border-gray-100 shadow-sm p-6"
+              class="bg-white rounded-2xl border-2 border-gray-100 shadow-sm p-6 pdf-avoid-break-inside" 
             >
-              <!-- Activity Header -->
               <div class="flex items-center gap-3 mb-6 pb-4 border-b-2 border-gray-100">
                 <div class="w-10 h-10 bg-gradient-to-br from-[#0071f3] to-[#8FABD4] rounded-lg flex items-center justify-center text-white font-bold">
                   {{ index + 1 }}
@@ -394,7 +377,6 @@ const printReport = async () => {
               </div>
 
               <div class="space-y-5">
-                <!-- CoA & Manpower Grid -->
                 <div class="grid grid-cols-1 md:grid-cols-2 gap-5">
                   <div class="flex flex-col">
                     <label class="text-sm font-semibold text-gray-700 mb-2">Chart of Account (CoA)</label>
@@ -411,7 +393,6 @@ const printReport = async () => {
                   </div>
                 </div>
 
-                <!-- Materials Section -->
                 <div v-if="activity.materials && activity.materials.length > 0" class="bg-blue-50 rounded-xl p-5 border-2 border-blue-200">
                   <h4 class="text-base font-bold text-blue-900 flex items-center gap-2 mb-4">
                     <span class="text-lg">📦</span>
@@ -419,7 +400,7 @@ const printReport = async () => {
                   </h4>
                   <div class="space-y-3">
                     <div
-                      v-for="(mat, matIdx) in activity.materials"
+                      v-for="(mat) in activity.materials"
                       :key="mat.material_used_id"
                       class="flex items-center justify-between bg-white rounded-lg p-4 border border-blue-200"
                     >
@@ -434,7 +415,6 @@ const printReport = async () => {
                   </div>
                 </div>
 
-                <!-- Approval Info for Activity -->
                 <div v-if="activity.approved_at" class="bg-green-50 rounded-lg p-4 border-2 border-green-200">
                   <p class="text-xs text-green-600 font-semibold mb-2 flex items-center gap-2">
                     <svg class="w-4 h-4" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512" fill="currentColor">
@@ -452,8 +432,7 @@ const printReport = async () => {
           </div>
         </div>
 
-        <!-- Report Approval Info -->
-        <div class="mb-8">
+        <div class="mb-8 pdf-avoid-break-inside"> 
           <h2 class="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-3">✅ Informasi Approval Report</h2>
           <div class="bg-gradient-to-br from-green-50 to-green-100 rounded-2xl border-2 border-green-200 shadow-sm p-6">
             <div class="flex items-start gap-4">
@@ -472,9 +451,8 @@ const printReport = async () => {
           </div>
         </div>
 
-        <!-- Action Buttons - No Print -->
         <div class="flex flex-wrap gap-3 justify-center mb-8 no-print">
-          <button
+           <button
             @click="router.push('/reportActivityList')"
             class="bg-white hover:bg-gray-50 text-gray-700 font-semibold px-8 py-3 rounded-xl border-2 border-gray-200 hover:border-[#0071f3] shadow-sm hover:shadow-lg transition-all flex items-center gap-2"
           >
@@ -486,8 +464,7 @@ const printReport = async () => {
         </div>
       </template>
 
-      <!-- Footer -->
-      <footer class="text-center py-10 mt-8 border-t border-gray-200">
+      <footer class="text-center py-10 mt-8 border-t border-gray-200 pdf-avoid-break-inside">
         <div class="flex items-center justify-center gap-2 mb-2">
           <span class="text-2xl">🌱</span>
           <p class="text-gray-400 font-bold text-sm">GREENHOUSE</p>
@@ -499,6 +476,11 @@ const printReport = async () => {
 </template>
 
 <style scoped>
+/* ✅ PERBAIKAN: Tambahkan kelas ini untuk html2pdf.js */
+#print-area.printing-mode {
+  font-size: 12px;
+}
+
 @media print {
   .no-print {
     display: none !important;
@@ -511,6 +493,23 @@ const printReport = async () => {
   
   body {
     background: white !important;
+  }
+
+  /* ✅ PERBAIKAN: Tambahkan juga di sini untuk print native browser */
+  #print-area.printing-mode {
+    font-size: 12px;
+  }
+
+  .pdf-avoid-break-inside {
+    page-break-inside: avoid;
+  }
+
+  .pdf-page-break-before {
+    page-break-before: always;
+  }
+
+  .pdf-page-break-after {
+    page-break-after: always;
   }
 }
 </style>
