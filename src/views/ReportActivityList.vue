@@ -1,4 +1,3 @@
-
 <script setup>
 import { RouterLink, useRouter } from 'vue-router'
 import { useAuthStore } from '../stores/auth'
@@ -76,91 +75,6 @@ const getLocationName = (locationId) => {
   return location?.location || `Location ${locationId}`
 }
 
-// 📋 Grouped Activity Reports - FIXED LOGIC
-const groupedActivityReports = computed(() => {
-  const grouped = {}
-  
-  console.log('📊 Grouping reports, total:', activityReportStore.reports.length)
-  
-  activityReportStore.reports.forEach(report => {
-    // ✅ Group berdasarkan location_id + batch_id + report_date
-    const key = `${report.location_id}_${report.batch_id}_${report.report_date}`
-    
-    if (!grouped[key]) {
-      grouped[key] = {
-        location_id: report.location_id,
-        location_name: getLocationName(report.location_id),
-        batch_id: report.batch_id,
-        batch_name: getBatchName(report.batch_id),
-        report_date: report.report_date,
-        reports: [], // Array of individual reports
-        reportIds: [], // Track report IDs
-        totalReports: 0,
-        approvedCount: 0,
-        reviewCount: 0,
-        revisionCount: 0,
-        status: 'onReview' // Default group status
-      }
-    }
-
-    // Add report to group
-    grouped[key].reports.push(report)
-    grouped[key].reportIds.push(report.report_id)
-    grouped[key].totalReports++
-
-    // ✅ Count berdasarkan report_status dari database
-    if (report.report_status === 'approved') {
-      grouped[key].approvedCount++
-    } else if (report.report_status === 'onReview') {
-      grouped[key].reviewCount++
-    } else if (report.report_status === 'needRevision') {
-      grouped[key].revisionCount++
-    }
-    
-    console.log(`📌 Report ${report.report_id} added to group ${key}, status: ${report.report_status}`)
-  })
-
-  // ✅ Tentukan status GROUP berdasarkan PRIORITAS
-  Object.values(grouped).forEach(group => {
-    console.log(`🔍 Group ${group.location_name} - ${group.batch_name} (${group.report_date}):`)
-    console.log(`   - Total: ${group.totalReports}`)
-    console.log(`   - Approved: ${group.approvedCount}`)
-    console.log(`   - OnReview: ${group.reviewCount}`)
-    console.log(`   - NeedRevision: ${group.revisionCount}`)
-    console.log(`   - Report IDs: ${group.reportIds.join(', ')}`)
-    
-    // Priority logic:
-    // 1. Jika ADA yang needRevision → Group status = needRevision
-    // 2. Jika SEMUA approved → Group status = approved
-    // 3. Else → Group status = onReview
-    
-    if (group.revisionCount > 0) {
-      group.status = 'needRevision'
-      console.log(`   ✅ Group status: needRevision (ada ${group.revisionCount} yang perlu revisi)`)
-    } else if (group.approvedCount === group.totalReports && group.totalReports > 0) {
-      group.status = 'approved'
-      console.log(`   ✅ Group status: approved (semua sudah approved)`)
-    } else {
-      group.status = 'onReview'
-      console.log(`   ✅ Group status: onReview (masih ada yang perlu review)`)
-    }
-  })
-
-  let result = Object.values(grouped)
-  
-  // Filter by date
-  if (filterDate.value) {
-    result = result.filter(g => g.report_date === filterDate.value)
-  }
-  
-  // Sort by date (newest first)
-  result.sort((a, b) => new Date(b.report_date) - new Date(a.report_date))
-  
-  console.log('📊 Final grouped reports:', result.length)
-  
-  return result
-})
-
 // 📋 Activity Reports - Individual per report_id
 const activityReports = computed(() => {
   console.log('📊 Processing reports, total:', activityReportStore.reports.length)
@@ -200,31 +114,36 @@ const activityReports = computed(() => {
   return reports
 })
 
-// 📁 Klik laporan activity
+// ✅ Fixed handleReportClick - Route berdasarkan status
 const handleReportClick = (report) => {
-  console.log('📋 Opening report group:', report)
-  console.log('   Report IDs in group:', report.reportIds)
-
   if (!report || !report.report_id) {
     alert("⚠️ Report ID tidak ditemukan!");
-    console.error("❌ Missing report_id in:", report);
     return;
   }
 
-  // ✅ Route berdasarkan GROUP status
-  let routeName = 'reportActivityReview'; // default
+  console.log('🔍 Report clicked:', {
+    report_id: report.report_id,
+    status: report.report_status
+  });
 
-if (report.report_status === 'approved') {
-  routeName = 'reportActivityView';
-} else if (report.report_status === 'needRevision') {
-  routeName = 'reportActivityEdit';
-}
+  let routeName = 'reportActivityReview'; // Default: onReview
 
-router.push({ 
-  name: 'reportActivityEdit', 
-  params: { id: report.report_id } // ✅ harus ada
-})
-}
+  // ✅ Tentukan route berdasarkan status
+  if (report.report_status === 'needRevision') {
+    routeName = 'reportActivityEdit';
+    console.log('➡️ Redirecting to Edit page (Need Revision)');
+  } else if (report.report_status === 'approved') {
+    routeName = 'reportActivityView';
+    console.log('➡️ Redirecting to View page (Approved)');
+  } else {
+    console.log('➡️ Redirecting to Review page (On Review)');
+  }
+
+  router.push({
+    name: routeName,
+    params: { report_id: report.report_id }
+  });
+};
 
 
 // 📦 Data Production & Sales
@@ -493,7 +412,7 @@ const getCurrentTime = () => {
           <div v-else class="grid grid-cols-1 gap-5">
             <div 
               v-for="report in activityReports" 
-              :key="`${report.location_id}-${report.batch_id}-${report.report_date}`"
+              :key="report.report_id"
               @click="handleReportClick(report)"
               class="group cursor-pointer"
             >
@@ -506,24 +425,25 @@ const getCurrentTime = () => {
                       <div class="w-10 h-10 bg-gradient-to-br from-[#0071f3] to-[#8FABD4] rounded-lg flex items-center justify-center text-white text-lg flex-shrink-0">
                         📋
                       </div>
-                      <div>
-                        <p class="font-bold text-gray-900 text-lg">{{ report.location_name }}</p>
+                      <div class="flex-1">
+                        <div class="flex items-center gap-2 mb-1">
+                          <p class="font-bold text-gray-900 text-lg">{{ report.location_name }}</p>
+                          <span class="inline-block px-2 py-0.5 bg-blue-100 text-blue-700 text-xs font-bold rounded">
+                            #{{ report.report_id }}
+                          </span>
+                        </div>
                         <p class="text-sm text-gray-500">{{ report.batch_name }}</p>
                       </div>
                     </div>
 
-                    <div class="grid grid-cols-1 sm:grid-cols-3 gap-3 mt-4">
+                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-4">
                       <div class="bg-gray-50 rounded-lg p-3">
-                        <p class="text-xs text-gray-500 font-semibold mb-1">Tanggal</p>
+                        <p class="text-xs text-gray-500 font-semibold mb-1">📅 Tanggal Laporan</p>
                         <p class="text-sm font-bold text-gray-900">{{ report.report_date }}</p>
                       </div>
                       <div class="bg-blue-50 rounded-lg p-3">
-                        <p class="text-xs text-blue-600 font-semibold mb-1">Total Laporan</p>
-                        <p class="text-sm font-bold text-blue-900">{{ report.totalReports }} laporan</p>
-                      </div>
-                      <div class="bg-green-50 rounded-lg p-3">
-                        <p class="text-xs text-green-600 font-semibold mb-1">Approved</p>
-                        <p class="text-sm font-bold text-green-900">{{ report.approvedCount }}/{{ report.totalReports }}</p>
+                        <p class="text-xs text-blue-600 font-semibold mb-1">🆔 Report ID</p>
+                        <p class="text-sm font-bold text-blue-900">#{{ report.report_id }}</p>
                       </div>
                     </div>
                   </div>
@@ -596,8 +516,8 @@ const getCurrentTime = () => {
                       📊
                     </div>
                     <div>
-                      <p class="font-bold text-gray-900 text-lg">{{ item.batch }}</p>
-                      <p class="text-sm text-gray-500">{{ item.date }} • {{ item.location }}</p>
+                      <p class="font-bold text-gray-900 text-lg">{{ item.batch_name }}</p>
+                      <p class="text-sm text-gray-500">{{ item.date }} • {{ item.location_name }}</p>
                     </div>
                   </div>
                   <div class="flex items-center gap-3">
@@ -629,7 +549,7 @@ const getCurrentTime = () => {
                       <li v-for="(p, pi) in item.production" :key="pi" class="text-sm bg-white/10 rounded-lg p-3">
                         <div class="flex justify-between items-center">
                           <span>{{ p.category }}</span>
-                          <span class="font-bold text-lg">{{ p.quantity }}</span>
+                          <span class="font-bold text-lg">{{ p.qty }}</span>
                         </div>
                         <p class="text-xs opacity-75 mt-1">{{ p.owner }}</p>
                       </li>
@@ -647,9 +567,9 @@ const getCurrentTime = () => {
                       <li v-for="(s, si) in item.sales" :key="si" class="text-sm bg-white/10 rounded-lg p-3">
                         <div class="flex justify-between items-center">
                           <span>{{ s.category }}</span>
-                          <span class="font-bold text-lg">{{ s.quantity }}</span>
+                          <span class="font-bold text-lg">{{ s.qty }}</span>
                         </div>
-                        <p class="text-xs opacity-75 mt-1">Rp {{ s.price.toLocaleString('id-ID') }}/{{ s.unit }}</p>
+                        <p class="text-xs opacity-75 mt-1">Rp {{ s.price.toLocaleString('id-ID') }}</p>
                       </li>
                     </ul>
                     <p v-else class="text-sm opacity-75 text-center py-4">Tidak ada data penjualan</p>

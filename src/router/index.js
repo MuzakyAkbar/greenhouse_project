@@ -1,9 +1,6 @@
 import { createRouter, createWebHistory } from "vue-router";
 import { useAuthStore } from "../stores/auth";
-
-// 🔹 Import tambahan untuk halaman AddBatch
 import AddBatch from "../views/AddBatch.vue";
-import ReportActivityEdit from '../views/ReportActivityEdit.vue'
 
 const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
@@ -19,7 +16,6 @@ const router = createRouter({
       component: () => import("../views/dashboard.vue"),
       meta: { requiresAuth: true, roles: ["manager", "admin"] },
     },
-    // 🔹 Dashboard Staff (NEW)
     {
       path: "/dashboard-staff",
       name: "dashboardStaff",
@@ -32,21 +28,19 @@ const router = createRouter({
       component: () => import("../views/ReportActivityList.vue"),
       meta: { requiresAuth: true },
     },
-    // ✅ FIXED: Gunakan :report_id sebagai params untuk Review
+    // ✅ Gunakan :report_id
     {
       path: "/reportActivityReview/:report_id",
       name: "reportActivityReview",
       component: () => import("../views/ReportActivityReview.vue"),
       meta: { requiresAuth: true },
     },
-    // ✅ FIXED: Gunakan :report_id sebagai params untuk View
     {
       path: "/reportActivityView/:report_id",
       name: "reportActivityView",
       component: () => import("../views/ReportActivityView.vue"),
       meta: { requiresAuth: true },
     },
-    // ✅ FIXED: Gunakan :report_id sebagai params untuk Edit
     {
       path: "/reportActivityEdit/:report_id",
       name: "reportActivityEdit",
@@ -71,8 +65,6 @@ const router = createRouter({
       component: AddBatch,
       meta: { requiresAuth: true },
     },
-
-    // 🔹 Routing Production & Sales
     {
       path: "/reportProductionReview",
       name: "reportProductionReview",
@@ -84,12 +76,6 @@ const router = createRouter({
       name: "reportProductionView",
       component: () => import("../views/reportProductionView.vue"),
       meta: { requiresAuth: true },
-    },
-    // 🔹 FIXED: Edit Production Report - harus konsisten pakai params
-    {
-      path: '/reportActivityEdit/:id',
-      name: 'reportActivityEdit',
-      component: ReportActivityEdit
     },
     {
       path: "/report-production",

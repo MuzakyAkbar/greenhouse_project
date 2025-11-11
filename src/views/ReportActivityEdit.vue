@@ -139,7 +139,7 @@ const loadData = async () => {
     if (report.activities) {
       activities.value = report.activities.map(act => ({
         activity_id: act.activity_id,
-        act_id: act.act_id,
+        activity_id: act.activity_id,
         act_name: act.act_name,
         CoA: act.CoA,
         manpower: act.manpower || 0,
@@ -219,7 +219,7 @@ const formatDateTime = (dateStr) => {
 // Watch for activity changes to auto-fill CoA
 watch(() => activities.value, (acts) => {
   acts.forEach((act) => {
-    const selected = potatoActivityStore.activities.find(a => a.activity_id == act.act_id)
+    const selected = potatoActivityStore.activities.find(a => a.activity_id == act.activity_id)
     if (selected?.CoA_code) {
       act.CoA = selected.CoA_code
     }
@@ -290,7 +290,7 @@ const handleSubmit = async () => {
     if (editableActivities.length > 0) {
       for (const act of editableActivities) {
         // Validate activity
-        if (!act.act_id) {
+        if (!act.activity_id) {
           throw new Error('Semua aktivitas wajib dipilih')
         }
 
@@ -298,15 +298,13 @@ const handleSubmit = async () => {
         const { error: updateActErr } = await supabase
           .from('gh_activity')
           .update({
-            act_id: parseInt(act.act_id),
+            activity_id: parseInt(act.activity_id),
             CoA: act.CoA ? parseFloat(act.CoA) : null,
             manpower: parseInt(act.manpower) || 0,
             status: 'onReview',
             revision_notes: null,
             revision_requested_by: null,
-            revision_requested_at: null,
-            revised_by: username,
-            revised_at: now
+            revision_requested_at: null
           })
           .eq('activity_id', act.activity_id)
         
@@ -315,42 +313,44 @@ const handleSubmit = async () => {
           throw new Error(`Gagal update aktivitas: ${updateActErr.message}`)
         }
 
-        // Delete old materials
-        const { error: deleteMatErr } = await supabase
-          .from('gh_material_used')
-          .delete()
-          .eq('activity_id', act.activity_id)
-        
-        if (deleteMatErr) {
-          console.error('Error deleting materials:', deleteMatErr)
-          throw new Error(`Gagal hapus material lama: ${deleteMatErr.message}`)
-        }
+        // ✅ Update materials tanpa hapus data lama
+if (act.materials && act.materials.length > 0) {
+  for (const mat of act.materials) {
+    const stockMaterial = materialStore.materialStock.find(m => m.material_id == mat.material_id)
 
-        // Insert new materials
-        if (act.materials && act.materials.length > 0) {
-          const validMaterials = act.materials.filter(m => m.material_id && m.qty > 0)
-          
-          if (validMaterials.length > 0) {
-            const materialsToInsert = validMaterials.map(mat => {
-              const stockMaterial = materialStore.materialStock.find(m => m.material_id == mat.material_id)
-              return {
-                activity_id: act.activity_id,
-                material_id: parseInt(mat.material_id),
-                material_name: stockMaterial?.material_name || mat.material_name,
-                qty: parseFloat(mat.qty) || 0,
-                uom: mat.uom || stockMaterial?.uom || ''
-              }
-            })
+    if (mat.material_used_id) {
+      // 🔄 Update data lama berdasarkan material_used_id
+      const { error: updateMatErr } = await supabase
+        .from('gh_material_used')
+        .update({
+          material_name: stockMaterial?.material_name || mat.material_name || '',
+          qty: parseFloat(mat.qty) || 0,
+          uom: mat.uom || stockMaterial?.uom || ''
+        })
+        .eq('material_used_id', mat.material_used_id)
 
-            const { error: insertMatErr } = await supabase
-              .from('gh_material_used')
-              .insert(materialsToInsert)
-            
-            if (insertMatErr) {
-              console.error('Error inserting materials:', insertMatErr)
-              throw new Error(`Gagal tambah material: ${insertMatErr.message}`)
-            }
-          }
+      if (updateMatErr) {
+        console.error('Error updating material:', updateMatErr)
+        throw new Error(`Gagal update material: ${updateMatErr.message}`)
+      }
+
+    } else if (mat.material_id && mat.qty > 0) {
+      // ➕ Tambah data baru hanya jika benar-benar baru
+      const { error: insertMatErr } = await supabase
+        .from('gh_material_used')
+        .insert({
+          activity_id: act.activity_id,
+          material_name: stockMaterial?.material_name || mat.material_name || '',
+          qty: parseFloat(mat.qty) || 0,
+          uom: mat.uom || stockMaterial?.uom || ''
+        })
+
+      if (insertMatErr) {
+        console.error('Error inserting new material:', insertMatErr)
+        throw new Error(`Gagal tambah material baru: ${insertMatErr.message}`)
+      }
+    }
+  }
         }
       }
       console.log(`✅ Updated ${editableActivities.length} activities`)
@@ -365,11 +365,11 @@ const handleSubmit = async () => {
     
     // ✅ UPDATE REPORT STATUS
     const { error: updateReportErr } = await supabase
-      .from('gh_report')
-      .update({
-        report_status: newReportStatus
-      })
-      .eq('report_id', report_id.value)
+  .from('gh_report')
+  .update({
+    report_status: 'onReview'
+  })
+  .eq('report_id', report_id.value)
     
     if (updateReportErr) {
       console.error('Error updating report:', updateReportErr)
@@ -721,25 +721,25 @@ const filteredMaterials = computed(() => {
                     Pilih Activity <span v-if="activity.editable" class="text-red-500">*</span>
                   </label>
                   <select
-                    v-model="activity.act_id"
+                    v-model="activity.activity_id"
                     :required="activity.editable"
                     :disabled="!activity.editable"
-                    class="w-full px-4 py-3 border-2 rounded-lg transition"
-                    :class="activity.editable ? 'border-gray-200 focus:border-[#0071f3] bg-white' : 'border-gray-200 bg-gray-100 cursor-not-allowed'"
-                    style="color: #111827 !important; -webkit-text-fill-color: #111827 !important; color-scheme: light !important;"
+                    class="w-full px-4 py-3 border-2 rounded-lg transition activity-select"
+                    :class="activity.editable ? 'border-gray-200 focus:border-[#0071f3] bg-white text-gray-900' : 'border-gray-200 bg-gray-100 cursor-not-allowed text-gray-600'"
                   >
-                    <option :value="null" style="color: #111827 !important; background-color: #ffffff !important;">
+                    <option :value="null" class="text-gray-900 bg-white">
                       Pilih Activity
                     </option>
                     <option
                       v-for="a in filteredActivities"
                       :key="a.activity_id"
                       :value="a.activity_id"
-                      style="color: #111827 !important; background-color: #ffffff !important;"
+                      class="text-gray-900 bg-white"
                     >
                       {{ a.act_name }}
                     </option>
                   </select>
+
                 </div>
 
                 <div>
@@ -765,8 +765,8 @@ const filteredMaterials = computed(() => {
                 </h4>
                 <div class="space-y-3">
                   <div
-                    v-for="(material, matIndex) in activity.materials"
-                    :key="matIndex"
+                    v-for="(material, matIndex) in activity.materials || []"
+                    :key="(material && material.material_used_id) || matIndex"
                     class="flex flex-col md:flex-row gap-3 items-end bg-white rounded-lg p-4 border border-gray-200"
                   >
                     <div class="flex-1 flex flex-col">
@@ -983,7 +983,7 @@ select {
   padding-right: 2.5rem;
   color: #111827 !important;
   background-color: #ffffff !important;
-  color-scheme: light !important; /* PAKSA LIGHT MODE */
+  color-scheme: light !important;
 }
 
 /* Paksa opsi dropdown */

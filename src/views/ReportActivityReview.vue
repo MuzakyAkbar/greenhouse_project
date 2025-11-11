@@ -102,9 +102,14 @@ const updateReportStatus = async () => {
     if (!currentReport.value) return
     
     const report = currentReport.value
+    const username = authStore.user?.username || authStore.user?.email || 'Admin'
+    
     let hasNeedRevision = false
     let allApproved = true
     let totalItems = 0
+    let revisionNotes = []
+    let revisionRequestedBy = null
+    let revisionRequestedAt = null
     
     // Check type_damages
     if (report.type_damages && report.type_damages.length > 0) {
@@ -113,7 +118,13 @@ const updateReportStatus = async () => {
         if (td.status === 'needRevision') {
           hasNeedRevision = true
           allApproved = false
-          break
+          if (td.revision_notes) {
+            revisionNotes.push(`[Kerusakan: ${td.type_damage}] ${td.revision_notes}`)
+          }
+          if (td.revision_requested_by && !revisionRequestedBy) {
+            revisionRequestedBy = td.revision_requested_by
+            revisionRequestedAt = td.revision_requested_at
+          }
         }
         if (td.status !== 'approved') {
           allApproved = false
@@ -128,7 +139,13 @@ const updateReportStatus = async () => {
         if (act.status === 'needRevision') {
           hasNeedRevision = true
           allApproved = false
-          break
+          if (act.revision_notes) {
+            revisionNotes.push(`[Aktivitas: ${act.act_name}] ${act.revision_notes}`)
+          }
+          if (act.revision_requested_by && !revisionRequestedBy) {
+            revisionRequestedBy = act.revision_requested_by
+            revisionRequestedAt = act.revision_requested_at
+          }
         }
         if (act.status !== 'approved') {
           allApproved = false
@@ -138,10 +155,35 @@ const updateReportStatus = async () => {
     
     // Determine status
     let newStatus = 'onReview' // default
+    const updateData = { report_status: null }
+    
     if (hasNeedRevision) {
       newStatus = 'needRevision' // Priority 1: Ada yang perlu revisi
+      updateData.report_status = newStatus
+      updateData.revision_notes = revisionNotes.join('\n\n')
+      updateData.revision_requested_by = revisionRequestedBy
+      updateData.revision_requested_at = revisionRequestedAt
+      // Clear approval fields when status becomes needRevision
+      updateData.approved_by = null
+      updateData.approved_at = null
     } else if (allApproved && totalItems > 0) {
       newStatus = 'approved' // Priority 2: Semua sudah approved
+      updateData.report_status = newStatus
+      updateData.approved_by = username
+      updateData.approved_at = new Date().toISOString()
+      // Clear revision fields when status becomes approved
+      updateData.revision_notes = null
+      updateData.revision_requested_by = null
+      updateData.revision_requested_at = null
+    } else {
+      newStatus = 'onReview'
+      updateData.report_status = newStatus
+      // Clear both revision and approval fields
+      updateData.revision_notes = null
+      updateData.revision_requested_by = null
+      updateData.revision_requested_at = null
+      updateData.approved_by = null
+      updateData.approved_at = null
     }
     
     // Update report status if changed
@@ -150,14 +192,15 @@ const updateReportStatus = async () => {
       
       const { error: updateErr } = await supabase
         .from('gh_report')
-        .update({ report_status: newStatus })
+        .update(updateData)
         .eq('report_id', report.report_id)
       
       if (updateErr) {
         console.error('❌ Error updating report status:', updateErr)
       } else {
         console.log(`✅ Report ${report.report_id} status updated to ${newStatus}`)
-        currentReport.value.report_status = newStatus
+        // Update local state
+        Object.assign(currentReport.value, updateData)
       }
     }
   } catch (err) {
