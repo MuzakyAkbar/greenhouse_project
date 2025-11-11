@@ -1,13 +1,76 @@
 <script setup>
-defineProps({
-  isOpen: {
-    type: Boolean,
-    required: true,
-  },
-})
+import { ref, onMounted } from "vue";
+import { supabase } from "@/lib/supabase";
+import { useBatchStore } from "@/stores/batch";
 
-const emit = defineEmits(['close'])
+defineProps({ isOpen: Boolean });
+const emit = defineEmits(["close"]);
+
+const batchStore = useBatchStore();
+const batches = ref([]);
+const selectedBatch = ref("");
+const productionType = ref("");
+const qty = ref(0);
+const damage = ref(0);
+const isSubmitting = ref(false);
+
+onMounted(async () => {
+  console.log("📦 Memuat data batch...");
+  await batchStore.getBatches();
+  batches.value = batchStore.batches;
+  console.log("✅ Batch yang diambil:", batches.value);
+});
+
+async function submitDataProduction() {
+  if (!selectedBatch.value || !productionType.value || qty.value <= 0) {
+    alert("⚠️ Harap isi semua data dengan benar sebelum submit!");
+    return;
+  }
+
+  isSubmitting.value = true;
+
+  try {
+    const payload = {
+      batch_id: Number(selectedBatch.value),
+      production_type: productionType.value,
+      qty: Number(qty.value),
+      total_damage: Number(damage.value),
+    };
+
+    console.log("📤 Mengirim data ke gh_data_production:", payload);
+
+    const { data, error } = await supabase
+      .from("gh_data_production")
+      .insert([payload])
+      .select();
+
+    if (error) {
+      console.error("❌ Error Supabase:", error.message, error.details);
+      alert(`❌ Gagal menyimpan data: ${error.message}`);
+      return;
+    }
+
+    console.log("✅ Data berhasil disimpan:", data);
+    alert("✅ Data berhasil disimpan ke database!");
+    resetForm();
+    emit("close");
+  } catch (err) {
+    console.error("❌ Gagal submit:", err);
+    alert(`❌ Gagal submit: ${err.message}`);
+  } finally {
+    isSubmitting.value = false;
+  }
+}
+
+
+function resetForm() {
+  selectedBatch.value = "";
+  productionType.value = "";
+  qty.value = 0;
+  damage.value = 0;
+}
 </script>
+
 
 <template>
   <!-- Overlay full screen -->
@@ -42,12 +105,39 @@ const emit = defineEmits(['close'])
 
       <!-- Content Modal -->
       <div class="p-6 space-y-5">
+        <!-- Input Pilih Batch -->
+        <div class="space-y-2">
+          <label class="text-sm font-semibold text-gray-700 block">Pilih Batch</label>
+          <div class="relative">
+            <select 
+            v-model="selectedBatch"
+            class="w-full bg-gray-50 border-2 border-gray-200 rounded-xl py-3 px-4 text-gray-900 font-medium focus:outline-none focus:border-[#0071f3] focus:ring-2 focus:ring-[#0071f3] focus:ring-opacity-20 transition appearance-none cursor-pointer hover:border-gray-300">
+              <option value="" selected disabled>Pilih Batch</option>
+              <option
+                v-for="batch in batches"
+                :key="batch.batch_id"
+                :value="batch.batch_id"
+              >
+                {{ batch.batch_name }}
+              </option>
+            </select>
+            <div class="absolute right-4 top-1/2 -translate-y-1/2 pointer-events-none text-gray-400">
+              <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
+                <path fill-rule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clip-rule="evenodd"/>
+              </svg>
+            </div>
+          </div>
+        </div>
+        
         <!-- Input Jenis Produksi -->
         <div class="space-y-2">
           <label class="text-sm font-semibold text-gray-700 block">Jenis Produksi</label>
           <div class="relative">
-            <select class="w-full bg-gray-50 border-2 border-gray-200 rounded-xl py-3 px-4 text-gray-900 font-medium focus:outline-none focus:border-[#0071f3] focus:ring-2 focus:ring-[#0071f3] focus:ring-opacity-20 transition appearance-none cursor-pointer hover:border-gray-300">
-              <option selected>Input Total Planlet/Batch</option>
+            <select 
+            v-model="productionType"
+            class="w-full bg-gray-50 border-2 border-gray-200 rounded-xl py-3 px-4 text-gray-900 font-medium focus:outline-none focus:border-[#0071f3] focus:ring-2 focus:ring-[#0071f3] focus:ring-opacity-20 transition appearance-none cursor-pointer hover:border-gray-300">
+              <option selected disabled>Input Total Planlet</option>
+              <option>Planlet</option>
               <option>Planlet Stek</option>
               <option>Benih G0</option>
               <option>Benih G1</option>
@@ -66,6 +156,7 @@ const emit = defineEmits(['close'])
           <label class="text-sm font-semibold text-gray-700 block">Jumlah (Qty)</label>
           <div class="relative">
             <input
+              v-model.number="qty"
               type="number"
               placeholder="Masukkan jumlah"
               class="w-full bg-gray-50 border-2 border-gray-200 rounded-xl py-3 px-4 text-gray-900 font-medium focus:outline-none focus:border-[#0071f3] focus:ring-2 focus:ring-[#0071f3] focus:ring-opacity-20 transition hover:border-gray-300"
@@ -82,6 +173,7 @@ const emit = defineEmits(['close'])
           <label class="text-sm font-semibold text-gray-700 block">Total Kerusakan</label>
           <div class="relative">
             <input
+              v-model.number="damage"
               type="number"
               placeholder="Masukkan jumlah kerusakan"
               class="w-full bg-gray-50 border-2 border-gray-200 rounded-xl py-3 px-4 text-gray-900 font-medium focus:outline-none focus:border-[#0071f3] focus:ring-2 focus:ring-[#0071f3] focus:ring-opacity-20 transition hover:border-gray-300"
@@ -116,10 +208,11 @@ const emit = defineEmits(['close'])
           Batal
         </button>
         <button
-          @click="$emit('close')"
+          @click.prevent="submitDataProduction"
+          :disabled="isSubmitting"
           class="bg-gradient-to-r from-[#0071f3] to-[#0060d1] hover:from-[#0060d1] hover:to-[#0050b1] text-white font-medium px-6 py-2.5 rounded-xl transition-all text-sm shadow-md hover:shadow-lg transform hover:-translate-y-0.5"
         >
-          <span class="flex items-center gap-2">
+          <span v-if="!isSubmitting" class="flex items-center gap-2">
             <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
               <path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"/>
             </svg>

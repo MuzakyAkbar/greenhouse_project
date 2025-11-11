@@ -16,7 +16,7 @@ const locationStore = useLocationStore()
 const potatoActivityStore = usePotatoActivityStore()
 const materialStore = useMaterialStore()
 
-// ✅ Get report_id from route params (try both 'report_id' and 'id')
+// ✅ Get report_id from route params
 const report_id = ref(route.params.report_id || route.params.id || null)
 
 const loading = ref(true)
@@ -52,18 +52,43 @@ onMounted(async () => {
   }
 
   await loadData()
+  // 🧩 Sinkronisasi act_name ke act_id agar dropdown terisi otomatis saat revisi
+activities.value.forEach((act) => {
+  // kalau act_id belum ada tapi act_name sudah terisi
+  if (!act.act_id && act.act_name) {
+    // cari activity di master berdasarkan nama (case insensitive)
+    const matched = potatoActivityStore.activities.find(a => 
+      a.activity?.toLowerCase().trim() === act.act_name.toLowerCase().trim() ||
+      a.act_name?.toLowerCase().trim() === act.act_name.toLowerCase().trim()
+    )
+
+    if (matched) {
+      act.act_id = matched.activity_id
+      act.CoA = act.CoA || matched.CoA_code
+      console.log(`✅ Auto-linked activity "${act.act_name}" to master ID ${matched.activity_id}`)
+    } else {
+      console.warn(`⚠️ Tidak ditemukan activity di master untuk "${act.act_name}"`)
+    }
+  }
+})
+
 })
 
 const loadData = async () => {
   try {
     loading.value = true
     
+    // ✅ Load master data terlebih dahulu
     await Promise.all([
       batchStore.getBatches(),
       locationStore.fetchAll(),
       potatoActivityStore.fetchAll(),
-      materialStore.fetchStock() // ✅ Fetch material stock (not fetchAll)
+      materialStore.fetchStock()
     ])
+    
+    console.log('📋 Master Data Loaded:')
+    console.log('  - Activities:', potatoActivityStore.activities.length)
+    console.log('  - Materials:', materialStore.materialStock.length)
 
     // ✅ FETCH REPORT BY report_id
     const { data: report, error: fetchError } = await supabase
@@ -80,10 +105,7 @@ const loadData = async () => {
       .single()
     
     if (fetchError) throw fetchError
-
-    if (!report) {
-      throw new Error('Laporan tidak ditemukan')
-    }
+    if (!report) throw new Error('Laporan tidak ditemukan')
 
     // ✅ Check if report has items that need revision
     const hasRevisionItems = 
@@ -106,7 +128,7 @@ const loadData = async () => {
       report_date: report.report_date
     }
 
-    // ✅ Load ALL type damages (not just needRevision) to display
+    // ✅ Load ALL type damages
     if (report.type_damages) {
       typeDamages.value = report.type_damages.map(td => ({
         typedamage_id: td.typedamage_id,
@@ -118,7 +140,7 @@ const loadData = async () => {
         revision_notes: td.revision_notes,
         approved_by: td.approved_by,
         approved_at: td.approved_at,
-        editable: td.status === 'needRevision' // ✅ Flag for editing
+        editable: td.status === 'needRevision'
       }))
       
       // Collect revision notes from type damages
@@ -135,29 +157,55 @@ const loadData = async () => {
       })
     }
 
-    // ✅ Load ALL activities (not just needRevision) to display
+    // ✅ Load ALL activities dengan mapping ke master data
     if (report.activities) {
-      activities.value = report.activities.map(act => ({
-        activity_id: act.activity_id,
-        activity_id: act.activity_id,
-        act_name: act.act_name,
-        CoA: act.CoA,
-        manpower: act.manpower || 0,
-        status: act.status,
-        materials: act.materials && act.materials.length > 0
-          ? act.materials.map(mat => ({
-              material_used_id: mat.material_used_id,
-              material_id: mat.material_id,
-              material_name: mat.material_name,
-              qty: mat.qty || 0,
-              uom: mat.uom
-            }))
-          : [{ material_used_id: null, material_id: null, material_name: '', qty: 0, uom: '' }],
-        revision_notes: act.revision_notes,
-        approved_by: act.approved_by,
-        approved_at: act.approved_at,
-        editable: act.status === 'needRevision' // ✅ Flag for editing
-      }))
+      activities.value = report.activities.map(act => {
+        // 🔍 Cari nama activity dari master data
+        const masterActivity = potatoActivityStore.activities.find(a => a.activity_id == act.act_id)
+        
+        console.log(`📌 Mapping activity #${act.activity_id}:`, {
+          act_id: act.act_id,
+          db_name: act.act_name,
+          master_name: masterActivity?.activity || masterActivity?.act_name
+        })
+        
+        return {
+          activity_id: act.activity_id,
+          act_id: act.act_id,
+          act_name: masterActivity?.activity || masterActivity?.act_name || act.act_name,
+          CoA: act.CoA,
+          qty: act.qty || 1,              
+          unit: act.unit || 'unit',
+          manpower: act.manpower || 0,
+          status: act.status,
+          materials: act.materials && act.materials.length > 0
+            ? act.materials.map(mat => {
+                // 🔍 Cari material di stock untuk mendapatkan material_id
+                const stockMaterial = materialStore.materialStock.find(
+                  m => m.material_name.toLowerCase().trim() === mat.material_name.toLowerCase().trim()
+                )
+                
+                console.log(`📦 Mapping material "${mat.material_name}":`, {
+                  found: !!stockMaterial,
+                  material_id: stockMaterial?.material_id,
+                  uom: mat.uom || stockMaterial?.uom
+                })
+                
+                return {
+                  material_used_id: mat.material_used_id,
+                  material_id: stockMaterial?.material_id || mat.material_id,
+                  material_name: mat.material_name,
+                  qty: mat.qty || 0,
+                  uom: mat.uom || stockMaterial?.uom || ''
+                }
+              })
+            : [{ material_used_id: null, material_id: null, material_name: '', qty: 0, uom: '' }],
+          revision_notes: act.revision_notes,
+          approved_by: act.approved_by,
+          approved_at: act.approved_at,
+          editable: act.status === 'needRevision'
+        }
+      })
       
       // Collect revision notes from activities
       report.activities.forEach(act => {
@@ -171,6 +219,8 @@ const loadData = async () => {
           })
         }
       })
+      
+      console.log('✅ Loaded activities with materials:', activities.value)
     }
 
     // Load material stock for this location
@@ -199,11 +249,6 @@ const getLocationName = (locationId) => {
   return location?.location || `Location ${locationId}`
 }
 
-const getActivityName = (actId) => {
-  const activity = potatoActivityStore.activities.find(a => a.activity_id == actId)
-  return activity?.act_name || `Activity ${actId}`
-}
-
 const formatDateTime = (dateStr) => {
   if (!dateStr) return '-'
   const date = new Date(dateStr)
@@ -216,15 +261,42 @@ const formatDateTime = (dateStr) => {
   })
 }
 
-// Watch for activity changes to auto-fill CoA
+// ✅ Watch for activity changes to auto-fill CoA dan act_name
 watch(() => activities.value, (acts) => {
   acts.forEach((act) => {
-    const selected = potatoActivityStore.activities.find(a => a.activity_id == act.activity_id)
-    if (selected?.CoA_code) {
-      act.CoA = selected.CoA_code
+    if (act.act_id) {
+      const selected = potatoActivityStore.activities.find(a => a.activity_id == act.act_id)
+      if (selected) {
+        // Auto-fill CoA jika belum ada
+        if (selected.CoA_code && !act.CoA) {
+          act.CoA = selected.CoA_code
+        }
+        // Auto-fill act_name
+        if (selected.activity || selected.act_name) {
+          act.act_name = selected.activity || selected.act_name
+        }
+      }
     }
   })
 }, { deep: true })
+
+// ✅ Handler untuk material change - auto fill uom
+const onMaterialChange = (activityIndex, materialIndex, material_id) => {
+  if (!material_id) return
+  
+  const selectedMaterial = materialStore.materialStock.find(m => m.material_id == material_id)
+  if (selectedMaterial) {
+    const material = activities.value[activityIndex].materials[materialIndex]
+    material.material_name = selectedMaterial.material_name
+    material.uom = selectedMaterial.uom || material.uom
+    
+    console.log(`✅ Material changed:`, {
+      material_id,
+      material_name: selectedMaterial.material_name,
+      uom: selectedMaterial.uom
+    })
+  }
+}
 
 // Material handlers
 const addMaterialRow = (activityIndex) => {
@@ -290,21 +362,35 @@ const handleSubmit = async () => {
     if (editableActivities.length > 0) {
       for (const act of editableActivities) {
         // Validate activity
-        if (!act.activity_id) {
+        if (!act.act_id) {
           throw new Error('Semua aktivitas wajib dipilih')
         }
+        
+        // 🔍 Get activity name from master data
+        const masterActivity = potatoActivityStore.activities.find(a => a.activity_id == act.act_id)
+        const activityName = masterActivity?.activity || masterActivity?.act_name || act.act_name
+
+        console.log(`🔄 Updating activity ${act.activity_id}:`, {
+          act_id: act.act_id,
+          act_name: activityName,
+          CoA: act.CoA,
+          manpower: act.manpower
+        })
 
         // Update activity
         const { error: updateActErr } = await supabase
           .from('gh_activity')
           .update({
-            activity_id: parseInt(act.activity_id),
+            act_id: parseInt(act.act_id),
+            act_name: activityName,
             CoA: act.CoA ? parseFloat(act.CoA) : null,
             manpower: parseInt(act.manpower) || 0,
             status: 'onReview',
             revision_notes: null,
             revision_requested_by: null,
-            revision_requested_at: null
+            revision_requested_at: null,
+            revised_by: username,
+            revised_at: now
           })
           .eq('activity_id', act.activity_id)
         
@@ -313,50 +399,58 @@ const handleSubmit = async () => {
           throw new Error(`Gagal update aktivitas: ${updateActErr.message}`)
         }
 
-        // ✅ Update materials tanpa hapus data lama
-if (act.materials && act.materials.length > 0) {
-  for (const mat of act.materials) {
-    const stockMaterial = materialStore.materialStock.find(m => m.material_id == mat.material_id)
+        // Delete old materials
+        const { error: deleteMatErr } = await supabase
+          .from('gh_material_used')
+          .delete()
+          .eq('activity_id', act.activity_id)
+        
+        if (deleteMatErr) {
+          console.error('Error deleting materials:', deleteMatErr)
+          throw new Error(`Gagal hapus material lama: ${deleteMatErr.message}`)
+        }
 
-    if (mat.material_used_id) {
-      // 🔄 Update data lama berdasarkan material_used_id
-      const { error: updateMatErr } = await supabase
-        .from('gh_material_used')
-        .update({
-          material_name: stockMaterial?.material_name || mat.material_name || '',
-          qty: parseFloat(mat.qty) || 0,
-          uom: mat.uom || stockMaterial?.uom || ''
-        })
-        .eq('material_used_id', mat.material_used_id)
+        // Insert new materials
+        if (act.materials && act.materials.length > 0) {
+          const validMaterials = act.materials.filter(m => m.material_id && m.qty > 0)
+          
+          if (validMaterials.length > 0) {
+            const materialsToInsert = validMaterials.map(mat => {
+              const stockMaterial = materialStore.materialStock.find(m => m.material_id == mat.material_id)
+              
+              console.log(`📦 Inserting material:`, {
+                material_id: mat.material_id,
+                material_name: stockMaterial?.material_name || mat.material_name,
+                qty: mat.qty,
+                uom: mat.uom || stockMaterial?.uom
+              })
+              
+              return {
+                activity_id: act.activity_id,
+                material_id: parseInt(mat.material_id),
+                material_name: stockMaterial?.material_name || mat.material_name,
+                qty: parseFloat(mat.qty) || 0,
+                uom: mat.uom || stockMaterial?.uom || ''
+              }
+            })
 
-      if (updateMatErr) {
-        console.error('Error updating material:', updateMatErr)
-        throw new Error(`Gagal update material: ${updateMatErr.message}`)
-      }
-
-    } else if (mat.material_id && mat.qty > 0) {
-      // ➕ Tambah data baru hanya jika benar-benar baru
-      const { error: insertMatErr } = await supabase
-        .from('gh_material_used')
-        .insert({
-          activity_id: act.activity_id,
-          material_name: stockMaterial?.material_name || mat.material_name || '',
-          qty: parseFloat(mat.qty) || 0,
-          uom: mat.uom || stockMaterial?.uom || ''
-        })
-
-      if (insertMatErr) {
-        console.error('Error inserting new material:', insertMatErr)
-        throw new Error(`Gagal tambah material baru: ${insertMatErr.message}`)
-      }
-    }
-  }
+            const { error: insertMatErr } = await supabase
+              .from('gh_material_used')
+              .insert(materialsToInsert)
+            
+            if (insertMatErr) {
+              console.error('Error inserting materials:', insertMatErr)
+              throw new Error(`Gagal tambah material: ${insertMatErr.message}`)
+            }
+            
+            console.log(`✅ Inserted ${materialsToInsert.length} materials`)
+          }
         }
       }
       console.log(`✅ Updated ${editableActivities.length} activities`)
     }
 
-    // ✅ CHECK IF ALL ITEMS ARE NOW APPROVED OR ONREVIEW (NO MORE needRevision)
+    // ✅ CHECK IF ALL ITEMS ARE NOW APPROVED OR ONREVIEW
     const stillHasRevision = 
       typeDamages.value.some(td => td.status === 'needRevision' && !td.editable) ||
       activities.value.some(act => act.status === 'needRevision' && !act.editable)
@@ -365,11 +459,11 @@ if (act.materials && act.materials.length > 0) {
     
     // ✅ UPDATE REPORT STATUS
     const { error: updateReportErr } = await supabase
-  .from('gh_report')
-  .update({
-    report_status: 'onReview'
-  })
-  .eq('report_id', report_id.value)
+      .from('gh_report')
+      .update({
+        report_status: newReportStatus
+      })
+      .eq('report_id', report_id.value)
     
     if (updateReportErr) {
       console.error('Error updating report:', updateReportErr)
@@ -401,16 +495,24 @@ const filteredActivities = computed(() => {
     console.warn('⚠️ No activities loaded')
     return []
   }
+  console.log('⚙️ Available activities:', activities.map(a => ({
+    id: a.activity_id,
+    name: a.activity || a.act_name
+  })))
   return activities
 })
 
 const filteredMaterials = computed(() => {
-  const materials = materialStore.materialStock // ✅ Use materialStock not materials
+  const materials = materialStore.materialStock
   if (!materials || materials.length === 0) {
-    console.warn('⚠️ No materials loaded')
+    console.warn('⚠️ No materials loaded in materialStore.materialStock')
     return []
   }
-  console.log('📦 Available materials:', materials.length, materials)
+  console.log('📦 Available materials for dropdown:', materials.map(m => ({
+    id: m.material_id,
+    name: m.material_name,
+    uom: m.uom
+  })))
   return materials
 })
 </script>
@@ -718,28 +820,28 @@ const filteredMaterials = computed(() => {
               <div class="grid grid-cols-1 md:grid-cols-2 gap-5 mb-6">
                 <div>
                   <label class="block text-sm font-semibold text-gray-700 mb-2">
-                    Pilih Activity <span v-if="activity.editable" class="text-red-500">*</span>
+                    Pilih Activity 
+                    <span v-if="activity.editable" class="text-red-500">*</span>
                   </label>
                   <select
-                    v-model="activity.activity_id"
+                    v-model="activity.act_id"
                     :required="activity.editable"
                     :disabled="!activity.editable"
-                    class="w-full px-4 py-3 border-2 rounded-lg transition activity-select"
-                    :class="activity.editable ? 'border-gray-200 focus:border-[#0071f3] bg-white text-gray-900' : 'border-gray-200 bg-gray-100 cursor-not-allowed text-gray-600'"
+                    class="w-full px-4 py-3 border-2 rounded-lg transition"
+                    :class="activity.editable ? 'border-gray-200 focus:border-[#0071f3] bg-white' : 'border-gray-200 bg-gray-100 cursor-not-allowed'"
+                    style="color: #111827 !important; -webkit-text-fill-color: #111827 !important; color-scheme: light !important;"
                   >
-                    <option :value="null" class="text-gray-900 bg-white">
+                    <option :value="null" style="color: #111827 !important; background-color: #ffffff !important;">
                       Pilih Activity
                     </option>
                     <option
                       v-for="a in filteredActivities"
                       :key="a.activity_id"
                       :value="a.activity_id"
-                      class="text-gray-900 bg-white"
-                    >
-                      {{ a.act_name }}
+                      style="color: #111827 !important; background-color: #ffffff !important;">
+                        {{ a.activity || a.act_name }}
                     </option>
                   </select>
-
                 </div>
 
                 <div>
@@ -765,8 +867,8 @@ const filteredMaterials = computed(() => {
                 </h4>
                 <div class="space-y-3">
                   <div
-                    v-for="(material, matIndex) in activity.materials || []"
-                    :key="(material && material.material_used_id) || matIndex"
+                    v-for="(material, matIndex) in activity.materials"
+                    :key="matIndex"
                     class="flex flex-col md:flex-row gap-3 items-end bg-white rounded-lg p-4 border border-gray-200"
                   >
                     <div class="flex-1 flex flex-col">
@@ -983,7 +1085,7 @@ select {
   padding-right: 2.5rem;
   color: #111827 !important;
   background-color: #ffffff !important;
-  color-scheme: light !important;
+  color-scheme: light !important; /* PAKSA LIGHT MODE */
 }
 
 /* Paksa opsi dropdown */

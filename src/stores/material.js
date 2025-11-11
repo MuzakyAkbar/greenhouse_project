@@ -78,6 +78,77 @@ export const useMaterialStore = defineStore('material', () => {
   }
 
   /**
+   * ✅ NEW: Validate stock untuk activity (bulk check)
+   * Cek apakah semua materials tersedia dengan qty yang cukup
+   */
+  async function validateStockForActivity(materials, location_id) {
+    try {
+      console.log('🔍 Validating stock for activity...', { 
+        materials_count: materials.length, 
+        location_id 
+      })
+
+      const validation = {
+        valid: true,
+        missing: [],      // materials yang tidak ada di db
+        insufficient: []  // materials yang qty kurang
+      }
+
+      for (const material of materials) {
+        if (!material.material_name || !material.qty || parseFloat(material.qty) <= 0) {
+          continue
+        }
+
+        const { data: stockData, error: err } = await supabase
+          .from('gh_material_stock')
+          .select('*')
+          .eq('material_name', material.material_name)
+          .eq('location_id', location_id)
+          .single()
+
+        if (err && err.code !== 'PGRST116') {
+          console.error('❌ Error checking stock:', err)
+          throw err
+        }
+
+        const requestQty = parseFloat(material.qty)
+
+        if (!stockData) {
+          // Material tidak ada di stock
+          validation.missing.push({
+            material_name: material.material_name,
+            requested_qty: requestQty,
+            uom: material.uom
+          })
+          validation.valid = false
+        } else if (parseFloat(stockData.qty || 0) < requestQty) {
+          // Stock tidak cukup
+          validation.insufficient.push({
+            material_name: material.material_name,
+            requested_qty: requestQty,
+            available_qty: parseFloat(stockData.qty || 0),
+            uom: material.uom || stockData.uom
+          })
+          validation.valid = false
+        } else {
+          console.log(`✅ Stock OK: ${material.material_name} (need: ${requestQty}, available: ${stockData.qty})`)
+        }
+      }
+
+      console.log('📊 Validation result:', validation)
+      return validation
+    } catch (err) {
+      console.error('Error validating stock:', err)
+      return { 
+        valid: false, 
+        missing: [], 
+        insufficient: [],
+        error: err 
+      }
+    }
+  }
+
+  /**
    * Create or update material stock
    */
   async function upsertStock(payload) {
@@ -137,7 +208,7 @@ export const useMaterialStore = defineStore('material', () => {
   }
 
   /**
-   * Reduce stock when material is used
+   * Reduce stock when material is used (CALLED FROM ReportActivityReview.vue on APPROVE)
    */
   async function reduceStock(material_name, qty, location_id) {
     try {
@@ -176,7 +247,8 @@ export const useMaterialStore = defineStore('material', () => {
         .from('gh_material_stock')
         .update({
           qty: newQty,
-          updated_at: new Date().toISOString()
+          updated_at: new Date().toISOString(),
+          updated_by: 'System (Auto-reduction on Activity Approval)'
         })
         .eq('material_id', stockData.material_id)
         .select()
@@ -184,6 +256,7 @@ export const useMaterialStore = defineStore('material', () => {
       if (updateErr) throw updateErr
       
       console.log('✅ Stock reduced successfully')
+      // Refresh local state
       await fetchStock({ location_id })
       
       return { data, error: null }
@@ -223,7 +296,7 @@ export const useMaterialStore = defineStore('material', () => {
    */
   async function removeStock(material_id) {
     try {
-      const { data, error: err } = await supabase
+      const { error: err } = await supabase
         .from('gh_material_stock')
         .delete()
         .eq('material_id', material_id)
@@ -232,7 +305,7 @@ export const useMaterialStore = defineStore('material', () => {
         await fetchStock()
       }
       
-      return { data, error: err }
+      return { data: null, error: err }
     } catch (err) {
       console.error('Error removing stock:', err)
       return { data: null, error: err }
@@ -337,7 +410,7 @@ export const useMaterialStore = defineStore('material', () => {
    */
   async function removeUsed(material_used_id) {
     try {
-      const { data, error: err } = await supabase
+      const { error: err } = await supabase
         .from('gh_material_used')
         .delete()
         .eq('material_used_id', material_used_id)
@@ -353,38 +426,38 @@ export const useMaterialStore = defineStore('material', () => {
     }
   }
 
-  // Tambahkan di bagian function sebelum return
-async function fetchAll(filters = {}) {
-  try {
-    // Ambil semua stock
-    await fetchStock(filters)
-    // Ambil semua material used
-    await fetchUsed(filters)
-    console.log('✅ fetchAll completed: stock + used')
-  } catch (err) {
-    console.error('❌ Error in fetchAll:', err)
+  /**
+   * Fetch all (combined stock + used)
+   */
+  async function fetchAll(filters = {}) {
+    try {
+      await fetchStock(filters)
+      await fetchUsed(filters)
+      console.log('✅ fetchAll completed: stock + used')
+    } catch (err) {
+      console.error('❌ Error in fetchAll:', err)
+    }
   }
-}
 
-// Di return statement, cukup tambahkan fetchAll
-return { 
-  materialStock,
-  materialUsed,
-  loading, 
-  error,
-  // Stock operations
-  fetchStock,
-  getStockByMaterial,
-  upsertStock,
-  reduceStock,
-  updateStock,
-  removeStock,
-  // Used operations
-  fetchUsed,
-  addToUsed,
-  updateUsed,
-  removeUsed,
-  // New combined fetch
-  fetchAll
-}
+  return { 
+    materialStock,
+    materialUsed,
+    loading, 
+    error,
+    // Stock operations
+    fetchStock,
+    getStockByMaterial,
+    validateStockForActivity,  // ✅ NEW
+    upsertStock,
+    reduceStock,
+    updateStock,
+    removeStock,
+    // Used operations
+    fetchUsed,
+    addToUsed,
+    updateUsed,
+    removeUsed,
+    // Combined fetch
+    fetchAll
+  }
 })

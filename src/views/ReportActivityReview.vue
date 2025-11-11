@@ -1,34 +1,38 @@
+
 <script setup>
 import { ref, onMounted, computed } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useAuthStore } from '../stores/auth'
-import { useActivityReportStore } from '../stores/activityReport'
 import { useBatchStore } from '../stores/batch'
 import { useLocationStore } from '../stores/location'
-import { useMaterialStore } from '../stores/material'
 import { supabase } from '../lib/supabase'
+import openbravoApi from '@/lib/openbravo'
+import axios from 'axios'
 
 const router = useRouter()
 const route = useRoute()
 const authStore = useAuthStore()
-const activityReportStore = useActivityReportStore()
 const batchStore = useBatchStore()
 const locationStore = useLocationStore()
-const materialStore = useMaterialStore()
 
-// ✅ Get report_id from route params
 const report_id = ref(route.params.report_id || null)
 
 const loading = ref(true)
 const processing = ref(false)
 const error = ref(null)
 
-const currentReport = ref(null) // Single report data
+const currentReport = ref(null)
 const revisionModal = ref({
   show: false,
-  type: null, // 'type_damage' or 'activity'
+  type: null,
   itemId: null,
   notes: ''
+})
+
+const warehouseInfo = ref({
+  warehouse: null,
+  bin: null,
+  location_name: null
 })
 
 onMounted(async () => {
@@ -55,7 +59,6 @@ const loadData = async () => {
       locationStore.fetchAll()
     ])
 
-    // ✅ FETCH REPORT BY report_id
     const { data: report, error: fetchError } = await supabase
       .from('gh_report')
       .select(`
@@ -78,12 +81,10 @@ const loadData = async () => {
     currentReport.value = report
     console.log('✅ Loaded report:', report)
     
-    // Load material stock for this location
     if (report.location_id) {
-      await materialStore.fetchStock({ location_id: report.location_id })
+      await loadWarehouseAndBin(report.location_id)
     }
     
-    // ✅ UPDATE REPORT STATUS BASED ON ITEMS
     await updateReportStatus()
     
   } catch (err) {
@@ -96,7 +97,324 @@ const loadData = async () => {
   }
 }
 
-// ✅ UPDATE REPORT STATUS LOGIC
+const loadWarehouseAndBin = async (locationId) => {
+  try {
+    const location = locationStore.locations.find(l => l.location_id == locationId)
+    if (!location) {
+      console.warn('⚠️ Location not found:', locationId)
+      return
+    }
+
+    const locationName = location.location
+    warehouseInfo.value.location_name = locationName
+    
+    console.log('🏢 Loading warehouse for location:', locationName)
+
+    const warehouseRes = await openbravoApi.get(
+      '/org.openbravo.service.json.jsonrest/Warehouse',
+      { params: { _where: `name='${locationName}'` } }
+    )
+
+    const warehouses = warehouseRes?.data?.response?.data || []
+    if (!warehouses.length) {
+      console.warn('⚠️ Warehouse not found for location:', locationName)
+      return
+    }
+
+    const warehouse = warehouses[0]
+    warehouseInfo.value.warehouse = warehouse
+    console.log('✅ Warehouse found:', warehouse.name)
+
+    const binRes = await openbravoApi.get(
+      '/org.openbravo.service.json.jsonrest/Locator',
+      { params: { _where: `M_Warehouse_ID='${warehouse.id}'` } }
+    )
+
+    const bins = binRes?.data?.response?.data || []
+    if (!bins.length) {
+      console.warn('⚠️ Bin not found for warehouse:', warehouse.name)
+      return
+    }
+
+    warehouseInfo.value.bin = bins[0]
+    console.log('✅ Bin found:', bins[0].name)
+
+  } catch (err) {
+    console.error('❌ Error loading warehouse/bin:', err)
+  }
+}
+
+// ✅ FIXED VERSION - Complete createAndProcessMovement Function
+// Replace entire function in ReportActivityReview.vue
+
+// ✅ FIXED VERSION - Create Internal Consumption (not Movement)
+const createAndProcessMovement = async (materials, activityName) => {
+  try {
+    if (!warehouseInfo.value.bin || !warehouseInfo.value.warehouse) {
+      throw new Error('Warehouse/Bin tidak ditemukan untuk location ini')
+    }
+
+    const warehouse = warehouseInfo.value.warehouse
+    const bin = warehouseInfo.value.bin
+    
+    const warehouseId = warehouse.id
+    const binId = bin.id
+    
+    // Ambil organization & client dari warehouse
+    const orgId = warehouse.organization?.id || warehouse.organization || '96D7D37973EF450383B8ADCFDB666725'
+    const clientId = warehouse.client?.id || warehouse.client || '025F309A89714992995442D9CDE13A15'
+    
+    console.log(`\n${'='.repeat(60)}`)
+    console.log(`🔄 CREATING INTERNAL CONSUMPTION (MATERIAL USAGE)`)
+    console.log(`${'='.repeat(60)}`)
+    console.log('Activity:', activityName)
+    console.log('Warehouse ID:', warehouseId)
+    console.log('Warehouse Name:', warehouse.name)
+    console.log('Bin ID:', binId)
+    console.log('Org ID:', orgId)
+    console.log('Client ID:', clientId)
+    console.log(`${'='.repeat(60)}\n`)
+
+    // ✅ STEP 1: Create Internal Consumption header
+    console.log('🔄 STEP 1: Creating Internal Consumption header...')
+    
+    const now = new Date()
+    const movementDate = now.toISOString().split('T')[0]
+    const consumptionName = `GH-${activityName.replace(/[^a-zA-Z0-9]/g, '').substring(0, 20)}-${Date.now()}`
+    
+    const headerPayload = {
+      _entityName: 'M_Internal_Consumption',
+      name: consumptionName,
+      movementDate: movementDate,
+      warehouse: warehouseId,
+      organization: orgId,
+      client: clientId,
+      documentStatus: 'DR',
+      documentAction: 'CO',
+      processed: false,
+      posted: 'N',
+      active: true,
+      description: `Material consumption for activity: ${activityName}`
+    }
+
+    console.log('📤 Header Payload:', JSON.stringify(headerPayload, null, 2))
+
+    const headerRes = await openbravoApi.post(
+      '/org.openbravo.service.json.jsonrest/M_Internal_Consumption',
+      headerPayload
+    )
+
+    console.log('📥 Header Response:', JSON.stringify(headerRes?.data, null, 2))
+    
+    // Check error
+    if (headerRes?.data?.response?.status === -1) {
+      const obError = headerRes.data.response.error
+      console.error('❌ Openbravo Error:', obError)
+      throw new Error(`Openbravo Error: ${obError?.message || JSON.stringify(obError)}`)
+    }
+
+    // Get consumption ID
+    let consumptionId = null
+    
+    if (headerRes?.data?.response?.data?.[0]?.id) {
+      consumptionId = headerRes.data.response.data[0].id
+    } else if (headerRes?.data?.data?.[0]?.id) {
+      consumptionId = headerRes.data.data[0].id
+    } else if (headerRes?.data?.id) {
+      consumptionId = headerRes.data.id
+    }
+    
+    if (!consumptionId) {
+      console.error('❌ No consumption ID in response')
+      throw new Error('Gagal mendapatkan Internal Consumption ID')
+    }
+
+    console.log(`✅ Internal Consumption created: ${consumptionId}`)
+
+    // ✅ STEP 2: Create consumption lines
+    console.log('\n🔄 STEP 2: Creating consumption lines...')
+    
+    let successCount = 0
+    let errors = []
+
+    for (const material of materials) {
+      try {
+        console.log(`\n  📦 Processing: ${material.material_name}`)
+        
+        // Get product
+        const productRes = await openbravoApi.get(
+          '/org.openbravo.service.json.jsonrest/Product',
+          {
+            params: {
+              _where: `name='${material.material_name}'`,
+              _selectedProperties: 'id,name,uOM',
+              _startRow: 0,
+              _endRow: 1
+            }
+          }
+        )
+
+        const products = productRes?.data?.response?.data || []
+        if (!products.length) {
+          errors.push(`${material.material_name}: Product not found`)
+          console.error(`    ❌ Product not found`)
+          continue
+        }
+
+        const product = products[0]
+        let uomId = product.uOM
+
+        // Get UOM if specified
+        if (material.uom) {
+          const uomRes = await openbravoApi.get(
+            '/org.openbravo.service.json.jsonrest/UOM',
+            {
+              params: {
+                _where: `name='${material.uom}'`,
+                _startRow: 0,
+                _endRow: 1
+              }
+            }
+          )
+
+          const uoms = uomRes?.data?.response?.data || []
+          if (uoms.length > 0) {
+            uomId = uoms[0].id
+          }
+        }
+
+        // Check stock
+        const stockRes = await openbravoApi.get(
+          '/org.openbravo.service.json.jsonrest/MaterialMgmtStorageDetail',
+          {
+            params: {
+              _where: `storageBin='${binId}' AND product='${product.id}'`,
+              _selectedProperties: 'quantityOnHand',
+              _startRow: 0,
+              _endRow: 1
+            }
+          }
+        )
+
+        const stockDetails = stockRes?.data?.response?.data || []
+        const currentStock = stockDetails[0]?.quantityOnHand || 0
+
+        console.log(`    📊 Stock: ${currentStock}, Need: ${material.qty}`)
+
+        if (currentStock < material.qty) {
+          errors.push(`${material.material_name}: Insufficient stock (${currentStock}/${material.qty})`)
+          console.warn(`    ⚠️ Insufficient stock`)
+          continue
+        }
+
+        // ✅ Create line - Internal Consumption hanya butuh locator (bin), tidak butuh destination
+        const linePayload = {
+          _entityName: 'M_Internal_ConsumptionLine',
+          internalConsumption: consumptionId,
+          product: product.id,
+          movementQuantity: material.qty,
+          uOM: uomId,
+          storagebin: binId,  // Source bin/locator
+          organization: orgId,
+          client: clientId,
+          lineNo: (successCount + 1) * 10
+        }
+
+        console.log('    📤 Line Payload:', JSON.stringify(linePayload, null, 2))
+
+        const lineRes = await openbravoApi.post(
+          '/org.openbravo.service.json.jsonrest/M_Internal_ConsumptionLine',
+          linePayload
+        )
+
+        if (lineRes?.data?.response?.status === -1) {
+          const lineError = lineRes.data.response.error
+          throw new Error(lineError?.message || 'Failed to create line')
+        }
+
+        console.log(`    ✅ Line created`)
+        successCount++
+
+      } catch (err) {
+        console.error(`    ❌ Error:`, err.message)
+        errors.push(`${material.material_name}: ${err.message}`)
+      }
+    }
+
+    if (successCount === 0) {
+      throw new Error('No materials were added to the consumption')
+    }
+
+    console.log(`\n✅ Lines created: ${successCount}/${materials.length}`)
+
+    // ✅ STEP 3: Process Internal Consumption
+    console.log('\n🔄 STEP 3: Processing Internal Consumption...')
+    
+    const apiUrl = (import.meta.env.VITE_OPENBRAVO_URL || '').trim()
+    const apiPort = (import.meta.env.VITE_API_PORT || '').trim()
+    const username = (import.meta.env.VITE_API_USER || '').trim()
+    const password = (import.meta.env.VITE_API_PASS || '').trim()
+
+    if (!apiUrl || !apiPort || !username || !password) {
+      throw new Error('API credentials not configured')
+    }
+
+    const endpoint = `${apiUrl.replace(/\/+$/, '')}:${apiPort}/api/process`
+    const token = btoa(unescape(encodeURIComponent(`${username}:${password}`)))
+
+    // Process ID untuk Internal Consumption (perlu dicek di Openbravo)
+    // Biasanya berbeda dengan Internal Movement (122)
+    const processPayload = {
+      ad_process_id: '139',  // ID untuk process Internal Consumption (sesuaikan dengan Openbravo Anda)
+      ad_client_id: clientId,
+      ad_org_id: orgId,
+      data: [{ id: consumptionId }]
+    }
+
+    console.log('📤 Process Payload:', JSON.stringify(processPayload, null, 2))
+
+    const processRes = await axios.post(endpoint, processPayload, {
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Basic ${token}`,
+        'X-Requested-With': 'XMLHttpRequest'
+      },
+      withCredentials: false
+    })
+
+    console.log('📥 Process Response:', JSON.stringify(processRes?.data, null, 2))
+
+    const resultObj = processRes?.data?.data?.[0]
+    
+    if (!resultObj || resultObj.result !== 1) {
+      throw new Error(resultObj?.errormsg || 'Process failed')
+    }
+
+    console.log(`✅ Internal Consumption processed successfully`)
+    console.log(`${'='.repeat(60)}\n`)
+
+    return {
+      success: true,
+      movementId: consumptionId,
+      successCount,
+      totalMaterials: materials.length,
+      errors: errors.length > 0 ? errors : null
+    }
+
+  } catch (err) {
+    console.error('\n❌ FATAL ERROR:', err.message)
+    console.error('Stack:', err.stack)
+    
+    return {
+      success: false,
+      error: err.message,
+      errors: [],
+      fullError: err
+    }
+  }
+}
+
+// ✅ UPDATE REPORT STATUS
 const updateReportStatus = async () => {
   try {
     if (!currentReport.value) return
@@ -154,31 +472,28 @@ const updateReportStatus = async () => {
     }
     
     // Determine status
-    let newStatus = 'onReview' // default
+    let newStatus = 'onReview'
     const updateData = { report_status: null }
     
     if (hasNeedRevision) {
-      newStatus = 'needRevision' // Priority 1: Ada yang perlu revisi
+      newStatus = 'needRevision'
       updateData.report_status = newStatus
       updateData.revision_notes = revisionNotes.join('\n\n')
       updateData.revision_requested_by = revisionRequestedBy
       updateData.revision_requested_at = revisionRequestedAt
-      // Clear approval fields when status becomes needRevision
       updateData.approved_by = null
       updateData.approved_at = null
     } else if (allApproved && totalItems > 0) {
-      newStatus = 'approved' // Priority 2: Semua sudah approved
+      newStatus = 'approved'
       updateData.report_status = newStatus
       updateData.approved_by = username
       updateData.approved_at = new Date().toISOString()
-      // Clear revision fields when status becomes approved
       updateData.revision_notes = null
       updateData.revision_requested_by = null
       updateData.revision_requested_at = null
     } else {
       newStatus = 'onReview'
       updateData.report_status = newStatus
-      // Clear both revision and approval fields
       updateData.revision_notes = null
       updateData.revision_requested_by = null
       updateData.revision_requested_at = null
@@ -186,7 +501,7 @@ const updateReportStatus = async () => {
       updateData.approved_at = null
     }
     
-    // Update report status if changed
+    // Update if changed
     if (report.report_status !== newStatus) {
       console.log(`🔄 Updating report ${report.report_id} status: ${report.report_status} → ${newStatus}`)
       
@@ -199,7 +514,6 @@ const updateReportStatus = async () => {
         console.error('❌ Error updating report status:', updateErr)
       } else {
         console.log(`✅ Report ${report.report_id} status updated to ${newStatus}`)
-        // Update local state
         Object.assign(currentReport.value, updateData)
       }
     }
@@ -297,7 +611,6 @@ const approveTypeDamage = async (typeDamageId) => {
     
     console.log('📋 Approving type_damage:', typeDamageId)
     
-    // Update type_damage status
     const { error: updateErr } = await supabase
       .from('gh_type_damage')
       .update({
@@ -309,31 +622,29 @@ const approveTypeDamage = async (typeDamageId) => {
     
     if (updateErr) throw updateErr
     
-    console.log('✅ Type damage status updated to approved')
+    console.log('✅ Type damage approved')
     
-    // ✅ REFRESH DATA FROM DATABASE
     await loadData()
-    
     alert('✅ Data kerusakan berhasil disetujui!')
     
   } catch (err) {
-    console.error('❌ Error approving type damage:', err)
+    console.error('❌ Error:', err)
     alert('❌ Gagal approve: ' + err.message)
   } finally {
     processing.value = false
   }
 }
 
-// ✅ APPROVE ACTIVITY
+// ✅ APPROVE ACTIVITY (FIXED - Create & Process Movement)
 const approveActivity = async (activityId) => {
-  if (!confirm('✅ Approve aktivitas ini?\n\nMaterial yang digunakan akan dikurangi dari stock.')) return
+  if (!confirm('✅ Approve aktivitas ini?\n\nInternal Movement akan dibuat dan material akan dikurangi dari stock Openbravo.')) return
 
   try {
     processing.value = true
     
     const username = authStore.user?.username || authStore.user?.email || 'Admin'
     
-    // ✅ CEK STATUS ACTIVITY SEBELUM APPROVE - Hindari duplikasi pengurangan stock
+    // ✅ CHECK STATUS
     const { data: checkActivity, error: checkError } = await supabase
       .from('gh_activity')
       .select('status, activity_id')
@@ -342,16 +653,13 @@ const approveActivity = async (activityId) => {
     
     if (checkError) throw checkError
     
-    // ❌ Jika sudah approved, jangan approve lagi (hindari pengurangan stock ganda)
     if (checkActivity.status === 'approved') {
       alert('⚠️ Activity ini sudah di-approve sebelumnya!')
       await loadData()
       return
     }
     
-    console.log('📋 Activity to approve:', checkActivity)
-    
-    // Get activity with materials FRESH FROM DATABASE
+    // Get activity with materials
     const { data: activityData, error: getError } = await supabase
       .from('gh_activity')
       .select(`
@@ -364,56 +672,77 @@ const approveActivity = async (activityId) => {
     if (getError) throw getError
     if (!activityData) throw new Error('Activity tidak ditemukan')
     
-    // ✅ REDUCE MATERIAL STOCK DULU SEBELUM UPDATE STATUS
-    let stockReduced = false
+    // ✅ CREATE & PROCESS INTERNAL MOVEMENT
+    let movementResult = null
+    
     if (activityData.materials && activityData.materials.length > 0) {
-      console.log('📦 Processing materials:', activityData.materials.length)
+      console.log('📦 Creating Internal Movement for materials:', activityData.materials.length)
       
-      for (const material of activityData.materials) {
-        if (material.qty > 0) {
-          console.log(`🔄 Reducing stock: ${material.material_name} (-${material.qty}) at location ${currentReport.value.location_id}`)
-          
-          const result = await materialStore.reduceStock(
-            material.material_name,
-            material.qty,
-            currentReport.value.location_id
-          )
-          
-          if (result.error) {
-            console.warn(`⚠️ Warning reducing stock for ${material.material_name}:`, result.error)
-          } else {
-            console.log(`✅ Stock reduced: ${material.material_name} (-${material.qty})`)
-            stockReduced = true
-          }
+      movementResult = await createAndProcessMovement(
+        activityData.materials,
+        activityData.act_name
+      )
+      
+      if (!movementResult.success) {
+        const proceed = confirm(
+          `⚠️ Gagal membuat movement:\n${movementResult.error}\n\nTetap approve activity ini?`
+        )
+        if (!proceed) {
+          processing.value = false
+          return
+        }
+      } else if (movementResult.errors && movementResult.errors.length > 0) {
+        const proceed = confirm(
+          `⚠️ Beberapa material gagal:\n\n${movementResult.errors.slice(0, 3).join('\n')}${movementResult.errors.length > 3 ? '\n...' : ''}\n\nTetap approve activity ini?`
+        )
+        if (!proceed) {
+          processing.value = false
+          return
         }
       }
     }
     
-    // ✅ UPDATE STATUS ACTIVITY SETELAH STOCK DIKURANGI
+    // ✅ UPDATE STATUS ACTIVITY
+    const updateData = {
+      status: 'approved',
+      approved_by: username,
+      approved_at: new Date().toISOString()
+    }
+    
+    // Simpan movement ID jika ada
+    if (movementResult?.movementId) {
+      updateData.openbravo_movement_id = movementResult.movementId
+    }
+    
     const { error: updateErr } = await supabase
       .from('gh_activity')
-      .update({
-        status: 'approved',
-        approved_by: username,
-        approved_at: new Date().toISOString()
-      })
+      .update(updateData)
       .eq('activity_id', activityId)
     
     if (updateErr) throw updateErr
     
-    console.log('✅ Activity status updated to approved')
+    console.log('✅ Activity approved')
     
-    // ✅ REFRESH DATA FROM DATABASE
     await loadData()
     
-    const message = stockReduced 
-      ? '✅ Aktivitas berhasil disetujui dan stock material dikurangi!'
-      : '✅ Aktivitas berhasil disetujui! (Tidak ada material yang dikurangi)'
-    
-    alert(message)
+    if (movementResult?.success) {
+      const detailMsg = `
+✅ Aktivitas berhasil disetujui!
+
+Internal Movement ID: ${movementResult.movementId}
+Material berhasil dikurangi: ${movementResult.successCount}/${movementResult.totalMaterials}
+
+${movementResult.errors ? '\n⚠️ Beberapa material gagal:\n' + movementResult.errors.join('\n') : ''}
+
+Silakan cek stock di Openbravo untuk memastikan perubahan.
+      `.trim()
+      alert(detailMsg)
+    } else {
+      alert('✅ Aktivitas berhasil disetujui!\n\n⚠️ Namun tidak ada material yang dikurangi dari stock.')
+    }
     
   } catch (err) {
-    console.error('❌ Error approving activity:', err)
+    console.error('❌ Error:', err)
     alert('❌ Gagal approve: ' + err.message)
   } finally {
     processing.value = false
@@ -445,9 +774,6 @@ const approveAllTypeDamages = async () => {
       return
     }
     
-    console.log('📋 Approving type_damages:', typeDamageIds)
-    
-    // Bulk update
     const { error: updateErr } = await supabase
       .from('gh_type_damage')
       .update({
@@ -459,9 +785,6 @@ const approveAllTypeDamages = async () => {
     
     if (updateErr) throw updateErr
     
-    console.log('✅ All type damages approved')
-    
-    // ✅ REFRESH DATA
     await loadData()
     alert(`✅ ${typeDamageIds.length} data kerusakan berhasil disetujui!`)
     
@@ -473,54 +796,54 @@ const approveAllTypeDamages = async () => {
   }
 }
 
-// ✅ APPROVE ALL ACTIVITIES
+// ✅ APPROVE ALL ACTIVITIES (FIXED)
 const approveAllActivities = async () => {
   if (!reportInfo.value || !currentReport.value) return
   
-  if (!confirm(`✅ Approve SEMUA (${reportInfo.value.totalActivities}) aktivitas?\n\nSemua material yang digunakan akan dikurangi dari stock.`)) return
+  if (!confirm(`✅ Approve SEMUA (${reportInfo.value.totalActivities}) aktivitas?\n\nInternal Movement akan dibuat untuk setiap aktivitas dan material akan dikurangi dari stock Openbravo.`)) return
 
   try {
     processing.value = true
     
     const username = authStore.user?.username || authStore.user?.email || 'Admin'
     
-    // ✅ CEK DAN FILTER HANYA ACTIVITY YANG BELUM APPROVED
     const activitiesToApprove = []
-    const materialsToReduce = []
+    let allMovementResults = []
     
     if (currentReport.value.activities) {
       for (const act of currentReport.value.activities) {
-        // ✅ HANYA PROSES ACTIVITY YANG STATUS: null, undefined, atau 'onReview'
         if (!act.status || act.status === 'onReview') {
-          // Double check dari database
           const { data: checkAct } = await supabase
             .from('gh_activity')
             .select('status')
             .eq('activity_id', act.activity_id)
             .single()
           
-          // Pastikan belum approved di database
           if (checkAct && checkAct.status !== 'approved') {
-            activitiesToApprove.push({
-              activity_id: act.activity_id,
-              materials: act.materials || []
-            })
+            activitiesToApprove.push(act)
             
-            // Collect materials untuk activity ini
+            // ✅ CREATE & PROCESS MOVEMENT untuk setiap activity
             if (act.materials && act.materials.length > 0) {
-              act.materials.forEach(mat => {
-                if (mat.qty > 0) {
-                  materialsToReduce.push({
-                    material_name: mat.material_name,
-                    qty: mat.qty,
-                    location_id: currentReport.value.location_id,
-                    activity_id: act.activity_id
-                  })
-                }
+              console.log(`📦 Creating movement for activity: ${act.act_name}`)
+              
+              const movementResult = await createAndProcessMovement(
+                act.materials,
+                act.act_name
+              )
+              
+              allMovementResults.push({
+                activityName: act.act_name,
+                result: movementResult
               })
+              
+              // Simpan movement ID ke activity jika berhasil
+              if (movementResult.success && movementResult.movementId) {
+                await supabase
+                  .from('gh_activity')
+                  .update({ openbravo_movement_id: movementResult.movementId })
+                  .eq('activity_id', act.activity_id)
+              }
             }
-          } else {
-            console.log(`⏭️ Skipping activity ${act.activity_id} - already approved`)
           }
         }
       }
@@ -531,24 +854,25 @@ const approveAllActivities = async () => {
       return
     }
     
-    console.log('📋 Activities to approve:', activitiesToApprove.length)
-    console.log('📦 Materials to reduce:', materialsToReduce.length)
+    // Collect errors
+    const failedMovements = allMovementResults.filter(r => !r.result.success)
     
-    // ✅ REDUCE MATERIAL STOCKS DULU
-    let stockReductionCount = 0
-    for (const mat of materialsToReduce) {
-      console.log(`🔄 Reducing: ${mat.material_name} (-${mat.qty}) for activity ${mat.activity_id}`)
+    if (failedMovements.length > 0) {
+      const errorMsg = failedMovements
+        .map(f => `${f.activityName}: ${f.result.error}`)
+        .slice(0, 3)
+        .join('\n')
       
-      const result = await materialStore.reduceStock(mat.material_name, mat.qty, mat.location_id)
-      if (result.error) {
-        console.warn(`⚠️ Warning: ${mat.material_name}`, result.error)
-      } else {
-        console.log(`✅ Stock reduced: ${mat.material_name} (-${mat.qty})`)
-        stockReductionCount++
+      const proceed = confirm(
+        `⚠️ Beberapa movement gagal:\n\n${errorMsg}${failedMovements.length > 3 ? '\n...' : ''}\n\nTetap approve semua activity?`
+      )
+      if (!proceed) {
+        processing.value = false
+        return
       }
     }
     
-    // ✅ BULK UPDATE ACTIVITIES STATUS SETELAH STOCK DIKURANGI
+    // ✅ BULK UPDATE STATUS
     const activityIds = activitiesToApprove.map(a => a.activity_id)
     
     const { error: updateErr } = await supabase
@@ -562,12 +886,10 @@ const approveAllActivities = async () => {
     
     if (updateErr) throw updateErr
     
-    console.log('✅ All activities status updated')
-    
-    // ✅ REFRESH DATA
     await loadData()
     
-    alert(`✅ ${activitiesToApprove.length} aktivitas berhasil disetujui!\n📦 ${stockReductionCount} material dikurangi dari stock.`)
+    const successCount = allMovementResults.filter(r => r.result.success).length
+    alert(`✅ ${activitiesToApprove.length} aktivitas berhasil disetujui!\n\nInternal Movement berhasil: ${successCount}/${allMovementResults.length}`)
     
   } catch (err) {
     console.error('❌ Error:', err)
@@ -581,17 +903,14 @@ const approveAllActivities = async () => {
 const approveEverything = async () => {
   if (!reportInfo.value) return
   
-  // ❌ CEGAH APPROVE JIKA MASIH ADA REVISION
   if (reportInfo.value.hasRevision) {
-    alert('⚠️ Tidak bisa approve semua!\n\nMasih ada item yang memerlukan revisi:\n- ' + 
-          reportInfo.value.revisionTypeDamages + ' data kerusakan\n- ' + 
-          reportInfo.value.revisionActivities + ' aktivitas\n\nHarap selesaikan revisi terlebih dahulu.')
+    alert('⚠️ Tidak bisa approve semua!\n\nMasih ada item yang memerlukan revisi.')
     return
   }
   
   const total = reportInfo.value.totalTypeDamages + reportInfo.value.totalActivities
   
-  if (!confirm(`✅ Approve SEMUA (${total} items)?\n\n- ${reportInfo.value.totalTypeDamages} data kerusakan\n- ${reportInfo.value.totalActivities} aktivitas\n\nMaterial akan dikurangi dari stock.`)) return
+  if (!confirm(`✅ Approve SEMUA (${total} items)?`)) return
 
   try {
     processing.value = true
@@ -637,7 +956,7 @@ const handleRevision = async () => {
     return
   }
 
-  if (!confirm(`🔄 Kirim permintaan revisi untuk ${type === 'type_damage' ? 'data kerusakan' : 'aktivitas'} ini?`)) return
+  if (!confirm(`🔄 Kirim permintaan revisi?`)) return
 
   try {
     processing.value = true
@@ -670,7 +989,6 @@ const handleRevision = async () => {
   }
 }
 
-// Get status badge
 const getStatusBadge = (status) => {
   const badges = {
     'onReview': {
@@ -983,6 +1301,7 @@ const getStatusBadge = (status) => {
                   <div v-if="activity.approved_at" class="mt-3 bg-green-50 border-2 border-green-200 rounded-lg p-3">
                     <p class="text-xs text-green-600 font-semibold mb-1">✅ Approved</p>
                     <p class="text-sm text-green-900">By: {{ activity.approved_by }} • {{ formatDateTime(activity.approved_at) }}</p>
+                    <p v-if="activity.openbravo_movement_id" class="text-xs text-green-700 mt-1">Movement ID: {{ activity.openbravo_movement_id }}</p>
                   </div>
                   
                   <!-- Revision Info -->
@@ -1006,7 +1325,13 @@ const getStatusBadge = (status) => {
               <ul class="text-sm text-blue-800 space-y-1">
                 <li>• <strong>Per Item:</strong> Klik "Approve" atau "Revise" pada setiap kerusakan tanaman atau aktivitas</li>
                 <li>• <strong>Bulk Actions:</strong> Gunakan tombol di atas untuk approve semua sekaligus</li>
-                <li>• <strong>Material Stock:</strong> Saat approve aktivitas, qty material akan otomatis dikurangi dari stock</li>
+                <li>• <strong>Material Stock:</strong> Saat approve aktivitas, sistem akan:
+                  <ul class="ml-4 mt-1 space-y-1">
+                    <li>1. Membuat Internal Movement di Openbravo</li>
+                    <li>2. Menambahkan material ke movement lines</li>
+                    <li>3. Process movement untuk reduce stock otomatis</li>
+                  </ul>
+                </li>
                 <li>• <strong>Status Report:</strong> Report akan berstatus "Approved" hanya jika SEMUA item sudah approved</li>
                 <li>• <strong>Revision:</strong> Item yang direquest revision akan dikembalikan ke staff untuk diperbaiki</li>
               </ul>

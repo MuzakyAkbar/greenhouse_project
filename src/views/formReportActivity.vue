@@ -1,7 +1,10 @@
+// FormReportActivity.vue - SCRIPT SETUP - Untuk ambil material dari Openbravo API
+
 <script setup>
 import { ref, onMounted, watch, onUnmounted, computed } from "vue";
 import { supabase } from "@/lib/supabase.js";
 import { Html5Qrcode } from "html5-qrcode";
+import openbravoApi from '@/lib/openbravo' // ✅ ADD THIS
 
 // Import stores
 import { useLocationStore } from "@/stores/location";
@@ -9,7 +12,7 @@ import { useBatchStore } from "@/stores/batch";
 import { useMaterialStore } from "@/stores/material";
 import { usePotatoActivityStore } from "@/stores/potatoActivity";
 import { useActivityReportStore } from "@/stores/activityReport";
-import { useActivityStore } from "@/stores/activity"; // ✅ ADDED
+import { useActivityStore } from "@/stores/activity";
 import { useTypeDamageStore } from "@/stores/typeDamage";
 
 // Initialize stores
@@ -18,7 +21,7 @@ const batchStore = useBatchStore();
 const materialStore = useMaterialStore();
 const potatoActivityStore = usePotatoActivityStore();
 const activityReportStore = useActivityReportStore();
-const activityStore = useActivityStore(); // ✅ ADDED
+const activityStore = useActivityStore();
 const typeDamageStore = useTypeDamageStore();
 
 // ======================
@@ -37,8 +40,13 @@ const typeDamages = ref([
   }
 ])
 
+// ===== MATERIAL STATE ✅ NEW (dari Openbravo)
+const availableMaterials = ref([])
+const materialLoading = ref(false)
 
-
+// Warehouse & Bin untuk tracking
+const selectedWarehouse = ref(null)
+const selectedBin = ref(null)
 
 // QR Scanner
 const showScanner = ref(false);
@@ -64,6 +72,9 @@ const potatoActivities = computed(() => potatoActivityStore.activities);
 
 // Loading states
 const isSubmitting = ref(false);
+
+// ===== UTIL: Format Number
+const formatNumber = (n) => new Intl.NumberFormat('id-ID').format(n ?? 0)
 
 // ======================
 // LIFECYCLE HOOKS
@@ -92,32 +103,103 @@ onUnmounted(() => {
 });
 
 // ======================
-// LOAD MATERIAL STOCK BY LOCATION
+// LOAD WAREHOUSE & BIN BY LOCATION NAME ✅ NEW
 // ======================
-watch(selectedLocation, async (newLocationId) => {
-  if (newLocationId) {
-    console.log("📦 Loading material stock for location:", newLocationId);
-    
-    try {
-      const result = await materialStore.fetchStock({ location_id: Number(newLocationId) });
-      
-      if (result.error) {
-        console.error("❌ Error loading material stock:", result.error);
-        alert(`Gagal memuat material stock: ${result.error.message}`);
-      } else {
-        console.log("✅ Material stocks loaded:", materialStocks.value);
-        console.log(`📊 Total materials: ${materialStocks.value.length}`);
-      }
-    } catch (error) {
-      console.error("❌ Exception loading material stock:", error);
-      alert(`Terjadi kesalahan saat memuat stock: ${error.message}`);
-    }
-  } else {
-    // Clear material stocks when location is deselected
-    materialStore.materialStock = [];
-    console.log("🧹 Material stocks cleared");
+const loadWarehouseAndBin = async (locationName) => {
+  if (!locationName) {
+    selectedWarehouse.value = null
+    selectedBin.value = null
+    return
   }
-}, { immediate: false });
+
+  try {
+    console.log('🏢 Finding warehouse for location:', locationName)
+
+    // 1. Get warehouse by location name dari Openbravo
+    const warehouseRes = await openbravoApi.get(
+      '/org.openbravo.service.json.jsonrest/Warehouse',
+      { params: { _where: `name='${locationName}'` } }
+    )
+
+    const warehouses = warehouseRes?.data?.response?.data || []
+    if (!warehouses.length) {
+      console.warn('⚠️ Warehouse not found for location:', locationName)
+      selectedWarehouse.value = null
+      selectedBin.value = null
+      return
+    }
+
+    const warehouse = warehouses[0]
+    selectedWarehouse.value = warehouse
+    console.log('✅ Warehouse found:', warehouse.name)
+
+    // 2. Get first bin (locator) untuk warehouse ini
+    const binRes = await openbravoApi.get(
+      '/org.openbravo.service.json.jsonrest/Locator',
+      { params: { _where: `M_Warehouse_ID='${warehouse.id}'` } }
+    )
+
+    const bins = binRes?.data?.response?.data || []
+    if (!bins.length) {
+      console.warn('⚠️ Bin not found for warehouse:', warehouse.name)
+      selectedBin.value = null
+      return
+    }
+
+    selectedBin.value = bins[0]
+    console.log('✅ Bin found:', bins[0].name)
+
+    // 3. Load materials untuk bin ini
+    await loadMaterialsByBin(bins[0].id)
+
+  } catch (err) {
+    console.error('❌ Error loading warehouse/bin:', err)
+    selectedWarehouse.value = null
+    selectedBin.value = null
+  }
+}
+
+// ======================
+// LOAD MATERIALS BY BIN ✅ NEW (seperti addnewgm.vue)
+// ======================
+const loadMaterialsByBin = async (binId) => {
+  if (!binId) {
+    availableMaterials.value = []
+    return
+  }
+
+  materialLoading.value = true
+  try {
+    console.log('📦 Loading materials for bin:', binId)
+
+    // Query MaterialMgmtStorageDetail dari Openbravo
+    const materialsRes = await openbravoApi.get(
+      '/org.openbravo.service.json.jsonrest/MaterialMgmtStorageDetail',
+      {
+        params: {
+          _where: `M_Locator_ID='${binId}' AND quantityOnHand > 0`
+        }
+      }
+    )
+
+    const rows = materialsRes?.data?.response?.data || []
+
+    availableMaterials.value = rows.map((r) => ({
+      productId: r.product,
+      material_name: r['product$_identifier'] || '(Tanpa Nama Produk)',
+      uomId: r.uOM,
+      uom: r['uOM$_identifier'] || null,
+      stock: r.quantityOnHand ?? 0,
+    }))
+
+    console.log(`✅ Loaded ${rows.length} materials`)
+  } catch (err) {
+    console.error('❌ Error loading materials:', err)
+    availableMaterials.value = []
+  } finally {
+    materialLoading.value = false
+  }
+}
 
 // ======================
 // QR SCANNER FUNCTIONS
@@ -196,6 +278,9 @@ const onScanSuccess = async (decodedText) => {
     const batchName = batchItem?.batch_name || "Batch tidak ditemukan";
 
     alert(`✅ QR Code berhasil di-scan!\n📍 Lokasi: ${locationName}\n🏷️ Batch: ${batchName}`);
+
+    // ✅ Load warehouse & materials untuk location ini
+    await loadWarehouseAndBin(locationName)
 
     stopScanner();
   } catch (err) {
@@ -278,6 +363,10 @@ function removeMaterialRow(sectionIndex, matIndex) {
   }
 }
 
+// ❌ HAPUS BAGIAN INI - INI YANG BIKIN ERROR!
+// Kode ini tidak boleh ada di sini (di luar function)
+// if (section.materials && section.materials.length > 0) { ... }
+
 function addWorkerRow(sectionIndex) {
   formSections.value[sectionIndex].workers.push({ qty: "" });
 }
@@ -288,9 +377,9 @@ function removeWorkerRow(sectionIndex, workerIndex) {
   }
 }
 
-// ======================
+// ==========================================
 // WATCHER - Auto-fill CoA
-// ======================
+// ==========================================
 watch(
   formSections,
   (sections) => {
@@ -304,14 +393,15 @@ watch(
   { deep: true }
 );
 
-// Watcher untuk auto-fill UoM
+
+// ✅ KEEP ONLY ONE WATCHER untuk auto-fill UoM
 watch(
   formSections,
   (sections) => {
     sections.forEach((section) => {
       section.materials.forEach((material) => {
         if (material.material_name) {
-          const selectedMaterial = materialStocks.value.find(
+          const selectedMaterial = availableMaterials.value.find(
             (m) => m.material_name === material.material_name
           );
           
@@ -353,23 +443,35 @@ const submitActivityReport = async () => {
     }
   }
 
-  // ✅ Validasi stock sebelum submit
+  // ✅ Batch validate ALL materials
+  const allMaterials = [];
+
   for (const section of formSections.value) {
     for (const mat of section.materials) {
-      const stockItem = materialStocks.value.find(
-        s => s.material_name === mat.material_name
+      if (mat.material_name && mat.qty && parseFloat(mat.qty) > 0) {
+        allMaterials.push({
+          material_name: mat.material_name,
+          qty: mat.qty,
+          uom: mat.uom
+        });
+      }
+    }
+  }
+
+  // Validasi qty vs stock dari availableMaterials
+  if (allMaterials.length > 0) {
+    for (const material of allMaterials) {
+      const stockItem = availableMaterials.value.find(
+        m => m.material_name === material.material_name
       );
-      
+
       if (!stockItem) {
-        alert(`⚠️ Material ${mat.material_name} tidak ditemukan di stock!`);
+        alert(`⚠️ Material "${material.material_name}" tidak ditemukan!`);
         return;
       }
-      
-      const requestedQty = parseFloat(mat.qty);
-      const availableQty = parseFloat(stockItem.qty);
-      
-      if (requestedQty > availableQty) {
-        alert(`⚠️ Stock ${mat.material_name} tidak cukup!\n\nDibutuhkan: ${requestedQty} ${mat.uom}\nTersedia: ${availableQty} ${stockItem.uom}`);
+
+      if (parseFloat(material.qty) > stockItem.stock) {
+        alert(`⚠️ Stock "${material.material_name}" tidak cukup!\nDibutuhkan: ${material.qty} ${material.uom}\nTersedia: ${stockItem.stock}`);
         return;
       }
     }
@@ -433,6 +535,8 @@ const submitActivityReport = async () => {
     }
 
     // 3. Create activities + material_used
+    console.log("🔄 Processing form sections:", formSections.value.length);
+    
     for (const section of formSections.value) {
       const manpowerTotal = section.workers.reduce(
         (sum, w) => sum + (parseInt(w.qty) || 0),
@@ -443,11 +547,13 @@ const submitActivityReport = async () => {
         a => a.activity_id == section.activity_id
       );
 
+      // ✅ FIXED: Hapus created_at
       const activityPayload = {
         report_id,
         act_name: selectedActivity?.activity || "",
         CoA: section.coa ? parseFloat(section.coa) : null,
-        manpower: manpowerTotal.toString()
+        manpower: manpowerTotal.toString(),
+        status: 'onReview'
       };
 
       console.log("📝 Creating activity:", activityPayload);
@@ -466,11 +572,20 @@ const submitActivityReport = async () => {
       const activity_id = activityData.activity_id;
       console.log("✅ Activity created with ID:", activity_id);
 
-      // 4. Create material_used setelah activity_id tersedia
+      // ✅ 4. CREATE MATERIAL_USED - ENHANCED LOGGING
+      console.log("🔍 CHECKING MATERIALS FOR ACTIVITY:", activity_id);
+      console.log("   - section.materials:", section.materials);
+      
       if (section.materials && section.materials.length > 0) {
-        const validMaterials = section.materials.filter(mat =>
-          mat.material_name && mat.qty && parseFloat(mat.qty) > 0
-        );
+        console.log("   - Total materials in section:", section.materials.length);
+        
+        const validMaterials = section.materials.filter(mat => {
+          const isValid = mat.material_name && mat.qty && parseFloat(mat.qty) > 0;
+          console.log(`   - Material: ${mat.material_name}, Qty: ${mat.qty}, Valid: ${isValid}`);
+          return isValid;
+        });
+
+        console.log("   - Valid materials count:", validMaterials.length);
 
         if (validMaterials.length > 0) {
           const materialPayloads = validMaterials.map(mat => ({
@@ -480,7 +595,7 @@ const submitActivityReport = async () => {
             uom: mat.uom || null
           }));
 
-          console.log("📦 Creating material used records:", materialPayloads);
+          console.log("📦 INSERTING MATERIAL USED RECORDS:", JSON.stringify(materialPayloads, null, 2));
 
           const { data: matData, error: matErr } = await supabase
             .from('gh_material_used')
@@ -488,16 +603,28 @@ const submitActivityReport = async () => {
             .select();
 
           if (matErr) {
-            console.error("❌ Error creating material used:", matErr);
+            console.error("❌ ERROR CREATING MATERIAL USED:", matErr);
+            console.error("   - Error details:", JSON.stringify(matErr, null, 2));
             throw matErr;
           }
 
           console.log(`✅ ${matData.length} Material used record(s) created`);
+          console.log("   - Created records:", JSON.stringify(matData, null, 2));
+        } else {
+          console.log("⚠️ NO VALID MATERIALS to insert for activity:", activity_id);
         }
+      } else {
+        console.log("⚠️ NO MATERIALS ARRAY or EMPTY for activity:", activity_id);
       }
     }
 
     alert("✅ Data berhasil disimpan ke database!");
+    console.log("📊 SUMMARY:");
+    console.log(`   - Report ID: ${report_id}`);
+    console.log(`   - Damages: ${validDamages.length}`);
+    console.log(`   - Activities: ${formSections.value.length}`);
+    console.log("   - Status: onReview (menunggu approval)");
+    
     resetForm();
 
   } catch (err) {
@@ -508,15 +635,16 @@ const submitActivityReport = async () => {
   }
 };
 
-
 // ======================
 // RESET FORM
 // ======================
 function resetForm() {
   selectedLocation.value = "";
   selectedBatch.value = "";
+  selectedWarehouse.value = null
+  selectedBin.value = null
+  availableMaterials.value = []
   
-  // ✅ Reset type damages
   typeDamages.value = [
     {
       id: Date.now(),
@@ -539,17 +667,17 @@ function resetForm() {
   selectedDate.value = new Date().toISOString().split("T")[0];
 }
 
-// Helper untuk mendapatkan nama lokasi
+// Helper functions
 function getLocationName(locationId) {
   const location = locations.value.find(l => l.location_id == locationId);
   return location ? location.location : "";
 }
 
-// Helper untuk mendapatkan nama batch
 function getBatchName(batchId) {
   const batch = batches.value.find(b => b.batch_id == batchId);
   return batch ? batch.batch_name : "";
 }
+
 </script>
 
 <template>
@@ -653,17 +781,7 @@ function getBatchName(batchId) {
       <div class="mb-8">
         <div class="flex justify-between items-center mb-3">
           <h2 class="text-sm font-semibold text-gray-500 uppercase tracking-wide">Jenis Kerusakan Tanaman</h2>
-          <button
-            @click="addTypeDamageRow"
-            class="flex items-center gap-2 bg-white hover:bg-gray-50 text-gray-700 font-semibold px-4 py-2 rounded-lg border-2 border-gray-200 hover:border-[#0071f3] shadow-sm transition text-sm"
-          >
-            <svg class="w-4 h-4 text-[#0071f3]" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512" fill="currentColor">
-              <path d="M256 80c0-17.7-14.3-32-32-32s-32 14.3-32 32l0 144L48 224c-17.7 0-32 14.3-32 32s14.3 32 32 32l144 0 0 144c0 17.7 14.3 32 32 32s32-14.3 32-32l0-144 144 0c17.7 0 32-14.3 32-32s-14.3-32-32-32l-144 0 0-144z"/>
-            </svg>
-            Tambah Row
-          </button>
         </div>
-        
         <div class="space-y-4">
           <div 
             v-for="(damage, index) in typeDamages" 
@@ -802,7 +920,7 @@ function getBatchName(batchId) {
               </div>
             </div>
 
-            <!-- Materials Section -->
+            <!-- Materials Section - UPDATED (Simple Dropdown) -->
             <div class="mb-6 bg-gray-50 rounded-xl p-5">
               <div class="flex justify-between items-center mb-4">
                 <h4 class="text-base font-bold text-gray-900 flex items-center gap-2">
@@ -816,23 +934,29 @@ function getBatchName(batchId) {
                   :key="matIndex"
                   class="flex flex-col md:flex-row gap-3 items-end bg-white rounded-lg p-4 border border-gray-200"
                 >
+                  <!-- Material Name - Dropdown dari availableMaterials -->
                   <div class="flex-1 flex flex-col">
                     <label class="text-xs font-semibold text-gray-600 mb-2">Nama Material</label>
                     <select
                       v-model="material.material_name"
-                      class="px-4 py-2.5 border-2 border-gray-200 rounded-lg bg-white text-gray-700 text-sm font-medium focus:outline-none focus:border-[#0071f3] focus:ring-2 focus:ring-[#0071f3]/20 transition appearance-none cursor-pointer"
+                      :disabled="materialLoading"
+                      class="px-4 py-2.5 border-2 border-gray-200 rounded-lg bg-white text-gray-700 text-sm font-medium focus:outline-none focus:border-[#0071f3] focus:ring-2 focus:ring-[#0071f3]/20 transition appearance-none cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
                     >
-                      <option value="" disabled>Pilih Material</option>
+                      <option value="" disabled>
+                        {{ materialLoading ? '⏳ Loading materials...' : 'Pilih Material' }}
+                      </option>
+                      <!-- ✅ Ambil dari availableMaterials (dari Openbravo MaterialMgmtStorageDetail) -->
                       <option
-                        v-for="mat in materialStocks"
-                        :key="mat.material_id"
+                        v-for="mat in availableMaterials"
+                        :key="mat.productId"
                         :value="mat.material_name"
                       >
-                        {{ mat.material_name }} (Stok: {{ mat.qty }} {{ mat.uom }})
+                        {{ mat.material_name }} (Stok: {{ formatNumber(mat.stock) }} {{ mat.uom }})
                       </option>
                     </select>
                   </div>
 
+                  <!-- Qty - Input number -->
                   <div class="w-full md:w-32 flex flex-col">
                     <label class="text-xs font-semibold text-gray-600 mb-2">Qty</label>
                     <input
@@ -844,6 +968,7 @@ function getBatchName(batchId) {
                     />
                   </div>
 
+                  <!-- Unit - Auto-filled dari availableMaterials -->
                   <div class="w-full md:w-32 flex flex-col">
                     <label class="text-xs font-semibold text-gray-600 mb-2">Unit</label>
                     <input
@@ -854,6 +979,7 @@ function getBatchName(batchId) {
                     />
                   </div>
 
+                  <!-- Delete Button -->
                   <button
                     @click="removeMaterialRow(index, matIndex)"
                     v-if="section.materials.length > 1"
@@ -864,6 +990,7 @@ function getBatchName(batchId) {
                 </div>
               </div>
 
+              <!-- Add Material Row Button -->
               <button
                 @click="addMaterialRow(index)"
                 class="w-full mt-3 bg-gradient-to-r from-[#0071f3] to-[#0060d1] hover:from-[#0060d1] hover:to-[#0050b1] text-white font-semibold px-4 py-2.5 rounded-lg transition shadow-md hover:shadow-lg text-sm"
