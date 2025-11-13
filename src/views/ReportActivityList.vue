@@ -290,7 +290,7 @@ const getCurrentTime = () => {
             >
               📋 Activity
             </button>
-            <button 
+            <!-- <button 
               @click="selectedReport = 'production'"
               :class="selectedReport === 'production' 
                 ? 'bg-gradient-to-r from-[#0071f3] to-[#0060d1] text-white shadow-md' 
@@ -298,7 +298,7 @@ const getCurrentTime = () => {
               class="px-5 py-2.5 rounded-lg font-semibold transition-all text-sm hover:shadow"
             >
               📈 Production & Sales
-            </button>
+            </button> -->
           </div>
         </div>
 

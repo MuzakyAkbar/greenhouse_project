@@ -18,6 +18,8 @@
     "html5-qrcode": "^2.3.8",
     "jspdf": "^3.0.3",
     "jspdf-autotable": "^5.0.2",
+    "leaflet": "^1.9.4",
+    "mapbox-gl": "^3.16.0",
     "pinia": "^3.0.3",
     "primeicons": "^7.0.0",
     "qrcode": "^1.5.4",

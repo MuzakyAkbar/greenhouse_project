@@ -1,5 +1,5 @@
 <script setup>
-import { ref, onMounted } from "vue";
+import { ref, onMounted, watch } from "vue";
 import { supabase } from "@/lib/supabase";
 import { useBatchStore } from "@/stores/batch";
 
@@ -7,22 +7,63 @@ defineProps({ isOpen: Boolean });
 const emit = defineEmits(["close"]);
 
 const batchStore = useBatchStore();
+
+// STATE
+const locations = ref([]);
 const batches = ref([]);
+const filteredBatches = ref([]);
+const selectedLocation = ref("");
 const selectedBatch = ref("");
 const productionType = ref("");
 const qty = ref(0);
 const damage = ref(0);
 const isSubmitting = ref(false);
 
+// ✅ Ambil data lokasi & semua batch saat awal
 onMounted(async () => {
+  console.log("📍 Memuat data lokasi...");
+  const { data: locationData, error: locationError } = await supabase
+    .from("gh_location")
+    .select("*")
+    .order("location_id", { ascending: true });
+
+  if (locationError) {
+    console.error("❌ Gagal memuat lokasi:", locationError.message);
+  } else {
+    locations.value = locationData;
+    console.log("✅ Lokasi berhasil dimuat:", locations.value);
+  }
+
   console.log("📦 Memuat data batch...");
   await batchStore.getBatches();
   batches.value = batchStore.batches;
-  console.log("✅ Batch yang diambil:", batches.value);
+  console.log("✅ Semua batch berhasil dimuat:", batches.value);
 });
 
+// ✅ Filter batch berdasarkan lokasi yang dipilih
+watch(selectedLocation, (newLocationId) => {
+  if (!newLocationId) {
+    filteredBatches.value = [];
+    selectedBatch.value = "";
+    return;
+  }
+
+  filteredBatches.value = batches.value.filter(
+    (b) => b.location_id === Number(newLocationId)
+  );
+
+  console.log(`🎯 Batch untuk lokasi #${newLocationId}:`, filteredBatches.value);
+  selectedBatch.value = ""; // reset batch setiap kali ganti lokasi
+});
+
+// ✅ Submit data produksi
 async function submitDataProduction() {
-  if (!selectedBatch.value || !productionType.value || qty.value <= 0) {
+  if (
+    !selectedLocation.value ||
+    !selectedBatch.value ||
+    !productionType.value ||
+    qty.value <= 0
+  ) {
     alert("⚠️ Harap isi semua data dengan benar sebelum submit!");
     return;
   }
@@ -31,6 +72,7 @@ async function submitDataProduction() {
 
   try {
     const payload = {
+      location_id: Number(selectedLocation.value),
       batch_id: Number(selectedBatch.value),
       production_type: productionType.value,
       qty: Number(qty.value),
@@ -45,7 +87,7 @@ async function submitDataProduction() {
       .select();
 
     if (error) {
-      console.error("❌ Error Supabase:", error.message, error.details);
+      console.error("❌ Error Supabase:", error.message);
       alert(`❌ Gagal menyimpan data: ${error.message}`);
       return;
     }
@@ -62,14 +104,15 @@ async function submitDataProduction() {
   }
 }
 
-
 function resetForm() {
+  selectedLocation.value = "";
   selectedBatch.value = "";
   productionType.value = "";
   qty.value = 0;
   damage.value = 0;
 }
 </script>
+
 
 
 <template>
@@ -105,29 +148,73 @@ function resetForm() {
 
       <!-- Content Modal -->
       <div class="p-6 space-y-5">
-        <!-- Input Pilih Batch -->
-        <div class="space-y-2">
-          <label class="text-sm font-semibold text-gray-700 block">Pilih Batch</label>
-          <div class="relative">
-            <select 
-            v-model="selectedBatch"
-            class="w-full bg-gray-50 border-2 border-gray-200 rounded-xl py-3 px-4 text-gray-900 font-medium focus:outline-none focus:border-[#0071f3] focus:ring-2 focus:ring-[#0071f3] focus:ring-opacity-20 transition appearance-none cursor-pointer hover:border-gray-300">
-              <option value="" selected disabled>Pilih Batch</option>
-              <option
-                v-for="batch in batches"
-                :key="batch.batch_id"
-                :value="batch.batch_id"
-              >
-                {{ batch.batch_name }}
-              </option>
-            </select>
-            <div class="absolute right-4 top-1/2 -translate-y-1/2 pointer-events-none text-gray-400">
-              <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
-                <path fill-rule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clip-rule="evenodd"/>
-              </svg>
-            </div>
-          </div>
-        </div>
+        <!-- Input Pilih location -->
+        <!-- Input Pilih Location -->
+<div class="space-y-2">
+  <label class="text-sm font-semibold text-gray-700 block">Pilih Lokasi</label>
+  <div class="relative">
+    <select
+      v-model="selectedLocation"
+      class="w-full bg-gray-50 border-2 border-gray-200 rounded-xl py-3 px-4 text-gray-900 font-medium 
+             focus:outline-none focus:border-[#0071f3] focus:ring-2 focus:ring-[#0071f3] focus:ring-opacity-20 
+             transition appearance-none cursor-pointer hover:border-gray-300"
+    >
+      <option value="" selected disabled>Pilih lokasi</option>
+      <option
+        v-for="location in locations"
+        :key="location.location_id"
+        :value="location.location_id"
+      >
+        {{ location.location }}
+      </option>
+    </select>
+    <div class="absolute right-4 top-1/2 -translate-y-1/2 pointer-events-none text-gray-400">
+      <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
+        <path
+          fill-rule="evenodd"
+          d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z"
+          clip-rule="evenodd"
+        />
+      </svg>
+    </div>
+  </div>
+</div>
+
+<!-- Input Pilih Batch (filtered berdasarkan lokasi) -->
+<div class="space-y-2">
+  <label class="text-sm font-semibold text-gray-700 block">Pilih Batch</label>
+  <div class="relative">
+    <select
+      v-model="selectedBatch"
+      :disabled="filteredBatches.length === 0"
+      class="w-full bg-gray-50 border-2 border-gray-200 rounded-xl py-3 px-4 text-gray-900 font-medium 
+             focus:outline-none focus:border-[#0071f3] focus:ring-2 focus:ring-[#0071f3] focus:ring-opacity-20 
+             transition appearance-none cursor-pointer hover:border-gray-300 
+             disabled:opacity-60 disabled:cursor-not-allowed"
+    >
+      <option value="" selected disabled>
+        {{ filteredBatches.length > 0 ? "Pilih Batch" : "Pilih lokasi terlebih dahulu" }}
+      </option>
+      <option
+        v-for="batch in filteredBatches"
+        :key="batch.batch_id"
+        :value="batch.batch_id"
+      >
+        {{ batch.batch_name }}
+      </option>
+    </select>
+    <div class="absolute right-4 top-1/2 -translate-y-1/2 pointer-events-none text-gray-400">
+      <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
+        <path
+          fill-rule="evenodd"
+          d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z"
+          clip-rule="evenodd"
+        />
+      </svg>
+    </div>
+  </div>
+</div>
+
         
         <!-- Input Jenis Produksi -->
         <div class="space-y-2">

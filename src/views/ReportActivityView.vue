@@ -289,26 +289,37 @@ const printReport = async () => {
               </div>
             </div>
 
-            <div class="grid grid-cols-1 md:grid-cols-2 gap-5 mt-5">
-              <div class="flex flex-col">
-                <label class="text-sm font-semibold text-gray-700 mb-2 flex items-center gap-2">
-                  <span class="text-lg">🏷️</span>
-                  Batch
-                </label>
-                <div class="px-4 py-3 border-2 border-gray-200 rounded-xl bg-gray-50 text-gray-700 font-medium">
-                  {{ getBatchName(currentReport.batch_id) }}
-                </div>
-              </div>
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-5 mt-5">
+  <div class="flex flex-col">
+    <label class="text-sm font-semibold text-gray-700 mb-2 flex items-center gap-2">
+      <span class="text-lg">🏷️</span>
+      Batch
+    </label>
+    <div class="px-4 py-3 border-2 border-gray-200 rounded-xl bg-gray-50 text-gray-700 font-medium">
+      {{ getBatchName(currentReport.batch_id) }}
+    </div>
+  </div>
 
-              <div class="flex flex-col">
-                <label class="text-sm font-semibold text-gray-700 mb-2 flex items-center gap-2">
-                  <span class="text-lg">📊</span>
-                  Status
-                </label>
-                <div class="px-4 py-3 border-2 border-green-200 rounded-xl bg-green-50 text-green-800 font-bold text-center">
-                  ✅ Approved
-                </div>
-              </div>
+  <!-- ✅ Tambahkan kolom baru: Fase Tumbuhan -->
+  <div class="flex flex-col">
+    <label class="text-sm font-semibold text-gray-700 mb-2 flex items-center gap-2">
+      <span class="text-lg">🌿</span>
+      Fase Tumbuhan
+    </label>
+    <div class="px-4 py-3 border-2 border-gray-200 rounded-xl bg-gray-50 text-gray-700 font-medium">
+      {{ currentReport.phase || 'Belum ditentukan' }}
+    </div>
+  </div>
+
+  <div class="flex flex-col">
+    <label class="text-sm font-semibold text-gray-700 mb-2 flex items-center gap-2">
+      <span class="text-lg">📊</span>
+      Status
+    </label>
+    <div class="px-4 py-3 border-2 border-green-200 rounded-xl bg-green-50 text-green-800 font-bold text-center">
+      ✅ Approved
+    </div>
+  </div>
             </div>
           </div>
         </div>

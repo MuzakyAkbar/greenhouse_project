@@ -52,26 +52,24 @@ onMounted(async () => {
   }
 
   await loadData()
-  // 🧩 Sinkronisasi act_name ke act_id agar dropdown terisi otomatis saat revisi
-activities.value.forEach((act) => {
-  // kalau act_id belum ada tapi act_name sudah terisi
-  if (!act.act_id && act.act_name) {
-    // cari activity di master berdasarkan nama (case insensitive)
-    const matched = potatoActivityStore.activities.find(a => 
-      a.activity?.toLowerCase().trim() === act.act_name.toLowerCase().trim() ||
-      a.act_name?.toLowerCase().trim() === act.act_name.toLowerCase().trim()
-    )
+  
+  // 🧩 Sinkronisasi act_name ke activity_id agar dropdown terisi otomatis saat revisi
+  activities.value.forEach((act) => {
+    if (!act.activity_id && act.act_name) {
+      const matched = potatoActivityStore.activities.find(a => 
+        a.activity?.toLowerCase().trim() === act.act_name.toLowerCase().trim() ||
+        a.act_name?.toLowerCase().trim() === act.act_name.toLowerCase().trim()
+      )
 
-    if (matched) {
-      act.act_id = matched.activity_id
-      act.CoA = act.CoA || matched.CoA_code
-      console.log(`✅ Auto-linked activity "${act.act_name}" to master ID ${matched.activity_id}`)
-    } else {
-      console.warn(`⚠️ Tidak ditemukan activity di master untuk "${act.act_name}"`)
+      if (matched) {
+        act.activity_id = matched.activity_id
+        act.CoA = act.CoA || matched.CoA_code
+        console.log(`✅ Auto-linked activity "${act.act_name}" to master ID ${matched.activity_id}`)
+      } else {
+        console.warn(`⚠️ Tidak ditemukan activity di master untuk "${act.act_name}"`)
+      }
     }
-  }
-})
-
+  })
 })
 
 const loadData = async () => {
@@ -160,18 +158,16 @@ const loadData = async () => {
     // ✅ Load ALL activities dengan mapping ke master data
     if (report.activities) {
       activities.value = report.activities.map(act => {
-        // 🔍 Cari nama activity dari master data
-        const masterActivity = potatoActivityStore.activities.find(a => a.activity_id == act.act_id)
+        const masterActivity = potatoActivityStore.activities.find(a => a.activity_id == act.activity_id)
         
         console.log(`📌 Mapping activity #${act.activity_id}:`, {
-          act_id: act.act_id,
+          activity_id: act.activity_id,
           db_name: act.act_name,
           master_name: masterActivity?.activity || masterActivity?.act_name
         })
         
         return {
-          activity_id: act.activity_id,
-          act_id: act.act_id,
+          activity_id: act.activity_id,  // ✅ FIXED: Single activity_id only
           act_name: masterActivity?.activity || masterActivity?.act_name || act.act_name,
           CoA: act.CoA,
           qty: act.qty || 1,              
@@ -180,7 +176,6 @@ const loadData = async () => {
           status: act.status,
           materials: act.materials && act.materials.length > 0
             ? act.materials.map(mat => {
-                // 🔍 Cari material di stock untuk mendapatkan material_id
                 const stockMaterial = materialStore.materialStock.find(
                   m => m.material_name.toLowerCase().trim() === mat.material_name.toLowerCase().trim()
                 )
@@ -264,14 +259,12 @@ const formatDateTime = (dateStr) => {
 // ✅ Watch for activity changes to auto-fill CoA dan act_name
 watch(() => activities.value, (acts) => {
   acts.forEach((act) => {
-    if (act.act_id) {
-      const selected = potatoActivityStore.activities.find(a => a.activity_id == act.act_id)
+    if (act.activity_id) {
+      const selected = potatoActivityStore.activities.find(a => a.activity_id == act.activity_id)
       if (selected) {
-        // Auto-fill CoA jika belum ada
         if (selected.CoA_code && !act.CoA) {
           act.CoA = selected.CoA_code
         }
-        // Auto-fill act_name
         if (selected.activity || selected.act_name) {
           act.act_name = selected.activity || selected.act_name
         }
@@ -315,7 +308,7 @@ const removeMaterialRow = (activityIndex, materialIndex) => {
   }
 }
 
-// Form submission
+// ✅ FIXED FORM SUBMISSION
 const handleSubmit = async () => {
   try {
     saving.value = true
@@ -329,84 +322,111 @@ const handleSubmit = async () => {
     const username = authStore.user?.username || authStore.user?.email || 'Staff'
     const now = new Date().toISOString()
 
+    console.log('🔄 Starting submit process...')
+    console.log('📊 Current state before filtering:')
+    console.log('  - Total type damages:', typeDamages.value.length)
+    typeDamages.value.forEach((td, idx) => {
+      console.log(`    [${idx}] ID: ${td.typedamage_id}, Status: ${td.status}, Editable: ${td.editable}`)
+    })
+    console.log('  - Total activities:', activities.value.length)
+    activities.value.forEach((act, idx) => {
+      console.log(`    [${idx}] ID: ${act.activity_id}, Status: ${act.status}, Editable: ${act.editable}`)
+    })
+
     // ✅ UPDATE ONLY TYPE DAMAGES WITH needRevision STATUS
-    const editableTypeDamages = typeDamages.value.filter(td => td.editable)
+    const editableTypeDamages = typeDamages.value.filter(td => {
+      const result = td.editable && td.status === 'needRevision'
+      console.log(`  Filtering TD ${td.typedamage_id}: editable=${td.editable}, status=${td.status}, result=${result}`)
+      return result
+    })
     if (editableTypeDamages.length > 0) {
+      console.log(`📝 Updating ${editableTypeDamages.length} type damages with needRevision status`)
+      
       for (const td of editableTypeDamages) {
-        const { error: updateErr } = await supabase
+        console.log(`  - Updating type damage ID ${td.typedamage_id}: "${td.type_damage}"`)
+        console.log(`    Current status: ${td.status} → Target status: onReview`)
+        
+        // ✅ Update type damage (FIXED: removed revised_by and revised_at - columns don't exist)
+        const { data: updatedData, error: updateErr } = await supabase
           .from('gh_type_damage')
           .update({
             type_damage: td.type_damage,
             kuning: parseInt(td.kuning) || 0,
             kutilang: parseInt(td.kutilang) || 0,
             busuk: parseInt(td.busuk) || 0,
-            status: 'onReview',
+            status: 'onReview',  // ✅ Change from needRevision to onReview
             revision_notes: null,
             revision_requested_by: null,
-            revision_requested_at: null,
-            revised_by: username,
-            revised_at: now
+            revision_requested_at: null
           })
           .eq('typedamage_id', td.typedamage_id)
+          .select()
         
         if (updateErr) {
-          console.error('Error updating type damage:', updateErr)
+          console.error('❌ Error updating type damage:', updateErr)
           throw new Error(`Gagal update kerusakan: ${updateErr.message}`)
         }
+        
+        console.log(`  ✅ Type damage ${td.typedamage_id} updated:`, updatedData)
       }
-      console.log(`✅ Updated ${editableTypeDamages.length} type damages`)
+      console.log(`✅ Successfully updated ${editableTypeDamages.length} type damages`)
+    } else {
+      console.log('ℹ️ No type damages need updating')
     }
 
     // ✅ UPDATE ONLY ACTIVITIES WITH needRevision STATUS
-    const editableActivities = activities.value.filter(act => act.editable)
+    const editableActivities = activities.value.filter(act => {
+      const result = act.editable && act.status === 'needRevision'
+      console.log(`  Filtering Activity ${act.activity_id}: editable=${act.editable}, status=${act.status}, result=${result}`)
+      return result
+    })
     if (editableActivities.length > 0) {
+      console.log(`📝 Updating ${editableActivities.length} activities with needRevision status`)
+      
       for (const act of editableActivities) {
         // Validate activity
-        if (!act.act_id) {
+        if (!act.activity_id) {
           throw new Error('Semua aktivitas wajib dipilih')
         }
         
         // 🔍 Get activity name from master data
-        const masterActivity = potatoActivityStore.activities.find(a => a.activity_id == act.act_id)
+        const masterActivity = potatoActivityStore.activities.find(a => a.activity_id == act.activity_id)
         const activityName = masterActivity?.activity || masterActivity?.act_name || act.act_name
 
-        console.log(`🔄 Updating activity ${act.activity_id}:`, {
-          act_id: act.act_id,
-          act_name: activityName,
-          CoA: act.CoA,
-          manpower: act.manpower
-        })
+        console.log(`  - Updating activity ID ${act.activity_id}: "${activityName}"`)
+        console.log(`    Current status: ${act.status} → Target status: onReview`)
 
-        // Update activity
-        const { error: updateActErr } = await supabase
+        // ✅ Update activity (FIXED: removed revised_by and revised_at - columns don't exist)
+        const { data: updatedAct, error: updateActErr } = await supabase
           .from('gh_activity')
           .update({
-            act_id: parseInt(act.act_id),
             act_name: activityName,
             CoA: act.CoA ? parseFloat(act.CoA) : null,
             manpower: parseInt(act.manpower) || 0,
-            status: 'onReview',
+            status: 'onReview',  // ✅ Change from needRevision to onReview
             revision_notes: null,
             revision_requested_by: null,
-            revision_requested_at: null,
-            revised_by: username,
-            revised_at: now
+            revision_requested_at: null
           })
           .eq('activity_id', act.activity_id)
+          .select()
         
         if (updateActErr) {
-          console.error('Error updating activity:', updateActErr)
-          throw new Error(`Gagal update aktivitas: ${updateActErr.message}`)
+          console.error('❌ Error updating activity:', updateActErr)
+          throw new Error(`Gagal update aktivitas "${activityName}": ${updateActErr.message}`)
         }
 
+        console.log(`  ✅ Activity ${act.activity_id} updated:`, updatedAct)
+
         // Delete old materials
+        console.log(`  🗑️ Deleting old materials for activity ${act.activity_id}`)
         const { error: deleteMatErr } = await supabase
           .from('gh_material_used')
           .delete()
           .eq('activity_id', act.activity_id)
         
         if (deleteMatErr) {
-          console.error('Error deleting materials:', deleteMatErr)
+          console.error('❌ Error deleting materials:', deleteMatErr)
           throw new Error(`Gagal hapus material lama: ${deleteMatErr.message}`)
         }
 
@@ -415,19 +435,15 @@ const handleSubmit = async () => {
           const validMaterials = act.materials.filter(m => m.material_id && m.qty > 0)
           
           if (validMaterials.length > 0) {
+            console.log(`  📦 Inserting ${validMaterials.length} new materials`)
+            
             const materialsToInsert = validMaterials.map(mat => {
               const stockMaterial = materialStore.materialStock.find(m => m.material_id == mat.material_id)
               
-              console.log(`📦 Inserting material:`, {
-                material_id: mat.material_id,
-                material_name: stockMaterial?.material_name || mat.material_name,
-                qty: mat.qty,
-                uom: mat.uom || stockMaterial?.uom
-              })
+              console.log(`    - Material: ${stockMaterial?.material_name || mat.material_name} (Qty: ${mat.qty})`)
               
               return {
                 activity_id: act.activity_id,
-                material_id: parseInt(mat.material_id),
                 material_name: stockMaterial?.material_name || mat.material_name,
                 qty: parseFloat(mat.qty) || 0,
                 uom: mat.uom || stockMaterial?.uom || ''
@@ -439,36 +455,68 @@ const handleSubmit = async () => {
               .insert(materialsToInsert)
             
             if (insertMatErr) {
-              console.error('Error inserting materials:', insertMatErr)
+              console.error('❌ Error inserting materials:', insertMatErr)
               throw new Error(`Gagal tambah material: ${insertMatErr.message}`)
             }
             
-            console.log(`✅ Inserted ${materialsToInsert.length} materials`)
+            console.log(`  ✅ Inserted ${materialsToInsert.length} materials`)
+          } else {
+            console.log(`  ℹ️ No valid materials to insert`)
           }
         }
       }
-      console.log(`✅ Updated ${editableActivities.length} activities`)
+      console.log(`✅ Successfully updated ${editableActivities.length} activities`)
+    } else {
+      console.log('ℹ️ No activities need updating')
     }
 
     // ✅ CHECK IF ALL ITEMS ARE NOW APPROVED OR ONREVIEW
+    console.log('🔍 Verifying final status from database...')
+    
+    const { data: currentTypeDamages } = await supabase
+      .from('gh_type_damage')
+      .select('typedamage_id, status')
+      .eq('report_id', report_id.value)
+
+    const { data: currentActivities } = await supabase
+      .from('gh_activity')
+      .select('activity_id, act_name, status')
+      .eq('report_id', report_id.value)
+
+    console.log('📋 Current Type Damages in DB:', currentTypeDamages)
+    console.log('📋 Current Activities in DB:', currentActivities)
+
     const stillHasRevision = 
-      typeDamages.value.some(td => td.status === 'needRevision' && !td.editable) ||
-      activities.value.some(act => act.status === 'needRevision' && !act.editable)
+      (currentTypeDamages && currentTypeDamages.some(td => td.status === 'needRevision')) ||
+      (currentActivities && currentActivities.some(act => act.status === 'needRevision'))
     
     const newReportStatus = stillHasRevision ? 'needRevision' : 'onReview'
     
+    console.log(`📊 Status check:`)
+    console.log(`  - Type damages with needRevision: ${currentTypeDamages?.filter(td => td.status === 'needRevision').length || 0}`)
+    console.log(`  - Activities with needRevision: ${currentActivities?.filter(act => act.status === 'needRevision').length || 0}`)
+    console.log(`  - Still has revision: ${stillHasRevision}`)
+    console.log(`  - New report status: ${newReportStatus}`)
+    
     // ✅ UPDATE REPORT STATUS
-    const { error: updateReportErr } = await supabase
+    console.log(`🔄 Updating report ${report_id.value} status to: ${newReportStatus}`)
+    
+    const { data: updatedReport, error: updateReportErr } = await supabase
       .from('gh_report')
       .update({
-        report_status: newReportStatus
+        report_status: newReportStatus,
+        updated_at: now
       })
       .eq('report_id', report_id.value)
+      .select()
     
     if (updateReportErr) {
-      console.error('Error updating report:', updateReportErr)
+      console.error('❌ Error updating report:', updateReportErr)
       throw new Error(`Gagal update status report: ${updateReportErr.message}`)
     }
+
+    console.log(`✅ Report status updated:`, updatedReport)
+    console.log(`✅ Final report status: ${newReportStatus}`)
 
     alert('✅ Laporan berhasil diperbarui dan dikirim untuk review ulang!')
     await router.push('/reportActivityList')
@@ -824,7 +872,7 @@ const filteredMaterials = computed(() => {
                     <span v-if="activity.editable" class="text-red-500">*</span>
                   </label>
                   <select
-                    v-model="activity.act_id"
+                    v-model="activity.activity_id"
                     :required="activity.editable"
                     :disabled="!activity.editable"
                     class="w-full px-4 py-3 border-2 rounded-lg transition"

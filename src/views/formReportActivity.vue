@@ -1,10 +1,10 @@
-// FormReportActivity.vue - SCRIPT SETUP - Untuk ambil material dari Openbravo API
+// FormReportActivity.vue - SCRIPT SETUP - Phase dipindah ke Informasi Dasar
 
 <script setup>
 import { ref, onMounted, watch, onUnmounted, computed } from "vue";
 import { supabase } from "@/lib/supabase.js";
 import { Html5Qrcode } from "html5-qrcode";
-import openbravoApi from '@/lib/openbravo' // ✅ ADD THIS
+import openbravoApi from '@/lib/openbravo'
 
 // Import stores
 import { useLocationStore } from "@/stores/location";
@@ -30,6 +30,7 @@ const typeDamageStore = useTypeDamageStore();
 const selectedDate = ref("");
 const selectedLocation = ref("");
 const selectedBatch = ref("");
+const selectedPhase = ref("");
 
 const typeDamages = ref([
   {
@@ -40,7 +41,7 @@ const typeDamages = ref([
   }
 ])
 
-// ===== MATERIAL STATE ✅ NEW (dari Openbravo)
+// ===== MATERIAL STATE (dari Openbravo)
 const availableMaterials = ref([])
 const materialLoading = ref(false)
 
@@ -57,6 +58,7 @@ let html5QrCode = null;
 const formSections = ref([
   {
     id: Date.now(),
+    phase: "",
     activity_id: "",
     coa: "",
     materials: [{ material_name: "", qty: "", uom: "" }],
@@ -75,6 +77,59 @@ const isSubmitting = ref(false);
 
 // ===== UTIL: Format Number
 const formatNumber = (n) => new Intl.NumberFormat('id-ID').format(n ?? 0)
+
+// ======================
+// WATCHERS
+// ======================
+
+// Watch selectedPhase untuk auto-sync ke semua sections
+watch(selectedPhase, (newPhase) => {
+  formSections.value.forEach(section => {
+    section.phase = newPhase;
+  });
+});
+
+// Watcher - Auto-fill CoA
+watch(
+  formSections,
+  (sections) => {
+    sections.forEach((s) => {
+      const selected = potatoActivities.value.find(
+        (a) => a.activity_id == s.activity_id
+      );
+      s.coa = selected ? selected.CoA_code : "";
+    });
+  },
+  { deep: true }
+);
+
+// Watcher untuk auto-fill UoM
+watch(
+  formSections,
+  (sections) => {
+    sections.forEach((section) => {
+      section.materials.forEach((material) => {
+        if (material.material_name) {
+          const selectedMaterial = availableMaterials.value.find(
+            (m) => m.material_name === material.material_name
+          );
+          
+          if (selectedMaterial) {
+            material.uom = selectedMaterial.uom || "";
+          }
+          
+          console.log("🔍 Auto-fill UoM:", {
+            material_name: material.material_name,
+            uom: material.uom
+          });
+        } else {
+          material.uom = "";
+        }
+      });
+    });
+  },
+  { deep: true }
+);
 
 // ======================
 // LIFECYCLE HOOKS
@@ -103,7 +158,7 @@ onUnmounted(() => {
 });
 
 // ======================
-// LOAD WAREHOUSE & BIN BY LOCATION NAME ✅ NEW
+// LOAD WAREHOUSE & BIN BY LOCATION NAME
 // ======================
 const loadWarehouseAndBin = async (locationName) => {
   if (!locationName) {
@@ -160,7 +215,7 @@ const loadWarehouseAndBin = async (locationName) => {
 }
 
 // ======================
-// LOAD MATERIALS BY BIN ✅ NEW (seperti addnewgm.vue)
+// LOAD MATERIALS BY BIN
 // ======================
 const loadMaterialsByBin = async (binId) => {
   if (!binId) {
@@ -172,7 +227,6 @@ const loadMaterialsByBin = async (binId) => {
   try {
     console.log('📦 Loading materials for bin:', binId)
 
-    // Query MaterialMgmtStorageDetail dari Openbravo
     const materialsRes = await openbravoApi.get(
       '/org.openbravo.service.json.jsonrest/MaterialMgmtStorageDetail',
       {
@@ -279,7 +333,6 @@ const onScanSuccess = async (decodedText) => {
 
     alert(`✅ QR Code berhasil di-scan!\n📍 Lokasi: ${locationName}\n🏷️ Batch: ${batchName}`);
 
-    // ✅ Load warehouse & materials untuk location ini
     await loadWarehouseAndBin(locationName)
 
     stopScanner();
@@ -340,6 +393,7 @@ function removeTypeDamageRow(index) {
 function addFormSection() {
   formSections.value.push({
     id: Date.now(),
+    phase: selectedPhase.value,
     activity_id: "",
     coa: "",
     materials: [{ material_name: "", qty: "", uom: "" }],
@@ -363,10 +417,6 @@ function removeMaterialRow(sectionIndex, matIndex) {
   }
 }
 
-// ❌ HAPUS BAGIAN INI - INI YANG BIKIN ERROR!
-// Kode ini tidak boleh ada di sini (di luar function)
-// if (section.materials && section.materials.length > 0) { ... }
-
 function addWorkerRow(sectionIndex) {
   formSections.value[sectionIndex].workers.push({ qty: "" });
 }
@@ -377,51 +427,6 @@ function removeWorkerRow(sectionIndex, workerIndex) {
   }
 }
 
-// ==========================================
-// WATCHER - Auto-fill CoA
-// ==========================================
-watch(
-  formSections,
-  (sections) => {
-    sections.forEach((s) => {
-      const selected = potatoActivities.value.find(
-        (a) => a.activity_id == s.activity_id
-      );
-      s.coa = selected ? selected.CoA_code : "";
-    });
-  },
-  { deep: true }
-);
-
-
-// ✅ KEEP ONLY ONE WATCHER untuk auto-fill UoM
-watch(
-  formSections,
-  (sections) => {
-    sections.forEach((section) => {
-      section.materials.forEach((material) => {
-        if (material.material_name) {
-          const selectedMaterial = availableMaterials.value.find(
-            (m) => m.material_name === material.material_name
-          );
-          
-          if (selectedMaterial) {
-            material.uom = selectedMaterial.uom || "";
-          }
-          
-          console.log("🔍 Auto-fill UoM:", {
-            material_name: material.material_name,
-            uom: material.uom
-          });
-        } else {
-          material.uom = "";
-        }
-      });
-    });
-  },
-  { deep: true }
-);
-
 // ======================
 // SUBMIT TO DATABASE
 // ======================
@@ -430,6 +435,12 @@ const submitActivityReport = async () => {
     alert("⚠️ Pilih lokasi dan batch terlebih dahulu!");
     return;
   }
+  
+  if (!selectedPhase.value) {
+    alert("⚠️ Pilih Phase terlebih dahulu!");
+    return;
+  }
+  
   if (isSubmitting.value) {
     console.log("⚠️ Submission already in progress, ignoring...");
     return;
@@ -443,7 +454,7 @@ const submitActivityReport = async () => {
     }
   }
 
-  // ✅ Batch validate ALL materials
+  // Batch validate ALL materials
   const allMaterials = [];
 
   for (const section of formSections.value) {
@@ -487,7 +498,8 @@ const submitActivityReport = async () => {
       batch_id: Number(selectedBatch.value),
       location_id: Number(selectedLocation.value),
       report_date: selectedDate.value,
-      report_status: 'onReview'
+      report_status: 'onReview',
+      phase: selectedPhase.value || null
     };
 
     console.log("📋 Creating report:", reportPayload);
@@ -547,7 +559,6 @@ const submitActivityReport = async () => {
         a => a.activity_id == section.activity_id
       );
 
-      // ✅ FIXED: Hapus created_at
       const activityPayload = {
         report_id,
         act_name: selectedActivity?.activity || "",
@@ -572,7 +583,7 @@ const submitActivityReport = async () => {
       const activity_id = activityData.activity_id;
       console.log("✅ Activity created with ID:", activity_id);
 
-      // ✅ 4. CREATE MATERIAL_USED - ENHANCED LOGGING
+      // 4. CREATE MATERIAL_USED
       console.log("🔍 CHECKING MATERIALS FOR ACTIVITY:", activity_id);
       console.log("   - section.materials:", section.materials);
       
@@ -621,6 +632,7 @@ const submitActivityReport = async () => {
     alert("✅ Data berhasil disimpan ke database!");
     console.log("📊 SUMMARY:");
     console.log(`   - Report ID: ${report_id}`);
+    console.log(`   - Phase: ${selectedPhase.value}`);
     console.log(`   - Damages: ${validDamages.length}`);
     console.log(`   - Activities: ${formSections.value.length}`);
     console.log("   - Status: onReview (menunggu approval)");
@@ -641,6 +653,7 @@ const submitActivityReport = async () => {
 function resetForm() {
   selectedLocation.value = "";
   selectedBatch.value = "";
+  selectedPhase.value = "";
   selectedWarehouse.value = null
   selectedBin.value = null
   availableMaterials.value = []
@@ -658,6 +671,7 @@ function resetForm() {
   formSections.value = [
     {
       id: Date.now(),
+      phase: "",
       activity_id: "",
       coa: "",
       materials: [{ material_name: "", qty: "", uom: "" }],
@@ -710,7 +724,7 @@ function getBatchName(batchId) {
     <!-- Main Content -->
     <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
       
-      <!-- Date, Location & Batch Section -->
+      <!-- Date, Phase, Location & Batch Section -->
       <div class="mb-8">
         <div class="flex justify-between items-center mb-3">
           <h2 class="text-sm font-semibold text-gray-500 uppercase tracking-wide">Informasi Dasar</h2>
@@ -725,7 +739,7 @@ function getBatchName(batchId) {
           </button>
         </div>
         <div class="bg-white rounded-2xl border-2 border-gray-100 shadow-sm hover:shadow-lg transition-all p-6">
-          <div class="grid grid-cols-1 md:grid-cols-3 gap-5">
+          <div class="grid grid-cols-1 md:grid-cols-4 gap-5">
             <!-- Date Picker -->
             <div class="flex flex-col">
               <label class="text-sm font-semibold text-gray-700 mb-2 flex items-center gap-2">
@@ -740,6 +754,25 @@ function getBatchName(batchId) {
                 v-model="selectedDate" 
                 class="px-4 py-3 border-2 border-gray-200 rounded-xl bg-gray-50 text-gray-700 font-medium focus:outline-none focus:border-[#0071f3] focus:ring-2 focus:ring-[#0071f3]/20 transition"
               />
+            </div>
+
+            <!-- Phase -->
+            <div class="flex flex-col">
+              <label class="text-sm font-semibold text-gray-700 mb-2 flex items-center gap-2">
+                <span class="text-lg">🌱</span>
+                Phase
+              </label>
+              <select
+                v-model="selectedPhase"
+                class="px-4 py-3 border-2 border-gray-200 rounded-xl bg-white text-gray-700 font-medium focus:outline-none focus:border-[#0071f3] focus:ring-2 focus:ring-[#0071f3]/20 transition appearance-none cursor-pointer"
+              >
+                <option value="" disabled>Pilih Phase</option>
+                <option>Planlet</option>
+                <option>Planlet Stek</option>
+                <option>G0</option>
+                <option>G1</option>
+                <option>G2</option>
+              </select>
             </div>
 
             <!-- Location -->
@@ -777,7 +810,7 @@ function getBatchName(batchId) {
         </div>
       </div>
 
-      <!-- Jenis Kerusakan Tanaman - UPDATED -->
+      <!-- Jenis Kerusakan Tanaman -->
       <div class="mb-8">
         <div class="flex justify-between items-center mb-3">
           <h2 class="text-sm font-semibold text-gray-500 uppercase tracking-wide">Jenis Kerusakan Tanaman</h2>
@@ -887,6 +920,9 @@ function getBatchName(batchId) {
                 {{ index + 1 }}
               </div>
               <h3 class="text-lg font-bold text-gray-900">Activity {{ index + 1 }}</h3>
+              <span v-if="selectedPhase" class="ml-auto px-3 py-1 bg-green-100 text-green-700 rounded-lg text-sm font-semibold">
+                Phase: {{ selectedPhase }}
+              </span>
             </div>
 
             <!-- Activity & CoA -->
@@ -920,7 +956,7 @@ function getBatchName(batchId) {
               </div>
             </div>
 
-            <!-- Materials Section - UPDATED (Simple Dropdown) -->
+            <!-- Materials Section -->
             <div class="mb-6 bg-gray-50 rounded-xl p-5">
               <div class="flex justify-between items-center mb-4">
                 <h4 class="text-base font-bold text-gray-900 flex items-center gap-2">
@@ -945,7 +981,6 @@ function getBatchName(batchId) {
                       <option value="" disabled>
                         {{ materialLoading ? '⏳ Loading materials...' : 'Pilih Material' }}
                       </option>
-                      <!-- ✅ Ambil dari availableMaterials (dari Openbravo MaterialMgmtStorageDetail) -->
                       <option
                         v-for="mat in availableMaterials"
                         :key="mat.productId"
@@ -1006,6 +1041,12 @@ function getBatchName(batchId) {
                   <span class="text-lg">👷</span>
                   Jumlah Tenaga Kerja
                 </h4>
+                <button
+                  @click="addWorkerRow(index)"
+                  class="text-sm bg-[#0071f3] hover:bg-[#0060d1] text-white px-3 py-1.5 rounded-lg transition font-semibold"
+                >
+                  + Tambah
+                </button>
               </div>
               <div class="space-y-3">
                 <div
@@ -1062,17 +1103,16 @@ function getBatchName(batchId) {
           <span v-else>📤 Submit Report</span>
         </button>
       </div>
-      </div>
-
-      <!-- Footer -->
-      <footer class="text-center py-10 mt-8 border-t border-gray-200">
-        <div class="flex items-center justify-center gap-2 mb-2">
-          <span class="text-2xl">🌱</span>
-          <p class="text-gray-400 font-bold text-sm">GREENHOUSE</p>
-        </div>
-        <p class="text-gray-400 text-xs">© 2025 All Rights Reserved</p>
-      </footer>
     </div>
+
+    <!-- Footer -->
+    <footer class="text-center py-10 mt-8 border-t border-gray-200">
+      <div class="flex items-center justify-center gap-2 mb-2">
+        <span class="text-2xl">🌱</span>
+        <p class="text-gray-400 font-bold text-sm">GREENHOUSE</p>
+      </div>
+      <p class="text-gray-400 text-xs">© 2025 All Rights Reserved</p>
+    </footer>
 
     <!-- QR Scanner Modal -->
     <div
@@ -1127,6 +1167,7 @@ function getBatchName(batchId) {
         </div>
       </div>
     </div>
+  </div>
 </template>
 
 <style scoped>

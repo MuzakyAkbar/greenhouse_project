@@ -298,7 +298,6 @@
             <div>
               <p class="text-xs text-gray-500 font-medium mb-1">Nama Lokasi:</p>
               <h2 class="text-xl font-bold text-gray-900">{{ locationName }}</h2>
-              <p class="text-xs text-gray-500 mt-1">0 Batch Aktif</p>
             </div>
           </div>
         </div>
@@ -454,7 +453,6 @@ async function submitToSupabase() {
         {
           location: locationName.value,
           id_openbravo: openbravoId.value,
-          batch_id: null
         }
       ])
       .select()

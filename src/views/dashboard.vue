@@ -34,7 +34,10 @@ Chart.register(
 )
 
 import { useAuthStore } from '../stores/auth'
+import { supabase } from '@/lib/supabase'
 
+const locationBatches = ref({});
+const locationList = ref([]);
 const authStore = useAuthStore()
 const isOpen = ref(false)
 
@@ -116,184 +119,31 @@ const batchList = ref([
   },
 ])
 
-onMounted(() => {
-  // Chart garis fase
-  new Chart(document.getElementById('faseChart'), {
-    type: 'line',
-    data: {
-      labels: ['Planlet', 'G0', 'G1', 'G2'],
-      datasets: [
-        {
-          label: 'Batch A',
-          data: [500, 420, 360, 310],
-          borderColor: '#0071f3',
-          backgroundColor: 'rgba(0, 113, 243, 0.08)',
-          tension: 0.4,
-          fill: true,
-          borderWidth: 3,
-          pointRadius: 5,
-          pointHoverRadius: 7,
-          pointBackgroundColor: '#0071f3',
-          pointBorderColor: '#fff',
-          pointBorderWidth: 2,
-        },
-        {
-          label: 'Batch B',
-          data: [600, 510, 460, 410],
-          borderColor: '#8FABD4',
-          backgroundColor: 'rgba(143, 171, 212, 0.08)',
-          tension: 0.4,
-          fill: true,
-          borderWidth: 3,
-          pointRadius: 5,
-          pointHoverRadius: 7,
-          pointBackgroundColor: '#8FABD4',
-          pointBorderColor: '#fff',
-          pointBorderWidth: 2,
-        },
-      ],
-    },
-    options: {
-      responsive: true,
-      maintainAspectRatio: false,
-      plugins: {
-        legend: { 
-          position: 'bottom',
-          labels: {
-            padding: 15,
-            font: { size: 12, weight: '500' },
-            usePointStyle: true,
-            pointStyle: 'circle'
-          }
-        },
-        title: {
-          display: true,
-          text: 'Perkembangan Fase Kentang per Batch',
-          font: { size: 15, weight: '600' },
-          color: '#1f2937',
-          padding: { bottom: 20 }
-        },
-      },
-      scales: {
-        y: {
-          beginAtZero: true,
-          grid: { color: '#f3f4f6', drawBorder: false },
-          ticks: { color: '#6b7280', font: { size: 11 } }
-        },
-        x: {
-          grid: { display: false, drawBorder: false },
-          ticks: { color: '#6b7280', font: { size: 11 } }
-        }
-      }
-    },
-  })
+onMounted(async () => {
 
-  // Chart pie kepemilikan
-  new Chart(document.getElementById('kepemilikanChart'), {
-    type: 'doughnut',
-    data: {
-      labels: ['Milik Mitra', 'Milik Petani'],
-      datasets: [
-        {
-          data: [summary.value.g2Mitra, summary.value.g2Petani],
-          backgroundColor: ['#0071f3', '#8FABD4'],
-          borderWidth: 0,
-          hoverOffset: 8,
-        },
-      ],
-    },
-    options: {
-      responsive: true,
-      maintainAspectRatio: false,
-      cutout: '60%',
-      plugins: {
-        legend: { 
-          position: 'bottom',
-          labels: {
-            padding: 15,
-            font: { size: 12, weight: '500' },
-            usePointStyle: true,
-            pointStyle: 'circle'
-          }
-        },
-        title: {
-          display: true,
-          text: 'Distribusi Kepemilikan G2',
-          font: { size: 15, weight: '600' },
-          color: '#1f2937',
-          padding: { bottom: 20 }
-        },
-      },
-    },
-  })
+  // Ambil semua lokasi
+  const { data: locData } = await supabase
+    .from("gh_location")
+    .select("*");
 
-  // Chart bar pendapatan vs pengeluaran
-  new Chart(document.getElementById('penjualanChart'), {
-    type: 'bar',
-    data: {
-      labels: batchList.value.map((b) => b.nama),
-      datasets: [
-        {
-          label: 'Pendapatan (Rp)',
-          data: batchList.value.map((b) => b.pendapatan),
-          backgroundColor: '#0071f3',
-          borderRadius: 8,
-          borderSkipped: false,
-        },
-        {
-          label: 'Pengeluaran (Rp)',
-          data: batchList.value.map((b) => b.pengeluaran),
-          backgroundColor: '#374151',
-          borderRadius: 8,
-          borderSkipped: false,
-        },
-      ],
-    },
-    options: {
-      responsive: true,
-      maintainAspectRatio: false,
-      scales: {
-        y: { 
-          beginAtZero: true,
-          grid: { color: '#f3f4f6', drawBorder: false },
-          ticks: { color: '#6b7280', font: { size: 11 } }
-        },
-        x: {
-          grid: { display: false, drawBorder: false },
-          ticks: { color: '#6b7280', font: { size: 11 } }
-        }
-      },
-      plugins: {
-        legend: { 
-          position: 'bottom',
-          labels: {
-            padding: 15,
-            font: { size: 12, weight: '500' },
-            usePointStyle: true,
-            pointStyle: 'rect'
-          }
-        },
-        title: {
-          display: true,
-          text: 'Perbandingan Pemasukan & Pengeluaran per Batch',
-          font: { size: 15, weight: '600' },
-          color: '#1f2937',
-          padding: { bottom: 20 }
-        },
-        tooltip: {
-          callbacks: {
-            label: function (context) {
-              return `${context.dataset.label}: Rp ${context.parsed.y.toLocaleString('id-ID')}`
-            },
-          },
-          backgroundColor: '#1f2937',
-          padding: 12,
-          cornerRadius: 8,
-        },
-      },
-    },
-  })
-})
+  locationList.value = locData || [];
+
+  // Ambil semua batch & kelompokkan berdasarkan lokasi
+  const { data: batchData } = await supabase
+    .from("gh_batch")
+    .select("batch_id, batch_name, location_id");
+
+  const grouped = {};
+
+  batchData.forEach(b => {
+    if (!grouped[b.location_id]) grouped[b.location_id] = [];
+    grouped[b.location_id].push(b);
+  });
+
+  locationBatches.value = grouped;
+});
+
+
 </script>
 
 <template>
@@ -345,11 +195,17 @@ onMounted(() => {
           >
             📊 Lihat Laporan
           </button>
-          <router-link
+          <!-- <router-link
             to="/report-production"
             class="bg-white hover:bg-gray-50 text-gray-700 font-medium px-5 py-3 rounded-xl transition-all text-sm border-2 border-gray-200 hover:border-[#0071f3] shadow-sm hover:shadow inline-flex items-center"
           >
             📈 Laporan Produksi
+          </router-link> -->
+          <router-link
+            to="/planningActivity"
+            class="bg-white hover:bg-gray-50 text-gray-700 font-medium px-5 py-3 rounded-xl transition-all text-sm border-2 border-gray-200 hover:border-[#0071f3] shadow-sm hover:shadow inline-flex items-center"
+          >
+            📝 Planning Activity
           </router-link>
           <router-link
             to="/location"
@@ -470,74 +326,48 @@ onMounted(() => {
 
       <!-- Batch Cards -->
       <div class="mb-8">
-        <h2 class="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-3">Data Setiap Batch</h2>
+        <h2 class="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-3">Data Setiap Location</h2>
       </div>
       <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-        <div
-          v-for="batch in batchList"
-          :key="batch.id"
-          class="group bg-white rounded-2xl border-2 border-gray-100 p-6 hover:border-[#0071f3] hover:shadow-xl transition-all transform hover:-translate-y-1"
-        >
-          <div class="flex items-start justify-between mb-4">
-            <h3 class="text-lg font-bold text-gray-900 flex-1">{{ batch.nama }}</h3>
-            <div class="w-12 h-12 bg-gradient-to-br from-[#0071f3] to-[#8FABD4] rounded-xl flex items-center justify-center text-white text-xl flex-shrink-0">
-              🥔
-            </div>
+      <div
+        v-for="loc in locationList"
+        :key="loc.location_id"
+        class="group bg-white rounded-2xl border-2 border-gray-100 p-6 hover:border-[#0071f3] hover:shadow-xl transition-all transform hover:-translate-y-1"
+      >
+        <div class="flex items-start justify-between mb-4">
+          <h3 class="text-lg font-bold text-gray-900 flex-1">{{ loc.location }}</h3>
+          <div class="w-12 h-12 bg-gradient-to-br from-[#0071f3] to-[#8FABD4] rounded-xl flex items-center justify-center text-white text-xl">
+            📍
           </div>
-          
-          <div class="space-y-3 mb-6">
-            <div class="flex items-center justify-between text-sm bg-gray-50 px-3 py-2 rounded-lg">
-              <span class="text-gray-600 font-medium">Planlet</span>
-              <span class="font-bold text-gray-900">{{ batch.planlet }}</span>
-            </div>
-            <div class="grid grid-cols-3 gap-2">
-              <div class="text-center bg-blue-50 px-2 py-2 rounded-lg">
-                <p class="text-xs text-blue-600 font-semibold mb-1">G0</p>
-                <p class="text-lg font-bold text-blue-900">{{ batch.g0 }}</p>
-              </div>
-              <div class="text-center bg-blue-50 px-2 py-2 rounded-lg">
-                <p class="text-xs text-blue-600 font-semibold mb-1">G1</p>
-                <p class="text-lg font-bold text-blue-900">{{ batch.g1 }}</p>
-              </div>
-              <div class="text-center bg-blue-50 px-2 py-2 rounded-lg">
-                <p class="text-xs text-blue-600 font-semibold mb-1">G2</p>
-                <p class="text-lg font-bold text-blue-900">{{ batch.g2 }}</p>
-              </div>
-            </div>
-            <div class="flex items-center justify-between text-sm bg-gray-50 px-3 py-2 rounded-lg">
-              <span class="text-gray-600 font-medium">Terjual</span>
-              <span class="font-bold text-gray-900">{{ batch.terjual }} unit</span>
-            </div>
-            
-            <div class="border-t-2 border-gray-100 pt-3 mt-3 space-y-2">
-              <div class="flex justify-between text-sm">
-                <span class="text-gray-600 font-medium">💰 Pendapatan</span>
-                <span class="font-bold text-green-600">Rp {{ (batch.pendapatan / 1000000).toFixed(1) }}M</span>
-              </div>
-              <div class="flex justify-between text-sm">
-                <span class="text-gray-600 font-medium">💸 Pengeluaran</span>
-                <span class="font-bold text-red-600">Rp {{ (batch.pengeluaran / 1000000).toFixed(1) }}M</span>
-              </div>
-              <div class="flex justify-between items-center pt-2 border-t border-gray-100">
-                <span class="text-sm text-gray-600 font-medium">Keberhasilan</span>
-                <div class="flex items-center gap-2">
-                  <div class="h-2 w-20 bg-gray-100 rounded-full overflow-hidden">
-                    <div class="h-full bg-gradient-to-r from-[#0071f3] to-[#8FABD4]" :style="`width: ${batch.sukses}%`"></div>
-                  </div>
-                  <span class="text-lg font-bold text-[#0071f3]">{{ batch.sukses }}%</span>
-                </div>
-              </div>
-            </div>
-          </div>
-          
-          <button
-            class="w-full bg-gradient-to-r from-[#0071f3] to-[#0060d1] group-hover:from-[#0060d1] group-hover:to-[#0050b1] text-white py-3 rounded-xl font-semibold hover:shadow-lg transition-all text-sm"
-            @click="goToDetail(batch.id)"
-          >
-            Lihat Detail →
-          </button>
         </div>
+
+        <!-- contoh display default angka (nanti bisa kamu ganti real data) -->
+        <div class="space-y-3 mb-6">
+          <div class="bg-gray-50 px-3 py-2 rounded-lg">
+      <span class="text-gray-600 font-medium block mb-1">Batch</span>
+
+      <div v-if="locationBatches[loc.location_id]?.length > 0">
+        <p 
+          v-for="b in locationBatches[loc.location_id]" 
+          :key="b.batch_id"
+          class="text-sm font-semibold text-gray-900"
+        >
+          • {{ b.batch_name }}
+        </p>
       </div>
+      <p v-else class="text-sm text-gray-500 italic">Tidak ada batch</p>
+    </div>
+    </div>
+
+    <button
+      class="w-full bg-gradient-to-r from-[#0071f3] to-[#0060d1] text-white py-3 rounded-xl font-semibold hover:shadow-lg transition-all text-sm"
+      @click="router.push(`/location/${loc.location_id}`)"
+    >
+      Lihat Detail →
+    </button>
+  </div>
+</div>
+
 
       <!-- Footer -->
       <footer class="text-center py-10 mt-16 border-t border-gray-200">
