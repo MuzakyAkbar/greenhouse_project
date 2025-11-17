@@ -1,7 +1,7 @@
 <script setup>
 import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
-import ModalView from '../components/ModalView.vue'
+import ModalView from '@/components/ModalView.vue'
 import {
   Chart,
   LineController,
@@ -64,7 +64,7 @@ const router = useRouter()
 const goToDetail = (batchId) => router.push(`/batch/${batchId}`)
 const tambahBatch = () => router.push('/tambah-batch')
 const bukaFormActivity = () => router.push('/formReportActivity')
-const bukaLaporanActivity = () => router.push('/reportActivityList')
+const bukaLaporanActivity = () => router.push('/planningReportList')
 
 // Data ringkasan
 const summary = ref({
@@ -182,18 +182,10 @@ onMounted(async () => {
         <h2 class="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-3">Quick Actions</h2>
         <div class="flex flex-wrap gap-3">
           <button
-            @click="bukaFormActivity"
-            class="group bg-gradient-to-r from-[#0071f3] to-[#0060d1] hover:from-[#0060d1] hover:to-[#0050b1] text-white font-medium px-5 py-3 rounded-xl transition-all text-sm shadow-md hover:shadow-lg transform hover:-translate-y-0.5"
-          >
-            <span class="flex items-center gap-2">
-              📝 Isi Form Aktivitas
-            </span>
-          </button>
-          <button
             @click="bukaLaporanActivity"
             class="bg-white hover:bg-gray-50 text-gray-700 font-medium px-5 py-3 rounded-xl transition-all text-sm border-2 border-gray-200 hover:border-[#0071f3] shadow-sm hover:shadow"
           >
-            📊 Lihat Laporan
+            📊 Planning & Report List
           </button>
           <!-- <router-link
             to="/report-production"
@@ -203,10 +195,20 @@ onMounted(async () => {
           </router-link> -->
           <router-link
             to="/planningActivity"
-            class="bg-white hover:bg-gray-50 text-gray-700 font-medium px-5 py-3 rounded-xl transition-all text-sm border-2 border-gray-200 hover:border-[#0071f3] shadow-sm hover:shadow inline-flex items-center"
+            class="group bg-gradient-to-r from-[#0071f3] to-[#0060d1] hover:from-[#0060d1] hover:to-[#0050b1] text-white font-medium px-5 py-3 rounded-xl transition-all text-sm shadow-md hover:shadow-lg transform hover:-translate-y-0.5"
           >
-            📝 Planning Activity
+            <span class="flex items-center gap-2">
+              📝 Form Activity Planning
+            </span>
           </router-link>
+          <button
+            @click="bukaFormActivity"
+            class="group bg-gradient-to-r from-[#0071f3] to-[#0060d1] hover:from-[#0060d1] hover:to-[#0050b1] text-white font-medium px-5 py-3 rounded-xl transition-all text-sm shadow-md hover:shadow-lg transform hover:-translate-y-0.5"
+          >
+            <span class="flex items-center gap-2">
+              📝 Form Activity Report
+            </span>
+          </button>
           <router-link
             to="/location"
             class="bg-gradient-to-r from-gray-700 to-gray-800 hover:from-gray-800 hover:to-gray-900 text-white font-medium px-5 py-3 rounded-xl transition-all text-sm shadow-md hover:shadow-lg transform hover:-translate-y-0.5 inline-flex items-center"

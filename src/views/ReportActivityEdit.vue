@@ -1,3 +1,4 @@
+
 <script setup>
 import { ref, onMounted, computed, watch } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
@@ -16,8 +17,14 @@ const locationStore = useLocationStore()
 const potatoActivityStore = usePotatoActivityStore()
 const materialStore = useMaterialStore()
 
-// ✅ Get report_id from route params
+// ✅ Get report_id from route params with debug
 const report_id = ref(route.params.report_id || route.params.id || null)
+
+console.log('🔍 Route Debug Info:')
+console.log('  - route.params:', route.params)
+console.log('  - route.path:', route.path)
+console.log('  - route.name:', route.name)
+console.log('  - report_id extracted:', report_id.value)
 
 const loading = ref(true)
 const saving = ref(false)
@@ -40,29 +47,44 @@ const typeDamages = ref([])
 const activities = ref([])
 
 onMounted(async () => {
+  console.log('═══════════════════════════════════════')
+  console.log('🚀 ReportActivityEdit.vue MOUNTED')
+  console.log('═══════════════════════════════════════')
+  console.log('📍 Current Route Info:')
+  console.log('  - Path:', route.path)
+  console.log('  - Name:', route.name)
+  console.log('  - Params:', JSON.stringify(route.params))
+  console.log('  - Query:', JSON.stringify(route.query))
+  console.log('  - Full Path:', route.fullPath)
+  console.log('📋 Extracted report_id:', report_id.value)
+  console.log('👤 User logged in:', authStore.isLoggedIn)
+  console.log('═══════════════════════════════════════')
+  
   if (!authStore.isLoggedIn) {
+    console.log('❌ User not logged in - Redirecting to login')
     router.push('/')
     return
   }
 
   if (!report_id.value) {
     alert('⚠️ Report ID tidak ditemukan')
-    router.push('/reportActivityList')
+    console.log('🔄 No report_id - Redirecting to /planningReportList')
+    router.replace('/planningReportList')
     return
   }
 
   await loadData()
   
-  // 🧩 Sinkronisasi act_name ke activity_id agar dropdown terisi otomatis saat revisi
+  // 🧩 Sinkronisasi act_name ke master_activity_id agar dropdown terisi otomatis saat revisi
   activities.value.forEach((act) => {
-    if (!act.activity_id && act.act_name) {
+    if (!act.master_activity_id && act.act_name) {
       const matched = potatoActivityStore.activities.find(a => 
         a.activity?.toLowerCase().trim() === act.act_name.toLowerCase().trim() ||
         a.act_name?.toLowerCase().trim() === act.act_name.toLowerCase().trim()
       )
 
       if (matched) {
-        act.activity_id = matched.activity_id
+        act.master_activity_id = matched.activity_id
         act.CoA = act.CoA || matched.CoA_code
         console.log(`✅ Auto-linked activity "${act.act_name}" to master ID ${matched.activity_id}`)
       } else {
@@ -112,7 +134,8 @@ const loadData = async () => {
 
     if (!hasRevisionItems) {
       alert('⚠️ Laporan ini tidak memiliki item yang memerlukan revisi.')
-      router.push('/reportActivityList')
+      console.log('🔄 No revision items - Redirecting to /planningReportList')
+      router.replace('/planningReportList')
       return
     }
 
@@ -158,24 +181,33 @@ const loadData = async () => {
     // ✅ Load ALL activities dengan mapping ke master data
     if (report.activities) {
       activities.value = report.activities.map(act => {
-        const masterActivity = potatoActivityStore.activities.find(a => a.activity_id == act.activity_id)
+        // ✅ Cari master activity yang cocok berdasarkan nama
+        const masterActivity = potatoActivityStore.activities.find(a => 
+          a.activity?.toLowerCase().trim() === act.act_name?.toLowerCase().trim() ||
+          a.act_name?.toLowerCase().trim() === act.act_name?.toLowerCase().trim()
+        )
         
-        console.log(`📌 Mapping activity #${act.activity_id}:`, {
-          activity_id: act.activity_id,
-          db_name: act.act_name,
-          master_name: masterActivity?.activity || masterActivity?.act_name
+        console.log(`📌 Mapping activity from gh_activity table:`, {
+          gh_activity_id: act.activity_id,
+          act_name: act.act_name,
+          master_match: masterActivity?.activity_id,
+          status: act.status,
+          CoA: act.CoA,
+          editable: act.status === 'needRevision'
         })
         
         return {
-          activity_id: act.activity_id,  // ✅ FIXED: Single activity_id only
-          act_name: masterActivity?.activity || masterActivity?.act_name || act.act_name,
-          CoA: act.CoA,
+          gh_activity_id: act.activity_id,  // ✅ ID dari tabel gh_activity (untuk delete)
+          master_activity_id: masterActivity?.activity_id || null,  // ✅ Auto-link ke master
+          act_name: act.act_name,           // ✅ Use original name from DB
+          CoA: act.CoA || masterActivity?.CoA_code,
           qty: act.qty || 1,              
           unit: act.unit || 'unit',
           manpower: act.manpower || 0,
           status: act.status,
           materials: act.materials && act.materials.length > 0
             ? act.materials.map(mat => {
+                // ✅ Cari material di stock berdasarkan nama
                 const stockMaterial = materialStore.materialStock.find(
                   m => m.material_name.toLowerCase().trim() === mat.material_name.toLowerCase().trim()
                 )
@@ -183,12 +215,13 @@ const loadData = async () => {
                 console.log(`📦 Mapping material "${mat.material_name}":`, {
                   found: !!stockMaterial,
                   material_id: stockMaterial?.material_id,
-                  uom: mat.uom || stockMaterial?.uom
+                  current_uom: mat.uom,
+                  stock_uom: stockMaterial?.uom
                 })
                 
                 return {
-                  material_used_id: mat.material_used_id,
-                  material_id: stockMaterial?.material_id || mat.material_id,
+                  material_used_id: mat.material_used_id,  // ✅ Keep for tracking
+                  material_id: stockMaterial?.material_id || null,  // ✅ Link ke master material
                   material_name: mat.material_name,
                   qty: mat.qty || 0,
                   uom: mat.uom || stockMaterial?.uom || ''
@@ -216,6 +249,12 @@ const loadData = async () => {
       })
       
       console.log('✅ Loaded activities with materials:', activities.value)
+      console.log('📊 Activities status summary:', activities.value.map(a => ({
+        gh_activity_id: a.gh_activity_id,
+        act_name: a.act_name,
+        status: a.status,
+        editable: a.editable
+      })))
     }
 
     // Load material stock for this location
@@ -227,7 +266,8 @@ const loadData = async () => {
     console.error('❌ Error loading data:', err)
     error.value = err.message
     alert('❌ Gagal memuat data: ' + err.message)
-    router.push('/reportActivityList')
+    console.log('🔄 Error - Redirecting to /planningReportList')
+    router.replace('/planningReportList')
   } finally {
     loading.value = false
   }
@@ -259,35 +299,64 @@ const formatDateTime = (dateStr) => {
 // ✅ Watch for activity changes to auto-fill CoA dan act_name
 watch(() => activities.value, (acts) => {
   acts.forEach((act) => {
-    if (act.activity_id) {
-      const selected = potatoActivityStore.activities.find(a => a.activity_id == act.activity_id)
+    if (act.master_activity_id) {
+      const selected = potatoActivityStore.activities.find(a => a.activity_id == act.master_activity_id)
       if (selected) {
-        if (selected.CoA_code && !act.CoA) {
+        if (selected.CoA_code) {
           act.CoA = selected.CoA_code
         }
         if (selected.activity || selected.act_name) {
           act.act_name = selected.activity || selected.act_name
         }
+        console.log(`✅ Auto-filled from master:`, {
+          master_activity_id: act.master_activity_id,
+          act_name: act.act_name,
+          CoA: act.CoA
+        })
       }
     }
   })
 }, { deep: true })
 
-// ✅ Handler untuk material change - auto fill uom
+// ✅ Handler untuk material change - FIXED VERSION
 const onMaterialChange = (activityIndex, materialIndex, material_id) => {
-  if (!material_id) return
+  console.log(`🔄 Material changed:`, {
+    activityIndex,
+    materialIndex,
+    material_id,
+    material_id_type: typeof material_id
+  })
   
-  const selectedMaterial = materialStore.materialStock.find(m => m.material_id == material_id)
+  if (!material_id || material_id === null) {
+    console.log('⚠️ No material_id selected')
+    const material = activities.value[activityIndex].materials[materialIndex]
+    material.material_id = null
+    material.material_name = ''
+    material.uom = ''
+    return
+  }
+  
+  // Convert to number
+  const materialIdNum = parseInt(material_id)
+  const selectedMaterial = materialStore.materialStock.find(m => parseInt(m.material_id) === materialIdNum)
+  
   if (selectedMaterial) {
     const material = activities.value[activityIndex].materials[materialIndex]
+    material.material_id = selectedMaterial.material_id
     material.material_name = selectedMaterial.material_name
-    material.uom = selectedMaterial.uom || material.uom
+    material.uom = selectedMaterial.uom || ''
     
-    console.log(`✅ Material changed:`, {
-      material_id,
-      material_name: selectedMaterial.material_name,
-      uom: selectedMaterial.uom
+    console.log(`✅ Material SAVED:`, {
+      material_id: material.material_id,
+      material_name: material.material_name,
+      qty: material.qty,
+      uom: material.uom
     })
+    
+    // Force update
+    activities.value = [...activities.value]
+  } else {
+    console.error(`❌ Material ID ${materialIdNum} NOT FOUND in stock`)
   }
 }
 
@@ -319,6 +388,22 @@ const handleSubmit = async () => {
       throw new Error('Lokasi, Batch, dan Tanggal wajib diisi')
     }
 
+    // ✅ Log materials for debugging (no blocking)
+    const editableActs = activities.value.filter(act => act.editable && act.status === 'needRevision')
+    editableActs.forEach((act, idx) => {
+      console.log(`Activity ${idx} - "${act.act_name}":`)
+      if (act.materials && act.materials.length > 0) {
+        act.materials.forEach((mat, matIdx) => {
+          const valid = !!(mat.material_id && mat.qty > 0)
+          console.log(`  Material [${matIdx}]: ${valid ? '✅' : '⚠️'}`, {
+            material_id: mat.material_id,
+            material_name: mat.material_name,
+            qty: mat.qty
+          })
+        })
+      }
+    })
+
     const username = authStore.user?.username || authStore.user?.email || 'Staff'
     const now = new Date().toISOString()
 
@@ -330,7 +415,7 @@ const handleSubmit = async () => {
     })
     console.log('  - Total activities:', activities.value.length)
     activities.value.forEach((act, idx) => {
-      console.log(`    [${idx}] ID: ${act.activity_id}, Status: ${act.status}, Editable: ${act.editable}`)
+      console.log(`    [${idx}] gh_activity_id: ${act.gh_activity_id}, Status: ${act.status}, Editable: ${act.editable}`)
     })
 
     // ✅ UPDATE ONLY TYPE DAMAGES WITH needRevision STATUS
@@ -346,7 +431,7 @@ const handleSubmit = async () => {
         console.log(`  - Updating type damage ID ${td.typedamage_id}: "${td.type_damage}"`)
         console.log(`    Current status: ${td.status} → Target status: onReview`)
         
-        // ✅ Update type damage (FIXED: removed revised_by and revised_at - columns don't exist)
+        // ✅ Update type damage
         const { data: updatedData, error: updateErr } = await supabase
           .from('gh_type_damage')
           .update({
@@ -377,98 +462,149 @@ const handleSubmit = async () => {
     // ✅ UPDATE ONLY ACTIVITIES WITH needRevision STATUS
     const editableActivities = activities.value.filter(act => {
       const result = act.editable && act.status === 'needRevision'
-      console.log(`  Filtering Activity ${act.activity_id}: editable=${act.editable}, status=${act.status}, result=${result}`)
+      console.log(`  Filtering Activity gh_activity_id=${act.gh_activity_id}: editable=${act.editable}, status=${act.status}, result=${result}`)
       return result
     })
+    
     if (editableActivities.length > 0) {
       console.log(`📝 Updating ${editableActivities.length} activities with needRevision status`)
+      console.log(`📝 Activities to update:`, editableActivities.map(a => ({
+        gh_activity_id: a.gh_activity_id,
+        act_name: a.act_name,
+        status: a.status
+      })))
       
       for (const act of editableActivities) {
-        // Validate activity
-        if (!act.activity_id) {
-          throw new Error('Semua aktivitas wajib dipilih')
+        // Validate activity - hanya perlu gh_activity_id
+        if (!act.gh_activity_id) {
+          throw new Error('ID aktivitas tidak valid (gh_activity_id tidak ditemukan)')
         }
-        
-        // 🔍 Get activity name from master data
-        const masterActivity = potatoActivityStore.activities.find(a => a.activity_id == act.activity_id)
-        const activityName = masterActivity?.activity || masterActivity?.act_name || act.act_name
 
-        console.log(`  - Updating activity ID ${act.activity_id}: "${activityName}"`)
+        // Pastikan ada nama aktivitas
+        if (!act.act_name || act.act_name.trim() === '') {
+          throw new Error('Nama aktivitas wajib diisi')
+        }
+
+        console.log(`  - Updating gh_activity ID ${act.gh_activity_id}: "${act.act_name}"`)
         console.log(`    Current status: ${act.status} → Target status: onReview`)
+        console.log(`    CoA: ${act.CoA}, Manpower: ${act.manpower}`)
 
-        // ✅ Update activity (FIXED: removed revised_by and revised_at - columns don't exist)
-        const { data: updatedAct, error: updateActErr } = await supabase
-          .from('gh_activity')
-          .update({
-            act_name: activityName,
-            CoA: act.CoA ? parseFloat(act.CoA) : null,
-            manpower: parseInt(act.manpower) || 0,
-            status: 'onReview',  // ✅ Change from needRevision to onReview
-            revision_notes: null,
-            revision_requested_by: null,
-            revision_requested_at: null
-          })
-          .eq('activity_id', act.activity_id)
-          .select()
+        // ✅ STEP 1: DELETE existing activity (akan cascade delete materials juga jika ada FK constraint)
+        console.log(`  🗑️ Deleting existing activity ${act.gh_activity_id} and its materials...`)
         
-        if (updateActErr) {
-          console.error('❌ Error updating activity:', updateActErr)
-          throw new Error(`Gagal update aktivitas "${activityName}": ${updateActErr.message}`)
-        }
-
-        console.log(`  ✅ Activity ${act.activity_id} updated:`, updatedAct)
-
-        // Delete old materials
-        console.log(`  🗑️ Deleting old materials for activity ${act.activity_id}`)
+        // Delete materials first
         const { error: deleteMatErr } = await supabase
           .from('gh_material_used')
           .delete()
-          .eq('activity_id', act.activity_id)
+          .eq('activity_id', act.gh_activity_id)
         
         if (deleteMatErr) {
-          console.error('❌ Error deleting materials:', deleteMatErr)
+          console.error('❌ Error deleting old materials:', deleteMatErr)
           throw new Error(`Gagal hapus material lama: ${deleteMatErr.message}`)
         }
+        console.log(`  ✅ Old materials deleted`)
 
-        // Insert new materials
-        if (act.materials && act.materials.length > 0) {
-          const validMaterials = act.materials.filter(m => m.material_id && m.qty > 0)
+        // Delete the activity itself
+        const { error: deleteActErr } = await supabase
+          .from('gh_activity')
+          .delete()
+          .eq('activity_id', act.gh_activity_id)
+        
+        if (deleteActErr) {
+          console.error('❌ Error deleting old activity:', deleteActErr)
+          throw new Error(`Gagal hapus aktivitas lama: ${deleteActErr.message}`)
+        }
+        console.log(`  ✅ Old activity deleted`)
+
+        // ✅ STEP 2: INSERT new activity with status onReview
+        console.log(`  📝 Inserting new activity with status onReview...`)
+        const { data: newActivity, error: insertActErr } = await supabase
+          .from('gh_activity')
+          .insert({
+            report_id: report_id.value,
+            act_name: act.act_name,
+            CoA: act.CoA ? parseFloat(act.CoA) : null,
+            manpower: parseInt(act.manpower) || 0,
+            status: 'onReview',  // ✅ New activity with onReview status
+            revision_notes: null,
+            revision_requested_by: null,
+            revision_requested_at: null,
+            approved_by: null,
+            approved_at: null
+          })
+          .select()
+          .single()
+        
+        if (insertActErr) {
+          console.error('❌ Error inserting new activity:', insertActErr)
+          throw new Error(`Gagal insert aktivitas baru "${act.act_name}": ${insertActErr.message}`)
+        }
+
+        console.log(`  ✅ New activity inserted:`, newActivity)
+        const newActivityId = newActivity.activity_id
+
+        if (!newActivityId) {
+          console.error('❌ CRITICAL: newActivityId is null/undefined!')
+          throw new Error('Failed to get activity_id after insert')
+        }
+        
+        console.log(`  ✅ Confirmed newActivityId: ${newActivityId}`)
+
+        // ✅ STEP 3: INSERT MATERIALS (SIMPLIFIED LIKE FormReportActivity.vue)
+        console.log(`  📦 Processing materials for activity ${newActivityId}`)
+        
+        if (!act.materials || act.materials.length === 0) {
+          console.log(`  ℹ️ No materials array`)
+        } else {
+          console.log(`  Total materials in array: ${act.materials.length}`)
+          console.log(`  Materials data:`, JSON.stringify(act.materials, null, 2))
+          
+          // ✅ FILTER - sama seperti FormReportActivity.vue
+          const validMaterials = act.materials.filter(mat => {
+            const isValid = mat.material_name && mat.qty && parseFloat(mat.qty) > 0
+            console.log(`  Material: ${mat.material_name}, Qty: ${mat.qty}, Valid: ${isValid}`)
+            return isValid
+          })
+
+          console.log(`  Valid materials: ${validMaterials.length}/${act.materials.length}`)
           
           if (validMaterials.length > 0) {
-            console.log(`  📦 Inserting ${validMaterials.length} new materials`)
-            
-            const materialsToInsert = validMaterials.map(mat => {
-              const stockMaterial = materialStore.materialStock.find(m => m.material_id == mat.material_id)
-              
-              console.log(`    - Material: ${stockMaterial?.material_name || mat.material_name} (Qty: ${mat.qty})`)
-              
-              return {
-                activity_id: act.activity_id,
-                material_name: stockMaterial?.material_name || mat.material_name,
-                qty: parseFloat(mat.qty) || 0,
-                uom: mat.uom || stockMaterial?.uom || ''
-              }
-            })
+            // ✅ MAP - sama seperti FormReportActivity.vue
+            const materialPayloads = validMaterials.map(mat => ({
+              activity_id: newActivityId,
+              material_name: mat.material_name,  // ✅ Langsung dari mat.material_name
+              qty: parseFloat(mat.qty),
+              uom: mat.uom || null  // ✅ Langsung dari mat.uom
+            }))
 
-            const { error: insertMatErr } = await supabase
+            console.log(`  📦 Inserting ${materialPayloads.length} materials:`)
+            console.log(JSON.stringify(materialPayloads, null, 2))
+
+            const { data: matData, error: matErr } = await supabase
               .from('gh_material_used')
-              .insert(materialsToInsert)
-            
-            if (insertMatErr) {
-              console.error('❌ Error inserting materials:', insertMatErr)
-              throw new Error(`Gagal tambah material: ${insertMatErr.message}`)
+              .insert(materialPayloads)
+              .select()
+
+            if (matErr) {
+              console.error(`  ❌ INSERT ERROR:`, matErr)
+              throw new Error(`Gagal insert material: ${matErr.message}`)
             }
-            
-            console.log(`  ✅ Inserted ${materialsToInsert.length} materials`)
+
+            console.log(`  ✅ SUCCESS! Inserted ${matData.length} materials:`)
+            matData.forEach((m, idx) => {
+              console.log(`    [${idx}] ID: ${m.material_used_id}, Name: ${m.material_name}, Qty: ${m.qty} ${m.uom}`)
+            })
           } else {
-            console.log(`  ℹ️ No valid materials to insert`)
+            console.log(`  ⚠️ No valid materials (all filtered out)`)
           }
         }
       }
-      console.log(`✅ Successfully updated ${editableActivities.length} activities`)
+      console.log(`✅ Successfully processed ${editableActivities.length} activities`)
     } else {
       console.log('ℹ️ No activities need updating')
     }
+
+    
 
     // ✅ CHECK IF ALL ITEMS ARE NOW APPROVED OR ONREVIEW
     console.log('🔍 Verifying final status from database...')
@@ -519,7 +655,12 @@ const handleSubmit = async () => {
     console.log(`✅ Final report status: ${newReportStatus}`)
 
     alert('✅ Laporan berhasil diperbarui dan dikirim untuk review ulang!')
-    await router.push('/reportActivityList')
+    
+    // ✅ Force redirect dengan replace untuk mencegah back
+    console.log('🔄 Success - Redirecting to /planningReportList')
+    setTimeout(() => {
+      router.replace('/planningReportList')  // ✅ Use replace instead of push
+    }, 100)
     
   } catch (err) {
     console.error('❌ Error saving:', err)
@@ -532,7 +673,8 @@ const handleSubmit = async () => {
 
 const handleCancel = () => {
   if (confirm('❓ Batalkan perubahan?\n\nData yang belum disimpan akan hilang.')) {
-    router.push('/reportActivityList')
+    console.log('🔄 Cancel - Redirecting to /planningReportList')
+    router.replace('/planningReportList')  // ✅ Use replace instead of push
   }
 }
 
@@ -822,7 +964,7 @@ const filteredMaterials = computed(() => {
 
             <div
               v-for="(activity, index) in activities"
-              :key="activity.activity_id"
+              :key="activity.gh_activity_id"
               :class="[
                 'rounded-2xl border-2 shadow-sm p-6',
                 activity.editable ? 'bg-white border-red-200' : 'bg-gray-50 border-gray-200'
@@ -872,7 +1014,7 @@ const filteredMaterials = computed(() => {
                     <span v-if="activity.editable" class="text-red-500">*</span>
                   </label>
                   <select
-                    v-model="activity.activity_id"
+                    v-model="activity.master_activity_id"
                     :required="activity.editable"
                     :disabled="!activity.editable"
                     class="w-full px-4 py-3 border-2 rounded-lg transition"
@@ -880,7 +1022,7 @@ const filteredMaterials = computed(() => {
                     style="color: #111827 !important; -webkit-text-fill-color: #111827 !important; color-scheme: light !important;"
                   >
                     <option :value="null" style="color: #111827 !important; background-color: #ffffff !important;">
-                      Pilih Activity
+                      {{ activity.act_name || 'Pilih Activity' }}
                     </option>
                     <option
                       v-for="a in filteredActivities"
@@ -923,6 +1065,7 @@ const filteredMaterials = computed(() => {
                       <label class="text-xs font-semibold text-gray-600 mb-2">Nama Material</label>
                       <select
                         v-model="material.material_id"
+                        @change="onMaterialChange(index, matIndex, material.material_id)"
                         :disabled="!activity.editable"
                         :class="[
                           'w-full px-4 py-2.5 border-2 rounded-lg transition',
@@ -931,11 +1074,20 @@ const filteredMaterials = computed(() => {
                             : 'border-gray-200 bg-gray-100 cursor-not-allowed text-gray-600'
                         ]"
                       >
-                        <option :value="null" class="text-gray-900">{{ material.material_name || 'Pilih Material' }}</option>
+                        <!-- Show current selection if exists -->
+                        <option 
+                          v-if="!material.material_id" 
+                          :value="null" 
+                          class="text-gray-900"
+                        >
+                          {{ material.material_name || 'Pilih Material' }}
+                        </option>
+                        <!-- List all available materials -->
                         <option
                           v-for="mat in filteredMaterials"
                           :key="mat.material_id"
                           :value="mat.material_id"
+                          :selected="material.material_id === mat.material_id"
                           class="text-gray-900"
                         >
                           {{ mat.material_name }}
@@ -1073,7 +1225,7 @@ const filteredMaterials = computed(() => {
             </div>
             <button
               type="button"
-              @click="router.push('/reportActivityList')"
+              @click="() => { console.log('🔄 Back button - Redirecting to /planningReportList'); router.replace('/planningReportList'); }"
               class="mt-4 w-full px-6 py-3 bg-yellow-500 hover:bg-yellow-600 text-white font-semibold rounded-xl transition"
             >
               Kembali ke List

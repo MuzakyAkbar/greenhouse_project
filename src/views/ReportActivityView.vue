@@ -14,9 +14,13 @@ const batchStore = useBatchStore()
 const locationStore = useLocationStore()
 
 const report_id = ref(route.params.report_id || null)
+
+const sourcePage = ref(route.query.from || '/planningReportList')
 const loading = ref(true)
 const error = ref(null)
 const currentReport = ref(null)
+
+
 
 onMounted(async () => {
   if (!authStore.isLoggedIn) {
@@ -26,7 +30,7 @@ onMounted(async () => {
 
   if (!report_id.value) {
     alert('⚠️ Report ID tidak ditemukan')
-    router.push('/reportActivityList')
+    router.push(sourcePage.value)
     return
   }
 
@@ -69,7 +73,7 @@ const loadData = async () => {
     console.error('❌ Error loading data:', err)
     error.value = err.message
     alert('❌ Gagal memuat data: ' + err.message)
-    router.push('/reportActivityList')
+    router.push(sourcePage.value)
   } finally {
     loading.value = false
   }
@@ -191,7 +195,7 @@ const printReport = async () => {
         <div class="flex items-center justify-between gap-4">
           <div class="flex items-center gap-4">
             <button
-              @click="router.push('/reportActivityList')"
+              @click="() => router.push(sourcePage)"
               class="flex items-center justify-center w-10 h-10 bg-gray-100 hover:bg-gray-200 rounded-lg transition"
             >
               <svg class="w-5 h-5 text-gray-700" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512" fill="currentColor">
@@ -290,36 +294,36 @@ const printReport = async () => {
             </div>
 
             <div class="grid grid-cols-1 md:grid-cols-3 gap-5 mt-5">
-  <div class="flex flex-col">
-    <label class="text-sm font-semibold text-gray-700 mb-2 flex items-center gap-2">
-      <span class="text-lg">🏷️</span>
-      Batch
-    </label>
-    <div class="px-4 py-3 border-2 border-gray-200 rounded-xl bg-gray-50 text-gray-700 font-medium">
-      {{ getBatchName(currentReport.batch_id) }}
-    </div>
-  </div>
+              <div class="flex flex-col">
+                <label class="text-sm font-semibold text-gray-700 mb-2 flex items-center gap-2">
+                  <span class="text-lg">🏷️</span>
+                  Batch
+                </label>
+                <div class="px-4 py-3 border-2 border-gray-200 rounded-xl bg-gray-50 text-gray-700 font-medium">
+                  {{ getBatchName(currentReport.batch_id) }}
+                </div>
+              </div>
 
-  <!-- ✅ Tambahkan kolom baru: Fase Tumbuhan -->
-  <div class="flex flex-col">
-    <label class="text-sm font-semibold text-gray-700 mb-2 flex items-center gap-2">
-      <span class="text-lg">🌿</span>
-      Fase Tumbuhan
-    </label>
-    <div class="px-4 py-3 border-2 border-gray-200 rounded-xl bg-gray-50 text-gray-700 font-medium">
-      {{ currentReport.phase || 'Belum ditentukan' }}
-    </div>
-  </div>
+              <!-- ✅ Tambahkan kolom baru: Fase Tumbuhan -->
+              <div class="flex flex-col">
+                <label class="text-sm font-semibold text-gray-700 mb-2 flex items-center gap-2">
+                  <span class="text-lg">🌿</span>
+                  Fase Tumbuhan
+                </label>
+                <div class="px-4 py-3 border-2 border-gray-200 rounded-xl bg-gray-50 text-gray-700 font-medium">
+                  {{ currentReport.phase || 'Belum ditentukan' }}
+                </div>
+              </div>
 
-  <div class="flex flex-col">
-    <label class="text-sm font-semibold text-gray-700 mb-2 flex items-center gap-2">
-      <span class="text-lg">📊</span>
-      Status
-    </label>
-    <div class="px-4 py-3 border-2 border-green-200 rounded-xl bg-green-50 text-green-800 font-bold text-center">
-      ✅ Approved
-    </div>
-  </div>
+              <div class="flex flex-col">
+                <label class="text-sm font-semibold text-gray-700 mb-2 flex items-center gap-2">
+                  <span class="text-lg">📊</span>
+                  Status
+                </label>
+                <div class="px-4 py-3 border-2 border-green-200 rounded-xl bg-green-50 text-green-800 font-bold text-center">
+                  ✅ Approved
+                </div>
+              </div>
             </div>
           </div>
         </div>
@@ -464,7 +468,7 @@ const printReport = async () => {
 
         <div class="flex flex-wrap gap-3 justify-center mb-8 no-print">
            <button
-            @click="router.push('/reportActivityList')"
+            @click="router.push('/planningReportList')"
             class="bg-white hover:bg-gray-50 text-gray-700 font-semibold px-8 py-3 rounded-xl border-2 border-gray-200 hover:border-[#0071f3] shadow-sm hover:shadow-lg transition-all flex items-center gap-2"
           >
             <svg class="w-5 h-5" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" fill="currentColor">

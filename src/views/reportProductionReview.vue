@@ -48,7 +48,7 @@ const productionData = ref([
       <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-5">
         <div class="flex items-center gap-4">
           <RouterLink
-            to="/reportActivityList"
+            to="/planningReportList"
             class="flex items-center justify-center w-10 h-10 bg-gray-100 hover:bg-gray-200 rounded-lg transition"
           >
             <svg class="w-5 h-5 text-gray-700" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512" fill="currentColor">
@@ -154,7 +154,7 @@ const productionData = ref([
               <h3 class="text-sm font-semibold text-gray-700 mb-3">Review Action</h3>
               <div class="flex flex-col sm:flex-row gap-4">
                 <router-link
-                  to="/reportActivityList"
+                  to="/planningReportList"
                   class="flex-1 bg-gradient-to-r from-green-500 to-green-600 hover:from-green-600 hover:to-green-700 text-white font-semibold py-3 rounded-xl transition-all shadow-md hover:shadow-lg transform hover:-translate-y-0.5 text-center flex items-center justify-center gap-2"
                 >
                   <svg class="w-5 h-5" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512" fill="currentColor">
@@ -164,7 +164,7 @@ const productionData = ref([
                 </router-link>
 
                 <router-link
-                  to="/reportActivityList"
+                  to="/planningReportList"
                   class="flex-1 bg-gradient-to-r from-red-500 to-red-600 hover:from-red-600 hover:to-red-700 text-white font-semibold py-3 rounded-xl transition-all shadow-md hover:shadow-lg transform hover:-translate-y-0.5 text-center flex items-center justify-center gap-2"
                 >
                   <svg class="w-5 h-5" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" fill="currentColor">

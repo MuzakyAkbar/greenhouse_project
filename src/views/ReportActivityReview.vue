@@ -16,6 +16,8 @@ const locationStore = useLocationStore()
 
 const report_id = ref(route.params.report_id || null)
 
+const sourcePage = ref(route.query.from || '/planningReportList')
+
 const loading = ref(true)
 const processing = ref(false)
 const error = ref(null)
@@ -48,7 +50,7 @@ onMounted(async () => {
 
   if (!report_id.value) {
     alert('⚠️ Report ID tidak ditemukan')
-    router.push('/reportActivityList')
+    router.push(sourcePage.value)
     return
   }
 
@@ -97,7 +99,7 @@ const loadData = async () => {
     console.error('❌ Error loading data:', err)
     error.value = err.message
     alert('❌ Gagal memuat data: ' + err.message)
-    router.push('/reportActivityList')
+    router.push(sourcePage.value)
   } finally {
     loading.value = false
   }
@@ -1057,7 +1059,7 @@ const approveEverything = async () => {
     await approveAllActivities()
     
     alert('✅ Semua item berhasil disetujui!')
-    router.push('/reportActivityList')
+    router.push(sourcePage.value)
     
   } catch (err) {
     console.error('❌ Error:', err)
@@ -1154,7 +1156,7 @@ const getStatusBadge = (status) => {
         <div class="flex items-center justify-between gap-4">
           <div class="flex items-center gap-4">
             <button
-              @click="router.push('/reportActivityList')"
+              @click="() => router.push(sourcePage)"
               class="flex items-center justify-center w-10 h-10 bg-gray-100 hover:bg-gray-200 rounded-lg transition"
             >
               <svg class="w-5 h-5 text-gray-700" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512" fill="currentColor">
