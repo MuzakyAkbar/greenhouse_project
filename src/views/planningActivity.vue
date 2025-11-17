@@ -3,6 +3,10 @@ import { ref, onMounted, watch, onUnmounted, computed } from "vue";
 import { supabase } from "@/lib/supabase.js";
 import { Html5Qrcode } from "html5-qrcode";
 import openbravoApi from '@/lib/openbravo'
+import { useRouter } from 'vue-router';
+
+// Initialize router
+const router = useRouter();
 
 // Import stores
 import { useLocationStore } from "@/stores/location";
@@ -56,7 +60,7 @@ let html5QrCode = null;
 const formSections = ref([
   {
     id: Date.now(),
-    phase_plan: "",  // ✅ Sudah benar
+    phase_plan: "",
     activity_id: "",
     coa: "",
     materials: [{ material_name: "", qty: "", uom: "" }],
@@ -77,13 +81,58 @@ const isSubmitting = ref(false);
 const formatNumber = (n) => new Intl.NumberFormat('id-ID').format(n ?? 0)
 
 // ======================
+// FUNGSI UNTUK CEK MATERIAL YANG SUDAH DIGUNAKAN
+// ======================
+const getUsedMaterialsByLocationAndDate = async (locationId, date, materialName) => {
+  try {
+    console.log('🔍 Checking used materials:', { locationId, date, materialName });
+    
+    // Query untuk mendapatkan total material yang sudah digunakan
+    // di lokasi dan tanggal yang sama
+    const { data, error } = await supabase
+      .from('gh_planning_material')
+      .select(`
+        qty,
+        uom,
+        gh_planning_activity!inner(
+          planning_id,
+          gh_planning_report!inner(
+            planning_date,
+            location_id,
+            status
+          )
+        )
+      `)
+      .eq('material_name', materialName)
+      .eq('gh_planning_activity.gh_planning_report.location_id', locationId)
+      .eq('gh_planning_activity.gh_planning_report.planning_date', date)
+      .neq('gh_planning_activity.gh_planning_report.status', 'cancelled'); // Exclude cancelled reports
+
+    if (error) {
+      console.error('❌ Error fetching used materials:', error);
+      return 0;
+    }
+
+    // Hitung total qty yang sudah digunakan
+    const totalUsed = data.reduce((sum, item) => sum + parseFloat(item.qty || 0), 0);
+    
+    console.log(`📊 Total ${materialName} used at location ${locationId} on ${date}:`, totalUsed);
+    
+    return totalUsed;
+  } catch (err) {
+    console.error('❌ Error in getUsedMaterialsByLocationAndDate:', err);
+    return 0;
+  }
+};
+
+// ======================
 // WATCHERS
 // ======================
 
 // Watch selectedPhase untuk auto-sync ke semua sections
 watch(selectedPhase, (newPhase) => {
   formSections.value.forEach(section => {
-    section.phase_plan = newPhase;  // ✅ Ubah dari phase ke phase_plan
+    section.phase_plan = newPhase;
   });
 });
 
@@ -125,6 +174,57 @@ watch(
         }
       });
     });
+  },
+  { deep: true }
+);
+
+// Watcher untuk validasi stock real-time dan update display
+watch(
+  [formSections, selectedLocation, selectedDate],
+  async () => {
+    if (!selectedLocation.value || !selectedDate.value) return;
+    
+    // Update display untuk setiap material
+    for (let sectionIndex = 0; sectionIndex < formSections.value.length; sectionIndex++) {
+      const section = formSections.value[sectionIndex];
+      
+      for (let matIndex = 0; matIndex < section.materials.length; matIndex++) {
+        const material = section.materials[matIndex];
+        
+        if (material.material_name) {
+          const usedElement = document.getElementById(`used-${sectionIndex}-${matIndex}`);
+          const availableElement = document.getElementById(`available-${sectionIndex}-${matIndex}`);
+          
+          if (usedElement && availableElement) {
+            const selectedMaterial = availableMaterials.value.find(
+              (m) => m.material_name === material.material_name
+            );
+            
+            if (selectedMaterial) {
+              const stockFromOpenbravo = parseFloat(selectedMaterial.stock);
+              const usedQty = await getUsedMaterialsByLocationAndDate(
+                selectedLocation.value,
+                selectedDate.value,
+                material.material_name
+              );
+              const availableStock = stockFromOpenbravo - usedQty;
+              
+              usedElement.textContent = `${formatNumber(usedQty)} ${material.uom}`;
+              availableElement.textContent = `${formatNumber(availableStock)} ${material.uom}`;
+              
+              // Change color based on availability
+              if (material.qty && parseFloat(material.qty) > availableStock) {
+                availableElement.classList.add('text-red-600');
+                availableElement.classList.remove('text-green-700');
+              } else {
+                availableElement.classList.add('text-green-700');
+                availableElement.classList.remove('text-red-600');
+              }
+            }
+          }
+        }
+      }
+    }
   },
   { deep: true }
 );
@@ -239,31 +339,98 @@ const loadMaterialsByBin = async (binId) => {
   try {
     console.log('📦 Loading materials for bin:', binId)
 
+    // First, try WITHOUT _selectedProperties to see full data structure
     const materialsRes = await openbravoApi.get(
       '/org.openbravo.service.json.jsonrest/MaterialMgmtStorageDetail',
       {
         params: {
-          _where: `storageBin.id='${binId}' AND quantityOnHand > 0`,
-          _selectedProperties: 'product.id,product.name,uOM.id,uOM.name,quantityOnHand'
+          _where: `storageBin.id='${binId}' AND quantityOnHand > 0`
+          // ✅ Remove _selectedProperties to get full object
         }
       }
     )
 
     const rows = materialsRes?.data?.response?.data || []
-    console.log('📊 Raw materials data:', rows)
+    
+    // ✅ DEBUG: Log first item with full structure
+    if (rows.length > 0) {
+      console.log('📊 Full raw material data (first item):', JSON.stringify(rows[0], null, 2))
+    }
+    console.log('📊 Total materials found:', rows.length)
 
-    availableMaterials.value = rows.map((r) => ({
-      productId: r.product?.id || r.product,
-      material_name: r.product?.name || r['product$_identifier'] || '(Tanpa Nama Produk)',
-      uomId: r.uOM?.id || r.uOM,
-      uom: r.uOM?.name || r['uOM$_identifier'] || 'Unit',
-      stock: parseFloat(r.quantityOnHand) || 0,
-    }))
+    // ✅ Enhanced mapping with multiple fallback options
+    availableMaterials.value = rows.map((r) => {
+      // Try different possible field names for product ID
+      const productId = 
+        r.product?.id || 
+        r.product || 
+        r.m_Product_ID || 
+        r['product$id'] ||
+        r.productId
+
+      // Try different possible field names for product name
+      const productName = 
+        r.product?.name || 
+        r['product$_identifier'] || 
+        r.product_name ||
+        r['product$name'] ||
+        r.productName ||
+        r._identifier ||
+        '(Tanpa Nama Produk)'
+      
+      // Try different possible field names for UOM ID
+      const uomId = 
+        r.uOM?.id || 
+        r.uOM || 
+        r.c_UOM_ID || 
+        r['uOM$id'] ||
+        r.uomId
+
+      // Try different possible field names for UOM name
+      const uomName = 
+        r.uOM?.name || 
+        r['uOM$_identifier'] || 
+        r.uom_name ||
+        r['uOM$name'] ||
+        r.uomName ||
+        'Unit'
+      
+      // Try different possible field names for stock quantity
+      const stock = parseFloat(
+        r.quantityOnHand || 
+        r.qtyonhand || 
+        r.stock || 
+        r.qty ||
+        0
+      )
+
+      console.log('🔍 Mapped material:', {
+        productId,
+        productName,
+        uomId,
+        uomName,
+        stock
+      })
+
+      return {
+        productId,
+        material_name: productName,
+        uomId,
+        uom: uomName,
+        stock
+      }
+    })
 
     console.log(`✅ Loaded ${availableMaterials.value.length} materials:`, availableMaterials.value)
 
+    // ✅ Alert if no materials found
+    if (availableMaterials.value.length === 0) {
+      console.warn('⚠️ No materials found with stock > 0 for this bin')
+    }
+
   } catch (err) {
     console.error('❌ Error loading materials:', err.response?.data || err.message)
+    console.error('❌ Full error object:', err)
     availableMaterials.value = []
   } finally {
     materialLoading.value = false
@@ -408,7 +575,7 @@ function removeTypeDamageRow(index) {
 function addFormSection() {
   formSections.value.push({
     id: Date.now(),
-    phase_plan: selectedPhase.value,  // ✅ Ubah dari phase ke phase_plan
+    phase_plan: selectedPhase.value,
     activity_id: "",
     coa: "",
     materials: [{ material_name: "", qty: "", uom: "" }],
@@ -417,35 +584,67 @@ function addFormSection() {
 }
 
 // ======================
-// VALIDATION FUNCTIONS
+// VALIDATION FUNCTIONS (ENHANCED)
 // ======================
-const validateMaterialStock = () => {
+const validateMaterialStock = async () => {
+  if (!selectedLocation.value || !selectedDate.value) {
+    console.warn('⚠️ Location or date not selected');
+    return [];
+  }
+
   const errors = [];
   
-  formSections.value.forEach((section, sectionIndex) => {
-    section.materials.forEach((material, matIndex) => {
+  // Proses setiap section
+  for (let sectionIndex = 0; sectionIndex < formSections.value.length; sectionIndex++) {
+    const section = formSections.value[sectionIndex];
+    
+    // Proses setiap material dalam section
+    for (let matIndex = 0; matIndex < section.materials.length; matIndex++) {
+      const material = section.materials[matIndex];
+      
       if (material.material_name && material.qty) {
+        // 1. Cari material dari Openbravo
         const selectedMaterial = availableMaterials.value.find(
           (m) => m.material_name === material.material_name
         );
         
         if (selectedMaterial) {
           const requestedQty = parseFloat(material.qty);
-          const availableStock = parseFloat(selectedMaterial.stock);
+          const stockFromOpenbravo = parseFloat(selectedMaterial.stock);
           
+          // 2. Hitung material yang sudah digunakan di lokasi dan tanggal yang sama
+          const usedQty = await getUsedMaterialsByLocationAndDate(
+            selectedLocation.value,
+            selectedDate.value,
+            material.material_name
+          );
+          
+          // 3. Hitung available stock = stock openbravo - yang sudah digunakan
+          const availableStock = stockFromOpenbravo - usedQty;
+          
+          console.log(`📊 Stock calculation for ${material.material_name}:`, {
+            stockFromOpenbravo,
+            usedQty,
+            availableStock,
+            requestedQty
+          });
+          
+          // 4. Validasi: requested qty tidak boleh melebihi available stock
           if (requestedQty > availableStock) {
             errors.push({
               sectionIndex: sectionIndex + 1,
               materialName: material.material_name,
               requestedQty: requestedQty,
+              stockFromOpenbravo: stockFromOpenbravo,
+              usedQty: usedQty,
               availableStock: availableStock,
               uom: material.uom
             });
           }
         }
       }
-    });
-  });
+    }
+  }
   
   return errors;
 };
@@ -477,7 +676,7 @@ function removeWorkerRow(sectionIndex, workerIndex) {
 }
 
 // ======================
-// SUBMIT TO DATABASE
+// SUBMIT TO DATABASE (ENHANCED)
 // ======================
 const submitPlanning = async () => {
   // ✅ Validasi 1: Cek semua field wajib termasuk tanggal
@@ -491,20 +690,27 @@ const submitPlanning = async () => {
     return;
   }
 
-  // ✅ VALIDASI STOCK MATERIAL
-  const stockErrors = validateMaterialStock();
+  // ✅ VALIDASI STOCK MATERIAL (Enhanced with database check)
+  const stockErrors = await validateMaterialStock();
   
   if (stockErrors.length > 0) {
-    let errorMessage = "❌ Tidak bisa melebihi stock qty material!\n\n";
+    let errorMessage = "❌ Stock material tidak mencukupi!\n\n";
     
     stockErrors.forEach((error, index) => {
       errorMessage += `${index + 1}. Activity ${error.sectionIndex}:\n`;
       errorMessage += `   Material: ${error.materialName}\n`;
       errorMessage += `   Qty diminta: ${formatNumber(error.requestedQty)} ${error.uom}\n`;
+      errorMessage += `   Stock Openbravo: ${formatNumber(error.stockFromOpenbravo)} ${error.uom}\n`;
+      errorMessage += `   Sudah digunakan: ${formatNumber(error.usedQty)} ${error.uom}\n`;
       errorMessage += `   Stock tersedia: ${formatNumber(error.availableStock)} ${error.uom}\n\n`;
     });
     
+    errorMessage += "Anda akan diarahkan ke halaman Good Movement untuk melakukan transfer stock.";
+    
     alert(errorMessage);
+    
+    // ✅ Redirect ke halaman /goodmovement
+    router.push('/goodmovement');
     return;
   }
 
@@ -514,37 +720,35 @@ const submitPlanning = async () => {
   try {
     console.log("📤 Menyimpan planning...");
 
-    // ✅ FIX: Format tanggal dengan benar (tanpa timezone shift)
-    // Gunakan format YYYY-MM-DD yang sudah ada di selectedDate
-    const reportDate = selectedDate.value; // Ini sudah format YYYY-MM-DD dari input type="date"
+    const reportDate = selectedDate.value;
     
     console.log("📅 Tanggal yang dipilih:", reportDate);
 
     // ==========================================
     // 1. INSERT ke gh_planning_report
     // ==========================================
-    const reportPayload = {
-      created_at: `${selectedDate.value}T00:00:00Z`, // ✅ Tambahkan waktu midnight UTC
-      location_id: Number(selectedLocation.value),
-      batch_id: Number(selectedBatch.value),
-      phase_plan: selectedPhase.value,
-      created_by: "manager",
-      status: "pending"
-    };
+    // Di planningActivity.vue, function submitPlanning()
+const reportPayload = {
+  planning_date: reportDate, // ✅ Gunakan planning_date
+  location_id: Number(selectedLocation.value),
+  batch_id: Number(selectedBatch.value),
+  phase_plan: selectedPhase.value,
+  created_by: "manager",
+  status: "onReview" // ✅ Status awal onReview
+  // ✅ JANGAN set updated_at, biarkan database handle dengan trigger
+};
 
-    console.log("📦 Payload yang akan disimpan:", reportPayload);
-
-    const { data: reportData, error: reportErr } = await supabase
-      .from("gh_planning_report")
-      .insert([reportPayload])
-      .select()
-      .single();
+const { data: reportData, error: reportErr } = await supabase
+  .from("gh_planning_report")
+  .insert([reportPayload])
+  .select()
+  .single();
 
     if (reportErr) throw reportErr;
 
     const planning_id = reportData.planning_id;
     console.log("🟩 Planning report created:", planning_id);
-    console.log("📅 Report date saved:", reportData.created_at);
+    console.log("📅 Report date saved:", reportData.planning_date);
 
     // ==========================================
     // 2. INSERT ke gh_planning_activity (LOOP)
@@ -565,7 +769,7 @@ const submitPlanning = async () => {
         planning_id,
         act_name: selectedAct?.activity || "",
         coa: section.coa ? Number(section.coa) : null,
-        manpower: manpowerTotal,
+        manpower: manpowerTotal.toString(), // ✅ Convert to string sesuai schema
         order_index: i + 1,
       };
 
@@ -613,10 +817,10 @@ const submitPlanning = async () => {
       changed_by: "manager",
       changes: JSON.stringify({
         action: "create_planning",
-        created_at: reportDate, // ✅ Gunakan reportDate yang sudah benar
+        planning_date: reportDate,
+        status: "onReview",
         ...reportPayload
       }),
-      changed_at: new Date().toISOString(), // Timestamp saat submit (untuk audit)
     };
 
     await supabase.from("gh_planning_history").insert([historyPayload]);
@@ -657,7 +861,7 @@ function resetForm() {
   formSections.value = [
     {
       id: Date.now(),
-      phase_plan: "",  // ✅ Ubah dari phase ke phase_plan
+      phase_plan: "",
       activity_id: "",
       coa: "",
       materials: [{ material_name: "", qty: "", uom: "" }],
@@ -695,34 +899,8 @@ watch(selectedLocation, async (newVal) => {
   const loc = locations.value.find(l => l.location_id == newVal);
   if (!loc) return;
 
-  await loadWarehouseAndBin(loc.location); // gunakan nama lokasi, bukan ID
+  await loadWarehouseAndBin(loc.location);
 });
-
-// Watcher untuk validasi stock real-time
-watch(
-  formSections,
-  (sections) => {
-    sections.forEach((section) => {
-      section.materials.forEach((material) => {
-        if (material.material_name && material.qty) {
-          const selectedMaterial = availableMaterials.value.find(
-            (m) => m.material_name === material.material_name
-          );
-          
-          if (selectedMaterial) {
-            const requestedQty = parseFloat(material.qty);
-            const availableStock = parseFloat(selectedMaterial.stock);
-            
-            if (requestedQty > availableStock) {
-              console.warn(`⚠️ Qty ${material.material_name} exceeding stock!`);
-            }
-          }
-        }
-      });
-    });
-  },
-  { deep: true }
-);
 
 </script>
 
@@ -924,11 +1102,11 @@ watch(
                 <div
                   v-for="(material, matIndex) in section.materials"
                   :key="matIndex"
-                  class="flex flex-col md:flex-row gap-3 items-end bg-white rounded-lg p-4 border border-gray-200"
+                  class="flex flex-col gap-3 bg-white rounded-lg p-4 border border-gray-200"
                 >
                   <!-- Material Name - Dropdown dari availableMaterials -->
-                  <div class="flex-1 flex flex-col">
-                    <label class="text-xs font-semibold text-gray-600 mb-2"> Material Name</label>
+                  <div class="flex flex-col">
+                    <label class="text-xs font-semibold text-gray-600 mb-2">Material Name</label>
                     <select
                       v-model="material.material_name"
                       :disabled="materialLoading"
@@ -942,42 +1120,65 @@ watch(
                         :key="mat.productId"
                         :value="mat.material_name"
                       >
-                        {{ mat.material_name }} (Stok: {{ formatNumber(mat.stock) }} {{ mat.uom }})
+                        {{ mat.material_name }} (Stok Openbravo: {{ formatNumber(mat.stock) }} {{ mat.uom }})
                       </option>
                     </select>
+                    
+                    <!-- Stock Info Display -->
+                    <div v-if="material.material_name" class="mt-2 text-xs">
+                      <div class="bg-blue-50 border border-blue-200 rounded-lg p-2 space-y-1">
+                        <div class="flex justify-between">
+                          <span class="text-gray-600">Stok Openbravo:</span>
+                          <span class="font-semibold text-gray-800">
+                            {{ formatNumber(availableMaterials.find(m => m.material_name === material.material_name)?.stock || 0) }} 
+                            {{ material.uom }}
+                          </span>
+                        </div>
+                        <div class="flex justify-between text-orange-600">
+                          <span>Sudah digunakan hari ini:</span>
+                          <span class="font-semibold" :id="`used-${index}-${matIndex}`">Calculating...</span>
+                        </div>
+                        <div class="flex justify-between border-t border-blue-300 pt-1">
+                          <span class="text-green-700 font-semibold">Tersedia:</span>
+                          <span class="font-bold text-green-700" :id="`available-${index}-${matIndex}`">Calculating...</span>
+                        </div>
+                      </div>
+                    </div>
                   </div>
 
-                  <!-- Qty - Input number -->
-                  <div class="w-full md:w-32 flex flex-col">
-                    <label class="text-xs font-semibold text-gray-600 mb-2">Qty</label>
-                    <input
-                      v-model="material.qty"
-                      type="number"
-                      step="0.01"
-                      placeholder="0"
-                      class="px-4 py-2.5 border-2 border-gray-200 rounded-lg bg-white text-gray-700 text-sm font-medium focus:outline-none focus:border-[#0071f3] focus:ring-2 focus:ring-[#0071f3]/20 transition"
-                    />
-                  </div>
+                  <div class="flex gap-3 items-end">
+                    <!-- Qty - Input number -->
+                    <div class="flex-1 flex flex-col">
+                      <label class="text-xs font-semibold text-gray-600 mb-2">Qty</label>
+                      <input
+                        v-model="material.qty"
+                        type="number"
+                        step="0.01"
+                        placeholder="0"
+                        class="px-4 py-2.5 border-2 border-gray-200 rounded-lg bg-white text-gray-700 text-sm font-medium focus:outline-none focus:border-[#0071f3] focus:ring-2 focus:ring-[#0071f3]/20 transition"
+                      />
+                    </div>
 
-                  <!-- Unit - Auto-filled dari availableMaterials -->
-                  <div class="w-full md:w-32 flex flex-col">
-                    <label class="text-xs font-semibold text-gray-600 mb-2">Unit</label>
-                    <input
-                      v-model="material.uom"
-                      placeholder="Auto-filled"
-                      readonly
-                      class="px-4 py-2.5 border-2 border-gray-200 rounded-lg bg-gray-50 text-gray-700 text-sm font-medium cursor-not-allowed"
-                    />
-                  </div>
+                    <!-- Unit - Auto-filled dari availableMaterials -->
+                    <div class="flex-1 flex flex-col">
+                      <label class="text-xs font-semibold text-gray-600 mb-2">Unit</label>
+                      <input
+                        v-model="material.uom"
+                        placeholder="Auto-filled"
+                        readonly
+                        class="px-4 py-2.5 border-2 border-gray-200 rounded-lg bg-gray-50 text-gray-700 text-sm font-medium cursor-not-allowed"
+                      />
+                    </div>
 
-                  <!-- Delete Button -->
-                  <button
-                    @click="removeMaterialRow(index, matIndex)"
-                    v-if="section.materials.length > 1"
-                    class="w-full md:w-auto px-4 py-2.5 bg-red-500 hover:bg-red-600 text-white text-sm font-semibold rounded-lg transition shadow-sm hover:shadow"
-                  >
-                    Hapus
-                  </button>
+                    <!-- Delete Button -->
+                    <button
+                      @click="removeMaterialRow(index, matIndex)"
+                      v-if="section.materials.length > 1"
+                      class="px-4 py-2.5 bg-red-500 hover:bg-red-600 text-white text-sm font-semibold rounded-lg transition shadow-sm hover:shadow"
+                    >
+                      Hapus
+                    </button>
+                  </div>
                 </div>
               </div>
 
@@ -997,12 +1198,6 @@ watch(
                   <span class="text-lg">👷</span>
                   Number of Workers
                 </h4>
-                <button
-                  @click="addWorkerRow(index)"
-                  class="text-sm bg-[#0071f3] hover:bg-[#0060d1] text-white px-3 py-1.5 rounded-lg transition font-semibold"
-                >
-                  + Add
-                </button>
               </div>
               <div class="space-y-3">
                 <div
@@ -1055,8 +1250,8 @@ watch(
           :class="{ 'opacity-50 cursor-not-allowed': isSubmitting }"
           class="bg-gradient-to-r from-[#0071f3] to-[#0060d1] hover:from-[#0060d1] hover:to-[#0050b1] text-white font-bold px-12 py-4 rounded-xl shadow-lg hover:shadow-xl transition-all transform hover:-translate-y-0.5 text-lg"
         >
-          <span v-if="isSubmitting">⏳ Save...</span>
-          <span v-else>📤 Submit Report</span>
+          <span v-if="isSubmitting">⏳ Saving...</span>
+          <span v-else>📤 Submit Planning</span>
         </button>
       </div>
     </div>

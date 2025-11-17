@@ -117,7 +117,6 @@ const handleReportClick = (report) => {
   })
 }
 
-// 📅 Planning Reports
 const planningReports = computed(() => {
   let plannings = planningStore.plannings.map(planning => ({
     planning_id: String(planning.planning_id),
@@ -125,23 +124,20 @@ const planningReports = computed(() => {
     location_name: getLocationName(planning.location_id),
     batch_id: planning.batch_id,
     batch_name: getBatchName(planning.batch_id),
-    report_date: planning.report_date,
+    planning_date: planning.planning_date,
     phase_plan: planning.phase_plan || 'N/A',
-    status: planning.status || 'draft',
+    status: planning.status || 'onReview',
     created_by: planning.created_by || 'N/A',
-    created_at: planning.created_at,
-    updated_at: planning.updated_at
+    updated_at: planning.updated_at // ✅ Ada di schema
+    // ❌ HAPUS created_at karena tidak ada di tabel gh_planning_report
   }))
   
   if (filterDatePlanning.value) {
-    plannings = plannings.filter(p => p.report_date === filterDatePlanning.value)
+    plannings = plannings.filter(p => p.planning_date === filterDatePlanning.value)
   }
   
-  plannings.sort((a, b) => {
-    const dateCompare = new Date(b.report_date) - new Date(a.report_date)
-    if (dateCompare !== 0) return dateCompare
-    return Number(b.planning_id) - Number(a.planning_id)
-  })
+  // ✅ Sort by planning_id descending (ID terbesar di atas)
+  plannings.sort((a, b) => Number(b.planning_id) - Number(a.planning_id))
   
   return plannings
 })
@@ -152,18 +148,44 @@ const handlePlanningClick = (planning) => {
     return
   }
 
-  let routeName = 'planningReview'
+  console.log('🖱️ Planning clicked:', {
+    planning_id: planning.planning_id,
+    status: planning.status
+  })
+
+  let routeName = 'planningActivityReview' // Default untuk onReview
   
-  if (planning.status === 'revision') {
-    routeName = 'planningEdit'
-  } else if (planning.status === 'approved') {
-    routeName = 'planningView'
+  // Hanya 2 route: Review untuk onReview, View untuk approved
+  if (planning.status === 'approved') {
+    routeName = 'planningActivityView'
+  } else {
+    // onReview atau status lainnya masuk ke Review
+    routeName = 'planningActivityReview'
   }
+
+  console.log('📍 Navigating to:', routeName, 'with planning_id:', planning.planning_id)
 
   router.push({
     name: routeName,
-    params: { planning_id: planning.planning_id }
+    params: { planning_id: String(planning.planning_id) }
   })
+}
+
+// Status helpers untuk Planning (hanya 2 status)
+const getPlanningStatusText = (status) => {
+  const statusMap = {
+    'onReview': '⏳ Waiting Review',
+    'approved': '✅ Approved'
+  }
+  return statusMap[status] || '❓ Unknown'
+}
+
+const getPlanningStatusColorClass = (status) => {
+  const colorMap = {
+    'onReview': 'bg-yellow-100 text-yellow-800',
+    'approved': 'bg-green-100 text-green-800'
+  }
+  return colorMap[status] || 'bg-gray-100 text-gray-800'
 }
 
 // Status helpers
@@ -183,24 +205,6 @@ const getStatusColorClass = (dbStatus) => {
     'approved': 'bg-green-100 text-green-800'
   }
   return colorMap[dbStatus] || 'bg-gray-100 text-gray-800'
-}
-
-const getPlanningStatusText = (status) => {
-  const statusMap = {
-    'draft': '📝 Draft',
-    'revision': '🔄 Revision',
-    'approved': '✅ Approved'
-  }
-  return statusMap[status] || '❓ Unknown'
-}
-
-const getPlanningStatusColorClass = (status) => {
-  const colorMap = {
-    'draft': 'bg-gray-100 text-gray-800',
-    'revision': 'bg-red-100 text-red-800',
-    'approved': 'bg-green-100 text-green-800'
-  }
-  return colorMap[status] || 'bg-gray-100 text-gray-800'
 }
 
 const isLoading = computed(() =>
@@ -458,7 +462,7 @@ const getCurrentTime = () => {
               </div>
 
               <router-link 
-                to="/formPlanning"
+                to="/planningActivity"
                 class="bg-gradient-to-r from-[#0071f3] to-[#0060d1] hover:from-[#0060d1] hover:to-[#0050b1] text-white font-semibold px-6 py-2.5 rounded-xl transition-all shadow-md hover:shadow-lg transform hover:-translate-y-0.5 flex items-center gap-2 text-sm"
               >
                 <svg class="w-5 h-5" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512" fill="currentColor">
@@ -517,7 +521,7 @@ const getCurrentTime = () => {
                     <div class="grid grid-cols-1 sm:grid-cols-3 gap-3 mt-4">
                       <div class="bg-gray-50 rounded-lg p-3">
                         <p class="text-xs text-gray-500 font-semibold mb-1">📅 Tanggal</p>
-                        <p class="text-sm font-bold text-gray-900">{{ planning.report_date }}</p>
+                        <p class="text-sm font-bold text-gray-900">{{ planning.planning_date }}</p>
                       </div>
                       <div class="bg-blue-50 rounded-lg p-3">
                         <p class="text-xs text-blue-600 font-semibold mb-1">🆔 Planning ID</p>

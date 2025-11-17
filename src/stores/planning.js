@@ -34,9 +34,12 @@ export const usePlanningStore = defineStore('planning', {
       try {
         const { data, error } = await supabase
           .from('gh_planning_report')
-          .select('*')
-          .order('report_date', { ascending: false })
-          .order('planning_id', { ascending: false })
+          .select(`
+            *,
+            gh_location:location_id(location_id, location),
+            gh_batch:batch_id(batch_id, batch_name)
+          `)
+          .order('planning_id', { ascending: false }) // ✅ Sort by ID descending
 
         if (error) throw error
 
@@ -59,10 +62,14 @@ export const usePlanningStore = defineStore('planning', {
       this.error = null
       
       try {
-        // Fetch planning report
+        // Fetch planning report with relations
         const { data: planningData, error: planningError } = await supabase
           .from('gh_planning_report')
-          .select('*')
+          .select(`
+            *,
+            gh_location:location_id(location_id, location),
+            gh_batch:batch_id(batch_id, batch_name)
+          `)
           .eq('planning_id', planning_id)
           .single()
 
@@ -127,11 +134,11 @@ export const usePlanningStore = defineStore('planning', {
         const { data, error } = await supabase
           .from('gh_planning_report')
           .insert([{
-            report_date: planningData.report_date,
+            planning_date: planningData.planning_date,
             phase_plan: planningData.phase_plan,
             location_id: planningData.location_id,
             batch_id: planningData.batch_id,
-            status: planningData.status || 'draft',
+            status: planningData.status || 'onReview', // ✅ Default onReview
             created_by: planningData.created_by
           }])
           .select()
@@ -161,12 +168,12 @@ export const usePlanningStore = defineStore('planning', {
         const { data, error } = await supabase
           .from('gh_planning_report')
           .update({
-            report_date: planningData.report_date,
+            planning_date: planningData.planning_date,
             phase_plan: planningData.phase_plan,
             location_id: planningData.location_id,
             batch_id: planningData.batch_id,
-            status: planningData.status,
-            updated_at: new Date().toISOString()
+            status: planningData.status
+            // ✅ updated_at will be auto-updated by trigger
           })
           .eq('planning_id', planning_id)
           .select()
@@ -256,8 +263,8 @@ export const usePlanningStore = defineStore('planning', {
             act_name: activityData.act_name,
             coa: activityData.coa,
             manpower: activityData.manpower,
-            order_index: activityData.order_index,
-            updated_at: new Date().toISOString()
+            order_index: activityData.order_index
+            // ✅ updated_at will be auto-updated by trigger
           })
           .eq('activity_id', activity_id)
           .select()
@@ -337,8 +344,8 @@ export const usePlanningStore = defineStore('planning', {
           .update({
             material_name: materialData.material_name,
             qty: materialData.qty,
-            uom: materialData.uom,
-            updated_at: new Date().toISOString()
+            uom: materialData.uom
+            // ✅ updated_at will be auto-updated by trigger
           })
           .eq('material_id', material_id)
           .select()
@@ -388,10 +395,7 @@ export const usePlanningStore = defineStore('planning', {
       try {
         const { data, error } = await supabase
           .from('gh_planning_report')
-          .update({ 
-            status,
-            updated_at: new Date().toISOString()
-          })
+          .update({ status })
           .eq('planning_id', planning_id)
           .select()
           .single()

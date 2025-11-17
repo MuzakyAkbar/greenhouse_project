@@ -1,5 +1,3 @@
-// FormReportActivity.vue - SCRIPT SETUP - Phase dipindah ke Informasi Dasar
-
 <script setup>
 import { ref, onMounted, watch, onUnmounted, computed } from "vue";
 import { supabase } from "@/lib/supabase.js";
@@ -31,6 +29,11 @@ const selectedDate = ref("");
 const selectedLocation = ref("");
 const selectedBatch = ref("");
 const selectedPhase = ref("");
+
+// Planning data state
+const planningData = ref(null);
+const loadingPlanning = ref(false);
+const showPlanningSection = ref(false);
 
 const typeDamages = ref([
   {
@@ -79,8 +82,88 @@ const isSubmitting = ref(false);
 const formatNumber = (n) => new Intl.NumberFormat('id-ID').format(n ?? 0)
 
 // ======================
+// FETCH PLANNING DATA
+// ======================
+const fetchPlanningData = async () => {
+  if (!selectedLocation.value || !selectedBatch.value) {
+    planningData.value = null;
+    showPlanningSection.value = false;
+    return;
+  }
+
+  loadingPlanning.value = true;
+  try {
+    console.log('🔍 Fetching planning data for:', {
+      location: selectedLocation.value,
+      batch: selectedBatch.value,
+      date: selectedDate.value
+    });
+
+    // Fetch planning report dengan activities dan materials
+    const { data, error } = await supabase
+      .from('gh_planning_report')
+      .select(`
+        planning_id,
+        planning_date,
+        phase_plan,
+        status,
+        gh_planning_activity (
+          activity_id,
+          act_name,
+          coa,
+          manpower,
+          order_index,
+          gh_planning_material (
+            material_id,
+            material_name,
+            qty,
+            uom
+          )
+        )
+      `)
+      .eq('location_id', selectedLocation.value)
+      .eq('batch_id', selectedBatch.value)
+      .eq('planning_date', selectedDate.value)
+      .order('planning_id', { ascending: false })
+      .limit(1);
+
+    if (error) {
+      console.error('❌ Error fetching planning:', error);
+      throw error;
+    }
+
+    if (data && data.length > 0) {
+      planningData.value = data[0];
+      showPlanningSection.value = true;
+      
+      // Auto-fill phase dari planning
+      if (planningData.value.phase_plan) {
+        selectedPhase.value = planningData.value.phase_plan;
+      }
+
+      console.log('✅ Planning data loaded:', planningData.value);
+    } else {
+      planningData.value = null;
+      showPlanningSection.value = false;
+      console.log('ℹ️ No planning found for selected date, location, and batch');
+    }
+  } catch (err) {
+    console.error('❌ Error in fetchPlanningData:', err);
+    planningData.value = null;
+    showPlanningSection.value = false;
+  } finally {
+    loadingPlanning.value = false;
+  }
+};
+
+// ======================
 // WATCHERS
 // ======================
+
+// Watch untuk trigger fetch planning data
+watch([selectedLocation, selectedBatch, selectedDate], () => {
+  fetchPlanningData();
+});
 
 // Watch selectedPhase untuk auto-sync ke semua sections
 watch(selectedPhase, (newPhase) => {
@@ -657,6 +740,8 @@ function resetForm() {
   selectedWarehouse.value = null
   selectedBin.value = null
   availableMaterials.value = []
+  planningData.value = null
+  showPlanningSection.value = false
   
   typeDamages.value = [
     {
@@ -690,6 +775,18 @@ function getLocationName(locationId) {
 function getBatchName(batchId) {
   const batch = batches.value.find(b => b.batch_id == batchId);
   return batch ? batch.batch_name : "";
+}
+
+// Format date untuk display
+function formatDate(dateString) {
+  if (!dateString) return '';
+  const date = new Date(dateString);
+  return date.toLocaleDateString('id-ID', { 
+    weekday: 'long', 
+    year: 'numeric', 
+    month: 'long', 
+    day: 'numeric' 
+  });
 }
 
 </script>
@@ -806,6 +903,134 @@ function getBatchName(batchId) {
               </svg>
               Lokasi: {{ getLocationName(selectedLocation) }} | Batch: {{ getBatchName(selectedBatch) }}
             </p>
+          </div>
+        </div>
+      </div>
+
+      <!-- Planning Data Section -->
+      <div v-if="showPlanningSection && planningData" class="mb-8">
+        <h2 class="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-3 flex items-center gap-2">
+          <span class="text-lg">📋</span>
+          Planning Hari Ini
+        </h2>
+        <div class="bg-gradient-to-br from-blue-50 to-indigo-50 rounded-2xl border-2 border-blue-200 shadow-lg p-6">
+          <!-- Planning Header -->
+          <div class="flex items-center justify-between mb-6 pb-4 border-b-2 border-blue-200">
+            <div class="flex items-center gap-3">
+              <div class="w-12 h-12 bg-gradient-to-br from-blue-500 to-indigo-600 rounded-xl flex items-center justify-center text-white">
+                <svg class="w-6 h-6" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 384 512" fill="currentColor">
+                  <path d="M64 0C28.7 0 0 28.7 0 64L0 448c0 35.3 28.7 64 64 64l256 0c35.3 0 64-28.7 64-64l0-288-128 0c-17.7 0-32-14.3-32-32L224 0 64 0zM256 0l0 128 128 0L256 0zM112 256l160 0c8.8 0 16 7.2 16 16s-7.2 16-16 16l-160 0c-8.8 0-16-7.2-16-16s7.2-16 16-16zm0 64l160 0c8.8 0 16 7.2 16 16s-7.2 16-16 16l-160 0c-8.8 0-16-7.2-16-16s7.2-16 16-16zm0 64l160 0c8.8 0 16 7.2 16 16s-7.2 16-16 16l-160 0c-8.8 0-16-7.2-16-16s7.2-16 16-16z"/>
+                </svg>
+              </div>
+              <div>
+                <h3 class="text-xl font-bold text-gray-900">Planning Activities</h3>
+                <p class="text-sm text-gray-600">{{ formatDate(planningData.planning_date) }}</p>
+              </div>
+            </div>
+            <div class="flex items-center gap-2">
+              <span class="px-3 py-1.5 bg-blue-100 text-blue-700 rounded-lg text-sm font-semibold">
+                Phase: {{ planningData.phase_plan }}
+              </span>
+              <span class="px-3 py-1.5 bg-green-100 text-green-700 rounded-lg text-sm font-semibold">
+                {{ planningData.status }}
+              </span>
+            </div>
+          </div>
+
+          <!-- Activities List -->
+          <div class="space-y-4">
+            <div 
+              v-for="(activity, idx) in planningData.gh_planning_activity" 
+              :key="activity.activity_id"
+              class="bg-white rounded-xl border-2 border-blue-100 p-5 hover:shadow-md transition-all"
+            >
+              <!-- Activity Header -->
+              <div class="flex items-start justify-between mb-4">
+                <div class="flex items-start gap-3">
+                  <div class="w-8 h-8 bg-blue-500 rounded-lg flex items-center justify-center text-white font-bold text-sm">
+                    {{ idx + 1 }}
+                  </div>
+                  <div>
+                    <h4 class="font-bold text-gray-900 text-lg">{{ activity.act_name }}</h4>
+                    <div class="flex items-center gap-4 mt-1">
+                      <span class="text-sm text-gray-600">
+                        <span class="font-semibold">CoA:</span> {{ activity.coa || 'N/A' }}
+                      </span>
+                      <span class="text-sm text-gray-600 flex items-center gap-1">
+                        <svg class="w-4 h-4" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512" fill="currentColor">
+                          <path d="M224 256A128 128 0 1 0 224 0a128 128 0 1 0 0 256zm-45.7 48C79.8 304 0 383.8 0 482.3C0 498.7 13.3 512 29.7 512l388.6 0c16.4 0 29.7-13.3 29.7-29.7C448 383.8 368.2 304 269.7 304l-91.4 0z"/>
+                        </svg>
+                        <span class="font-semibold">Manpower:</span> {{ activity.manpower }}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Materials Table -->
+              <div v-if="activity.gh_planning_material && activity.gh_planning_material.length > 0" class="mt-4">
+                <h5 class="text-sm font-bold text-gray-700 mb-3 flex items-center gap-2">
+                  <svg class="w-4 h-4 text-blue-600" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" fill="currentColor">
+                    <path d="M234.5 5.7c13.9-5 29.1-5 43.1 0l192 68.6C495 83.4 512 107.5 512 134.6l0 242.9c0 27-17 51.2-42.5 60.3l-192 68.6c-13.9 5-29.1 5-43.1 0l-192-68.6C17 428.6 0 404.5 0 377.4L0 134.6c0-27 17-51.2 42.5-60.3l192-68.6zM256 66L82.3 128 256 190l173.7-62L256 66zm32 368.6l160-57.1 0-188L288 246.6l0 188z"/>
+                  </svg>
+                  Materials Needed
+                </h5>
+                <div class="bg-gray-50 rounded-lg overflow-hidden border border-gray-200">
+                  <table class="w-full">
+                    <thead class="bg-gray-100">
+                      <tr>
+                        <th class="px-4 py-2 text-left text-xs font-semibold text-gray-700 uppercase">Material</th>
+                        <th class="px-4 py-2 text-center text-xs font-semibold text-gray-700 uppercase">Quantity</th>
+                        <th class="px-4 py-2 text-center text-xs font-semibold text-gray-700 uppercase">Unit</th>
+                      </tr>
+                    </thead>
+                    <tbody class="divide-y divide-gray-200">
+                      <tr v-for="material in activity.gh_planning_material" :key="material.material_id" class="hover:bg-blue-50 transition">
+                        <td class="px-4 py-3 text-sm font-medium text-gray-900">{{ material.material_name }}</td>
+                        <td class="px-4 py-3 text-sm text-center font-semibold text-gray-700">{{ formatNumber(material.qty) }}</td>
+                        <td class="px-4 py-3 text-sm text-center text-gray-600">{{ material.uom }}</td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              <!-- No Materials Message -->
+              <div v-else class="mt-4 bg-gray-50 border border-gray-200 rounded-lg p-3">
+                <p class="text-sm text-gray-500 text-center">Tidak ada material untuk aktivitas ini</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Loading Planning -->
+      <div v-if="loadingPlanning" class="mb-8">
+        <div class="bg-white rounded-2xl border-2 border-gray-200 shadow-sm p-8">
+          <div class="flex items-center justify-center gap-3">
+            <svg class="w-6 h-6 text-blue-600 animate-spin" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" fill="currentColor">
+              <path d="M304 48a48 48 0 1 0 -96 0 48 48 0 1 0 96 0zm0 416a48 48 0 1 0 -96 0 48 48 0 1 0 96 0zM48 304a48 48 0 1 0 0-96 48 48 0 1 0 0 96zm464-48a48 48 0 1 0 -96 0 48 48 0 1 0 96 0zM142.9 437A48 48 0 1 0 75 369.1 48 48 0 1 0 142.9 437zm0-294.2A48 48 0 1 0 75 75a48 48 0 1 0 67.9 67.9zM369.1 437A48 48 0 1 0 437 369.1 48 48 0 1 0 369.1 437z"/>
+            </svg>
+            <span class="text-gray-600 font-medium">Memuat data planning...</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- No Planning Message -->
+      <div v-if="!loadingPlanning && selectedLocation && selectedBatch && !planningData" class="mb-8">
+        <div class="bg-yellow-50 border-2 border-yellow-200 rounded-2xl p-6">
+          <div class="flex items-start gap-3">
+            <svg class="w-6 h-6 text-yellow-600 flex-shrink-0 mt-0.5" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" fill="currentColor">
+              <path d="M256 32c14.2 0 27.3 7.5 34.5 19.8l216 368c7.3 12.4 7.3 27.7 .2 40.1S486.3 480 472 480L40 480c-14.3 0-27.6-7.7-34.7-20.1s-7-27.8 .2-40.1l216-368C228.7 39.5 241.8 32 256 32zm0 128c-13.3 0-24 10.7-24 24l0 112c0 13.3 10.7 24 24 24s24-10.7 24-24l0-112c0-13.3-10.7-24-24-24zm32 224a32 32 0 1 0 -64 0 32 32 0 1 0 64 0z"/>
+            </svg>
+            <div>
+              <h3 class="font-bold text-yellow-800 mb-1">Tidak Ada Planning Untuk Hari Ini</h3>
+              <p class="text-sm text-yellow-700">
+                Tidak ditemukan planning untuk tanggal <span class="font-semibold">{{ formatDate(selectedDate) }}</span> 
+                di lokasi <span class="font-semibold">{{ getLocationName(selectedLocation) }}</span>.
+                Silakan isi form aktivitas secara manual.
+              </p>
+            </div>
           </div>
         </div>
       </div>
