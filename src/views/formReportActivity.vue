@@ -99,7 +99,7 @@ const fetchPlanningData = async () => {
       date: selectedDate.value
     });
 
-    // Fetch planning report dengan activities dan materials
+    // Fetch planning report dengan activities dan materials (hanya yang approved)
     const { data, error } = await supabase
       .from('gh_planning_report')
       .select(`
@@ -124,6 +124,7 @@ const fetchPlanningData = async () => {
       .eq('location_id', selectedLocation.value)
       .eq('batch_id', selectedBatch.value)
       .eq('planning_date', selectedDate.value)
+      .eq('status', 'approved')
       .order('planning_id', { ascending: false })
       .limit(1);
 
