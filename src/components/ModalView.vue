@@ -124,7 +124,7 @@ function resetForm() {
   >
     <!-- Kotak modal -->
     <div
-      class="bg-white rounded-2xl shadow-2xl max-w-lg w-full transform transition-all duration-300 scale-100 border-2 border-gray-100"
+      class="bg-white rounded-2xl shadow-2xl max-w-lg w-full max-h-[90vh] overflow-y-auto transform transition-all duration-300 scale-100 border-2 border-gray-100"
     >
       <!-- Header Modal -->
       <div class="bg-gradient-to-r from-[#0071f3] to-[#0060d1] p-6 rounded-t-2xl relative overflow-hidden">
@@ -246,23 +246,6 @@ function resetForm() {
               v-model.number="qty"
               type="number"
               placeholder="Masukkan jumlah"
-              class="w-full bg-gray-50 border-2 border-gray-200 rounded-xl py-3 px-4 text-gray-900 font-medium focus:outline-none focus:border-[#0071f3] focus:ring-2 focus:ring-[#0071f3] focus:ring-opacity-20 transition hover:border-gray-300"
-              min="0"
-            />
-            <div class="absolute right-4 top-1/2 -translate-y-1/2 text-gray-400 text-sm font-semibold">
-              unit
-            </div>
-          </div>
-        </div>
-
-        <!-- Input Kerusakan -->
-        <div class="space-y-2">
-          <label class="text-sm font-semibold text-gray-700 block">Total Kerusakan</label>
-          <div class="relative">
-            <input
-              v-model.number="damage"
-              type="number"
-              placeholder="Masukkan jumlah kerusakan"
               class="w-full bg-gray-50 border-2 border-gray-200 rounded-xl py-3 px-4 text-gray-900 font-medium focus:outline-none focus:border-[#0071f3] focus:ring-2 focus:ring-[#0071f3] focus:ring-opacity-20 transition hover:border-gray-300"
               min="0"
             />
