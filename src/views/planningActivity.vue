@@ -186,7 +186,7 @@ const clearMaterialCache = () => {
 // ======================
 // HELPER: Update Display untuk Single Material
 // ======================
-const updateMaterialDisplay = (sectionIndex, matIndex, material, usageMap) => {
+const updateMaterialDisplay = (sectionIndex, matIndex, material, usageMap, currentFormUsage) => {
   const usedElement = document.getElementById(`used-${sectionIndex}-${matIndex}`);
   const availableElement = document.getElementById(`available-${sectionIndex}-${matIndex}`);
   
@@ -205,16 +205,36 @@ const updateMaterialDisplay = (sectionIndex, matIndex, material, usageMap) => {
   }
   
   const stockFromOpenbravo = parseFloat(selectedMaterial.stock);
-  const usedQty = usageMap.get(material.material_name) || 0;
-  const availableStock = stockFromOpenbravo - usedQty;
+  const usedQtyFromDB = usageMap.get(material.material_name) || 0;
+  
+  // ✅ Hitung penggunaan dari activity sebelumnya di form ini
+  const usedInPreviousActivities = currentFormUsage.get(material.material_name) || 0;
+  
+  // ✅ Total yang sudah digunakan = dari DB + dari activity sebelumnya
+  const totalUsed = usedQtyFromDB + usedInPreviousActivities;
+  const availableStock = stockFromOpenbravo - totalUsed;
   const uom = material.uom || selectedMaterial.uom;
   
-  usedElement.textContent = `${formatNumber(usedQty)} ${uom}`;
+  // Update display untuk "Sudah digunakan"
+  if (usedInPreviousActivities > 0) {
+    usedElement.innerHTML = `
+      <div class="space-y-0.5">
+        <div>${formatNumber(usedQtyFromDB)} ${uom} <span class="text-xs text-gray-500">(dari DB)</span></div>
+        <div class="text-orange-700">+ ${formatNumber(usedInPreviousActivities)} ${uom} <span class="text-xs">(activity sebelumnya)</span></div>
+        <div class="border-t border-orange-300 pt-0.5 font-semibold">${formatNumber(totalUsed)} ${uom}</div>
+      </div>
+    `;
+  } else {
+    usedElement.textContent = `${formatNumber(usedQtyFromDB)} ${uom}`;
+  }
+  
   availableElement.textContent = `${formatNumber(availableStock)} ${uom}`;
   
-  console.log(`✅ Updated display for ${material.material_name}:`, {
+  console.log(`✅ Updated display for ${material.material_name} (Activity ${sectionIndex + 1}):`, {
     stock: stockFromOpenbravo,
-    used: usedQty,
+    usedFromDB: usedQtyFromDB,
+    usedInPreviousActivities,
+    totalUsed,
     available: availableStock
   });
   
@@ -256,7 +276,7 @@ const updateAllMaterialDisplay = async () => {
   
   console.log('📋 Materials to check:', Array.from(uniqueMaterials));
   
-  // ✅ Fetch usage data in parallel
+  // ✅ Fetch usage data from DB in parallel
   const usagePromises = Array.from(uniqueMaterials).map(async (materialName) => {
     const usedQty = await getUsedMaterialsByLocationAndDate(
       selectedLocation.value,
@@ -269,9 +289,12 @@ const updateAllMaterialDisplay = async () => {
   const usageResults = await Promise.all(usagePromises);
   const usageMap = new Map(usageResults.map(r => [r.materialName, r.usedQty]));
   
-  console.log('📊 Usage map:', Object.fromEntries(usageMap));
+  console.log('📊 Usage map from DB:', Object.fromEntries(usageMap));
   
-  // ✅ Update DOM for each material
+  // ✅ Hitung penggunaan material dari form (akumulatif per activity)
+  const currentFormUsage = new Map();
+  
+  // ✅ Update DOM for each material dengan akumulasi usage
   for (let sectionIndex = 0; sectionIndex < formSections.value.length; sectionIndex++) {
     const section = formSections.value[sectionIndex];
     
@@ -279,10 +302,21 @@ const updateAllMaterialDisplay = async () => {
       const material = section.materials[matIndex];
       
       if (material.material_name) {
-        updateMaterialDisplay(sectionIndex, matIndex, material, usageMap);
+        // Update display dengan data usage yang sudah diakumulasi
+        updateMaterialDisplay(sectionIndex, matIndex, material, usageMap, currentFormUsage);
+        
+        // ✅ Setelah update display, tambahkan qty material ini ke akumulasi
+        if (material.qty && parseFloat(material.qty) > 0) {
+          const currentUsage = currentFormUsage.get(material.material_name) || 0;
+          currentFormUsage.set(material.material_name, currentUsage + parseFloat(material.qty));
+          
+          console.log(`📝 Activity ${sectionIndex + 1} - ${material.material_name}: +${material.qty}, total form usage: ${currentFormUsage.get(material.material_name)}`);
+        }
       }
     }
   }
+  
+  console.log('✅ All displays updated with accumulated usage');
 };
 
 // ======================
@@ -334,11 +368,11 @@ watch(
 );
 
 // ======================
-// WATCHER: Trigger saat material name berubah
+// WATCHER: Trigger saat material name atau qty berubah
 // ======================
 watch(
   () => formSections.value.flatMap(s => 
-    s.materials.map(m => ({ name: m.material_name, uom: m.uom }))
+    s.materials.map(m => ({ name: m.material_name, qty: m.qty, uom: m.uom }))
   ),
   async () => {
     // ✅ Debounce
@@ -873,12 +907,12 @@ const submitPlanning = async () => {
     let errorMessage = "❌ Stock material tidak mencukupi!\n\n";
     
     stockErrors.forEach((error, index) => {
-      errorMessage += `${index + 1}. Activity ${error.sectionIndex}:\n`;
-      errorMessage += `   Material: ${error.materialName}\n`;
-      errorMessage += `   Qty diminta: ${formatNumber(error.requestedQty)} ${error.uom}\n`;
+      errorMessage += `${index + 1}. Material: ${error.materialName}\n`;
+      errorMessage += `   TOTAL qty diminta (semua activity): ${formatNumber(error.totalRequested)} ${error.uom}\n`;
       errorMessage += `   Stock Openbravo: ${formatNumber(error.stockFromOpenbravo)} ${error.uom}\n`;
       errorMessage += `   Sudah digunakan: ${formatNumber(error.usedQty)} ${error.uom}\n`;
-      errorMessage += `   Stock tersedia: ${formatNumber(error.availableStock)} ${error.uom}\n\n`;
+      errorMessage += `   Stock tersedia: ${formatNumber(error.availableStock)} ${error.uom}\n`;
+      errorMessage += `   Digunakan di Activity: ${error.sections.map(s => `#${s.sectionIndex} (${formatNumber(s.qty)} ${error.uom})`).join(', ')}\n\n`;
     });
     
     errorMessage += "Anda akan diarahkan ke halaman Good Movement untuk melakukan transfer stock.";
@@ -903,28 +937,27 @@ const submitPlanning = async () => {
     // ==========================================
     // 1. INSERT ke gh_planning_report
     // ==========================================
-    // Di planningActivity.vue, function submitPlanning()
     const reportPayload = {
-    planning_date: reportDate, // ✅ Gunakan planning_date
-    location_id: Number(selectedLocation.value),
-    batch_id: Number(selectedBatch.value),
-    phase_plan: selectedPhase.value,
-    created_by: "manager",
-    status: "onReview" // ✅ Status awal onReview
-    // ✅ JANGAN set updated_at, biarkan database handle dengan trigger
+      planning_date: reportDate, // ✅ Gunakan planning_date
+      location_id: Number(selectedLocation.value),
+      batch_id: Number(selectedBatch.value),
+      phase_plan: selectedPhase.value,
+      created_by: "manager",
+      status: "onReview" // ✅ Status awal onReview
+      // ✅ JANGAN set updated_at, biarkan database handle dengan trigger
     };
 
     const { data: reportData, error: reportErr } = await supabase
-    .from("gh_planning_report")
-    .insert([reportPayload])
-    .select()
-    .single();
+      .from("gh_planning_report")
+      .insert([reportPayload])
+      .select()
+      .single();
 
-        if (reportErr) throw reportErr;
+    if (reportErr) throw reportErr;
 
-        const planning_id = reportData.planning_id;
-        console.log("🟩 Planning report created:", planning_id);
-        console.log("📅 Report date saved:", reportData.planning_date);
+    const planning_id = reportData.planning_id;
+    console.log("🟩 Planning report created:", planning_id);
+    console.log("📅 Report date saved:", reportData.planning_date);
 
     // ==========================================
     // 2. INSERT ke gh_planning_activity (LOOP)
@@ -1065,20 +1098,6 @@ const filteredBatches = computed(() => {
     (b) => Number(b.location_id) === Number(selectedLocation.value)
   );
 });
-
-watch(selectedLocation, () => {
-  selectedBatch.value = "";
-});
-
-watch(selectedLocation, async (newVal) => {
-  if (!newVal) return;
-
-  const loc = locations.value.find(l => l.location_id == newVal);
-  if (!loc) return;
-
-  await loadWarehouseAndBin(loc.location);
-});
-
 </script>
 
 <template>
