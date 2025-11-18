@@ -81,47 +81,207 @@ const isSubmitting = ref(false);
 const formatNumber = (n) => new Intl.NumberFormat('id-ID').format(n ?? 0)
 
 // ======================
-// FUNGSI UNTUK CEK MATERIAL YANG SUDAH DIGUNAKAN
+// CACHE UNTUK MATERIAL USAGE
+// ======================
+const materialUsageCache = ref(new Map());
+const cacheTimestamp = ref(null);
+const CACHE_DURATION = 30000; // 30 detik
+
+// ======================
+// FUNGSI UNTUK CEK MATERIAL YANG SUDAH DIGUNAKAN (FIXED LOGIC)
 // ======================
 const getUsedMaterialsByLocationAndDate = async (locationId, date, materialName) => {
   try {
-    console.log('🔍 Checking used materials:', { locationId, date, materialName });
+    // ✅ Create cache key
+    const cacheKey = `${locationId}-${date}-${materialName}`;
+    const now = Date.now();
     
-    // Query untuk mendapatkan total material yang sudah digunakan
-    // di lokasi dan tanggal yang sama
+    // ✅ Check cache validity
+    if (cacheTimestamp.value && (now - cacheTimestamp.value) < CACHE_DURATION) {
+      const cached = materialUsageCache.value.get(cacheKey);
+      if (cached !== undefined) {
+        console.log('💾 Using cached data for:', materialName);
+        return cached;
+      }
+    }
+    
+    console.log('🔍 Fetching used materials from DB:', { locationId, date, materialName });
+    
+    // ✅ Ambil waktu saat ini (hari ini jam sekarang)
+    const currentDateTime = new Date();
+    
+    // ✅ Query: Ambil semua material di lokasi ini yang updated_at <= sekarang
+    // Tidak peduli planning_date-nya kapan, yang penting sudah di-input/update sampai sekarang
     const { data, error } = await supabase
       .from('gh_planning_material')
       .select(`
         qty,
         uom,
-        gh_planning_activity!inner(
-          planning_id,
-          gh_planning_report!inner(
-            planning_date,
-            location_id,
-            status
-          )
+        updated_at,
+        created_at,
+        planning_id,
+        gh_planning_report!inner(
+          planning_date,
+          location_id,
+          status
         )
       `)
       .eq('material_name', materialName)
-      .eq('gh_planning_activity.gh_planning_report.location_id', locationId)
-      .eq('gh_planning_activity.gh_planning_report.planning_date', date)
-      .neq('gh_planning_activity.gh_planning_report.status', 'cancelled'); // Exclude cancelled reports
+      .eq('gh_planning_report.location_id', locationId)
+      .neq('gh_planning_report.status', 'cancelled')
+      .lte('updated_at', currentDateTime.toISOString()) // ✅ Yang sudah diinput/update sampai sekarang
+      .order('updated_at', { ascending: false });
 
     if (error) {
       console.error('❌ Error fetching used materials:', error);
       return 0;
     }
 
-    // Hitung total qty yang sudah digunakan
+    // Hitung total qty yang sudah digunakan (untuk lokasi ini, semua tanggal)
     const totalUsed = data.reduce((sum, item) => sum + parseFloat(item.qty || 0), 0);
     
-    console.log(`📊 Total ${materialName} used at location ${locationId} on ${date}:`, totalUsed);
+    // ✅ Log detail dengan breakdown per tanggal
+    if (data.length > 0) {
+      const latestUpdate = data[0].updated_at;
+      const recordCount = data.length;
+      
+      // Group by planning_date untuk detail
+      const byDate = data.reduce((acc, item) => {
+        const planDate = item.gh_planning_report.planning_date;
+        if (!acc[planDate]) acc[planDate] = 0;
+        acc[planDate] += parseFloat(item.qty || 0);
+        return acc;
+      }, {});
+      
+      console.log(`📊 ${materialName} at location ${locationId}:`, {
+        totalUsed,
+        recordCount,
+        latestUpdate,
+        breakdown: byDate
+      });
+    } else {
+      console.log(`📊 ${materialName}: No usage found at location ${locationId}`);
+    }
+    
+    // ✅ Save to cache
+    materialUsageCache.value.set(cacheKey, totalUsed);
+    cacheTimestamp.value = now;
     
     return totalUsed;
   } catch (err) {
     console.error('❌ Error in getUsedMaterialsByLocationAndDate:', err);
     return 0;
+  }
+};
+
+// ======================
+// CLEAR CACHE (dipanggil saat location/date berubah)
+// ======================
+const clearMaterialCache = () => {
+  materialUsageCache.value.clear();
+  cacheTimestamp.value = null;
+  console.log('🗑️ Material usage cache cleared');
+};
+
+// ======================
+// HELPER: Update Display untuk Single Material
+// ======================
+const updateMaterialDisplay = (sectionIndex, matIndex, material, usageMap) => {
+  const usedElement = document.getElementById(`used-${sectionIndex}-${matIndex}`);
+  const availableElement = document.getElementById(`available-${sectionIndex}-${matIndex}`);
+  
+  if (!usedElement || !availableElement) {
+    console.warn(`⚠️ Elements not found for section ${sectionIndex}, material ${matIndex}`);
+    return;
+  }
+  
+  const selectedMaterial = availableMaterials.value.find(
+    (m) => m.material_name === material.material_name
+  );
+  
+  if (!selectedMaterial) {
+    console.warn(`⚠️ Material not found in availableMaterials: ${material.material_name}`);
+    return;
+  }
+  
+  const stockFromOpenbravo = parseFloat(selectedMaterial.stock);
+  const usedQty = usageMap.get(material.material_name) || 0;
+  const availableStock = stockFromOpenbravo - usedQty;
+  const uom = material.uom || selectedMaterial.uom;
+  
+  usedElement.textContent = `${formatNumber(usedQty)} ${uom}`;
+  availableElement.textContent = `${formatNumber(availableStock)} ${uom}`;
+  
+  console.log(`✅ Updated display for ${material.material_name}:`, {
+    stock: stockFromOpenbravo,
+    used: usedQty,
+    available: availableStock
+  });
+  
+  // Color coding
+  if (material.qty && parseFloat(material.qty) > availableStock) {
+    availableElement.classList.add('text-red-600');
+    availableElement.classList.remove('text-green-700');
+  } else {
+    availableElement.classList.add('text-green-700');
+    availableElement.classList.remove('text-red-600');
+  }
+};
+
+// ======================
+// FUNGSI: Update Semua Material Display
+// ======================
+const updateAllMaterialDisplay = async () => {
+  if (!selectedLocation.value || availableMaterials.value.length === 0) {
+    console.log('⏸️ Waiting for location and materials...');
+    return;
+  }
+  
+  console.log('🔄 Updating all material displays...');
+  
+  // ✅ Collect all unique materials
+  const uniqueMaterials = new Set();
+  formSections.value.forEach(section => {
+    section.materials.forEach(material => {
+      if (material.material_name) {
+        uniqueMaterials.add(material.material_name);
+      }
+    });
+  });
+  
+  if (uniqueMaterials.size === 0) {
+    console.log('⏸️ No materials selected');
+    return;
+  }
+  
+  console.log('📋 Materials to check:', Array.from(uniqueMaterials));
+  
+  // ✅ Fetch usage data in parallel
+  const usagePromises = Array.from(uniqueMaterials).map(async (materialName) => {
+    const usedQty = await getUsedMaterialsByLocationAndDate(
+      selectedLocation.value,
+      selectedDate.value,
+      materialName
+    );
+    return { materialName, usedQty };
+  });
+  
+  const usageResults = await Promise.all(usagePromises);
+  const usageMap = new Map(usageResults.map(r => [r.materialName, r.usedQty]));
+  
+  console.log('📊 Usage map:', Object.fromEntries(usageMap));
+  
+  // ✅ Update DOM for each material
+  for (let sectionIndex = 0; sectionIndex < formSections.value.length; sectionIndex++) {
+    const section = formSections.value[sectionIndex];
+    
+    for (let matIndex = 0; matIndex < section.materials.length; matIndex++) {
+      const material = section.materials[matIndex];
+      
+      if (material.material_name) {
+        updateMaterialDisplay(sectionIndex, matIndex, material, usageMap);
+      }
+    }
   }
 };
 
@@ -164,11 +324,6 @@ watch(
           if (selectedMaterial) {
             material.uom = selectedMaterial.uom || "";
           }
-          
-          console.log("🔍 Auto-fill UoM:", {
-            material_name: material.material_name,
-            uom: material.uom
-          });
         } else {
           material.uom = "";
         }
@@ -178,56 +333,55 @@ watch(
   { deep: true }
 );
 
-// Watcher untuk validasi stock real-time dan update display
+// ======================
+// WATCHER: Trigger saat material name berubah
+// ======================
 watch(
-  [formSections, selectedLocation, selectedDate],
+  () => formSections.value.flatMap(s => 
+    s.materials.map(m => ({ name: m.material_name, uom: m.uom }))
+  ),
   async () => {
-    if (!selectedLocation.value || !selectedDate.value) return;
-    
-    // Update display untuk setiap material
-    for (let sectionIndex = 0; sectionIndex < formSections.value.length; sectionIndex++) {
-      const section = formSections.value[sectionIndex];
-      
-      for (let matIndex = 0; matIndex < section.materials.length; matIndex++) {
-        const material = section.materials[matIndex];
-        
-        if (material.material_name) {
-          const usedElement = document.getElementById(`used-${sectionIndex}-${matIndex}`);
-          const availableElement = document.getElementById(`available-${sectionIndex}-${matIndex}`);
-          
-          if (usedElement && availableElement) {
-            const selectedMaterial = availableMaterials.value.find(
-              (m) => m.material_name === material.material_name
-            );
-            
-            if (selectedMaterial) {
-              const stockFromOpenbravo = parseFloat(selectedMaterial.stock);
-              const usedQty = await getUsedMaterialsByLocationAndDate(
-                selectedLocation.value,
-                selectedDate.value,
-                material.material_name
-              );
-              const availableStock = stockFromOpenbravo - usedQty;
-              
-              usedElement.textContent = `${formatNumber(usedQty)} ${material.uom}`;
-              availableElement.textContent = `${formatNumber(availableStock)} ${material.uom}`;
-              
-              // Change color based on availability
-              if (material.qty && parseFloat(material.qty) > availableStock) {
-                availableElement.classList.add('text-red-600');
-                availableElement.classList.remove('text-green-700');
-              } else {
-                availableElement.classList.add('text-green-700');
-                availableElement.classList.remove('text-red-600');
-              }
-            }
-          }
-        }
-      }
+    // ✅ Debounce
+    if (window.materialUpdateTimeout) {
+      clearTimeout(window.materialUpdateTimeout);
     }
+    
+    window.materialUpdateTimeout = setTimeout(async () => {
+      await updateAllMaterialDisplay();
+    }, 300);
   },
   { deep: true }
 );
+
+watch(selectedLocation, () => {
+  selectedBatch.value = "";
+  clearMaterialCache();
+});
+
+watch(selectedLocation, async (newVal) => {
+  if (!newVal) return;
+
+  const loc = locations.value.find(l => l.location_id == newVal);
+  if (!loc) return;
+
+  await loadWarehouseAndBin(loc.location);
+});
+
+watch(selectedDate, () => {
+  clearMaterialCache();
+  // ✅ Trigger update display setelah date berubah
+  setTimeout(() => updateAllMaterialDisplay(), 500);
+});
+
+// ✅ Trigger saat availableMaterials selesai loading
+watch(availableMaterials, (newMaterials) => {
+  if (newMaterials.length > 0) {
+    console.log('✅ Materials loaded, triggering display update...');
+    clearMaterialCache();
+    // ✅ Trigger update jika sudah ada material terpilih
+    setTimeout(() => updateAllMaterialDisplay(), 500);
+  }
+});
 
 // ======================
 // LIFECYCLE HOOKS
@@ -339,28 +493,23 @@ const loadMaterialsByBin = async (binId) => {
   try {
     console.log('📦 Loading materials for bin:', binId)
 
-    // First, try WITHOUT _selectedProperties to see full data structure
     const materialsRes = await openbravoApi.get(
       '/org.openbravo.service.json.jsonrest/MaterialMgmtStorageDetail',
       {
         params: {
           _where: `storageBin.id='${binId}' AND quantityOnHand > 0`
-          // ✅ Remove _selectedProperties to get full object
         }
       }
     )
 
     const rows = materialsRes?.data?.response?.data || []
     
-    // ✅ DEBUG: Log first item with full structure
     if (rows.length > 0) {
       console.log('📊 Full raw material data (first item):', JSON.stringify(rows[0], null, 2))
     }
     console.log('📊 Total materials found:', rows.length)
 
-    // ✅ Enhanced mapping with multiple fallback options
     availableMaterials.value = rows.map((r) => {
-      // Try different possible field names for product ID
       const productId = 
         r.product?.id || 
         r.product || 
@@ -368,7 +517,6 @@ const loadMaterialsByBin = async (binId) => {
         r['product$id'] ||
         r.productId
 
-      // Try different possible field names for product name
       const productName = 
         r.product?.name || 
         r['product$_identifier'] || 
@@ -378,7 +526,6 @@ const loadMaterialsByBin = async (binId) => {
         r._identifier ||
         '(Tanpa Nama Produk)'
       
-      // Try different possible field names for UOM ID
       const uomId = 
         r.uOM?.id || 
         r.uOM || 
@@ -386,7 +533,6 @@ const loadMaterialsByBin = async (binId) => {
         r['uOM$id'] ||
         r.uomId
 
-      // Try different possible field names for UOM name
       const uomName = 
         r.uOM?.name || 
         r['uOM$_identifier'] || 
@@ -395,7 +541,6 @@ const loadMaterialsByBin = async (binId) => {
         r.uomName ||
         'Unit'
       
-      // Try different possible field names for stock quantity
       const stock = parseFloat(
         r.quantityOnHand || 
         r.qtyonhand || 
@@ -423,7 +568,6 @@ const loadMaterialsByBin = async (binId) => {
 
     console.log(`✅ Loaded ${availableMaterials.value.length} materials:`, availableMaterials.value)
 
-    // ✅ Alert if no materials found
     if (availableMaterials.value.length === 0) {
       console.warn('⚠️ No materials found with stock > 0 for this bin')
     }
@@ -584,7 +728,7 @@ function addFormSection() {
 }
 
 // ======================
-// VALIDATION FUNCTIONS (ENHANCED)
+// VALIDATION FUNCTIONS (ENHANCED & OPTIMIZED)
 // ======================
 const validateMaterialStock = async () => {
   if (!selectedLocation.value || !selectedDate.value) {
@@ -594,57 +738,89 @@ const validateMaterialStock = async () => {
 
   const errors = [];
   
-  // Proses setiap section
-  for (let sectionIndex = 0; sectionIndex < formSections.value.length; sectionIndex++) {
-    const section = formSections.value[sectionIndex];
-    
-    // Proses setiap material dalam section
-    for (let matIndex = 0; matIndex < section.materials.length; matIndex++) {
-      const material = section.materials[matIndex];
-      
+  // ✅ Collect all unique materials with their total requested qty
+  const materialRequests = new Map();
+  
+  formSections.value.forEach((section, sectionIndex) => {
+    section.materials.forEach((material, matIndex) => {
       if (material.material_name && material.qty) {
-        // 1. Cari material dari Openbravo
-        const selectedMaterial = availableMaterials.value.find(
-          (m) => m.material_name === material.material_name
-        );
+        const key = material.material_name;
+        const requestedQty = parseFloat(material.qty);
         
-        if (selectedMaterial) {
-          const requestedQty = parseFloat(material.qty);
-          const stockFromOpenbravo = parseFloat(selectedMaterial.stock);
-          
-          // 2. Hitung material yang sudah digunakan di lokasi dan tanggal yang sama
-          const usedQty = await getUsedMaterialsByLocationAndDate(
-            selectedLocation.value,
-            selectedDate.value,
-            material.material_name
-          );
-          
-          // 3. Hitung available stock = stock openbravo - yang sudah digunakan
-          const availableStock = stockFromOpenbravo - usedQty;
-          
-          console.log(`📊 Stock calculation for ${material.material_name}:`, {
-            stockFromOpenbravo,
-            usedQty,
-            availableStock,
-            requestedQty
+        if (!materialRequests.has(key)) {
+          materialRequests.set(key, {
+            materialName: material.material_name,
+            uom: material.uom,
+            totalRequested: 0,
+            sections: []
           });
-          
-          // 4. Validasi: requested qty tidak boleh melebihi available stock
-          if (requestedQty > availableStock) {
-            errors.push({
-              sectionIndex: sectionIndex + 1,
-              materialName: material.material_name,
-              requestedQty: requestedQty,
-              stockFromOpenbravo: stockFromOpenbravo,
-              usedQty: usedQty,
-              availableStock: availableStock,
-              uom: material.uom
-            });
-          }
         }
+        
+        const data = materialRequests.get(key);
+        data.totalRequested += requestedQty; // ✅ Tambahkan ke total
+        data.sections.push({
+          sectionIndex: sectionIndex + 1,
+          matIndex,
+          qty: requestedQty
+        });
       }
+    });
+  });
+  
+  // ✅ Validate each unique material (parallel processing)
+  const validationPromises = Array.from(materialRequests.entries()).map(async ([materialName, data]) => {
+    // 1. Cari material dari Openbravo
+    const selectedMaterial = availableMaterials.value.find(
+      (m) => m.material_name === materialName
+    );
+    
+    if (!selectedMaterial) return null;
+    
+    const stockFromOpenbravo = parseFloat(selectedMaterial.stock);
+    
+    // 2. Hitung material yang sudah digunakan
+    const usedQty = await getUsedMaterialsByLocationAndDate(
+      selectedLocation.value,
+      selectedDate.value,
+      materialName
+    );
+    
+    // 3. Hitung available stock
+    const availableStock = stockFromOpenbravo - usedQty;
+    
+    // ✅ 4. Check TOTAL REQUESTED vs AVAILABLE STOCK
+    console.log(`🔍 Validating ${materialName}:`, {
+      totalRequested: data.totalRequested,
+      availableStock,
+      sections: data.sections.length
+    });
+    
+    if (data.totalRequested > availableStock) {
+      // ❌ Total permintaan melebihi stock tersedia
+      return {
+        materialName: data.materialName,
+        totalRequested: data.totalRequested,
+        stockFromOpenbravo,
+        usedQty,
+        availableStock,
+        uom: data.uom,
+        sections: data.sections // Semua section yang pakai material ini
+      };
     }
-  }
+    
+    return null; // ✅ Stock cukup
+  });
+  
+  const results = await Promise.all(validationPromises);
+  
+  // Flatten results (filter null)
+  results.forEach(result => {
+    if (result) {
+      errors.push(result);
+    }
+  });
+  
+  console.log('✅ Validation completed:', errors.length === 0 ? 'All materials available' : `${errors.length} materials insufficient`);
   
   return errors;
 };
@@ -728,27 +904,27 @@ const submitPlanning = async () => {
     // 1. INSERT ke gh_planning_report
     // ==========================================
     // Di planningActivity.vue, function submitPlanning()
-const reportPayload = {
-  planning_date: reportDate, // ✅ Gunakan planning_date
-  location_id: Number(selectedLocation.value),
-  batch_id: Number(selectedBatch.value),
-  phase_plan: selectedPhase.value,
-  created_by: "manager",
-  status: "onReview" // ✅ Status awal onReview
-  // ✅ JANGAN set updated_at, biarkan database handle dengan trigger
-};
+    const reportPayload = {
+    planning_date: reportDate, // ✅ Gunakan planning_date
+    location_id: Number(selectedLocation.value),
+    batch_id: Number(selectedBatch.value),
+    phase_plan: selectedPhase.value,
+    created_by: "manager",
+    status: "onReview" // ✅ Status awal onReview
+    // ✅ JANGAN set updated_at, biarkan database handle dengan trigger
+    };
 
-const { data: reportData, error: reportErr } = await supabase
-  .from("gh_planning_report")
-  .insert([reportPayload])
-  .select()
-  .single();
+    const { data: reportData, error: reportErr } = await supabase
+    .from("gh_planning_report")
+    .insert([reportPayload])
+    .select()
+    .single();
 
-    if (reportErr) throw reportErr;
+        if (reportErr) throw reportErr;
 
-    const planning_id = reportData.planning_id;
-    console.log("🟩 Planning report created:", planning_id);
-    console.log("📅 Report date saved:", reportData.planning_date);
+        const planning_id = reportData.planning_id;
+        console.log("🟩 Planning report created:", planning_id);
+        console.log("📅 Report date saved:", reportData.planning_date);
 
     // ==========================================
     // 2. INSERT ke gh_planning_activity (LOOP)
@@ -793,7 +969,8 @@ const { data: reportData, error: reportErr } = await supabase
 
       if (validMaterials.length > 0) {
         const materialPayloads = validMaterials.map((m) => ({
-          activity_id,
+          planning_id,   // ✅ Tambahkan planning_id
+          activity_id,   // ✅ Tetap simpan untuk referensi
           material_name: m.material_name,
           qty: parseFloat(m.qty),
           uom: m.uom || null,
