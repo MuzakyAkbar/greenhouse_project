@@ -340,6 +340,63 @@ const loadMaterialsByBin = async (binId) => {
 }
 
 // ======================
+// GET MATERIAL PRICE FROM OPENBRAVO
+// ======================
+const getMaterialPrice = async (materialName) => {
+  try {
+    console.log('💰 Fetching price for:', materialName);
+
+    // Strategi 1: Coba cari berdasarkan product dulu
+    const stockItem = availableMaterials.value.find(
+      m => m.material_name === materialName
+    );
+
+    if (!stockItem || !stockItem.productId) {
+      console.warn(`⚠️ Product ID not found for: ${materialName}`);
+      return 0;
+    }
+
+    console.log(`   - Product ID: ${stockItem.productId}`);
+
+    // Get costing data untuk product ini
+    const costingRes = await openbravoApi.get(
+      '/org.openbravo.service.json.jsonrest/MaterialMgmtCosting',
+      {
+        params: {
+          _where: `product='${stockItem.productId}'`,
+          _orderBy: 'updated desc',
+          _maxResults: 50
+        }
+      }
+    );
+
+    const costings = costingRes?.data?.response?.data || [];
+    
+    console.log(`   - Found ${costings.length} costing records`);
+    
+    if (costings.length > 0) {
+      // Ambil harga yang paling baru (sudah diorder by updated desc)
+      const latestCosting = costings[0];
+      const price = parseFloat(latestCosting.price) || 0;
+      
+      console.log(`✅ Price found for ${materialName}:`, price);
+      console.log('   - Identifier:', latestCosting._identifier);
+      console.log('   - Updated:', latestCosting.updated);
+      console.log('   - Cost Type:', latestCosting.costType);
+      
+      return price;
+    } else {
+      console.warn(`⚠️ No costing data found for material: ${materialName}`);
+      return 0;
+    }
+  } catch (err) {
+    console.error(`❌ Error fetching price for ${materialName}:`, err);
+    console.error('   - Error details:', err.response?.data || err.message);
+    return 0;
+  }
+};
+
+// ======================
 // QR SCANNER FUNCTIONS
 // ======================
 const startScanner = async () => {
@@ -667,7 +724,7 @@ const submitActivityReport = async () => {
       const activity_id = activityData.activity_id;
       console.log("✅ Activity created with ID:", activity_id);
 
-      // 4. CREATE MATERIAL_USED
+      // 4. CREATE MATERIAL_USED WITH PRICE
       console.log("🔍 CHECKING MATERIALS FOR ACTIVITY:", activity_id);
       console.log("   - section.materials:", section.materials);
       
@@ -683,14 +740,25 @@ const submitActivityReport = async () => {
         console.log("   - Valid materials count:", validMaterials.length);
 
         if (validMaterials.length > 0) {
-          const materialPayloads = validMaterials.map(mat => ({
-            activity_id,
-            material_name: mat.material_name,
-            qty: parseFloat(mat.qty),
-            uom: mat.uom || null
-          }));
+          // Fetch prices untuk semua materials
+          const materialPayloads = await Promise.all(
+            validMaterials.map(async (mat) => {
+              const qty = parseFloat(mat.qty);
+              const unitPrice = await getMaterialPrice(mat.material_name);
+              const totalPrice = qty * unitPrice;
 
-          console.log("📦 INSERTING MATERIAL USED RECORDS:", JSON.stringify(materialPayloads, null, 2));
+              return {
+                activity_id,
+                material_name: mat.material_name,
+                qty: qty,
+                uom: mat.uom || null,
+                unit_price: unitPrice,
+                total_price: totalPrice
+              };
+            })
+          );
+
+          console.log("📦 INSERTING MATERIAL USED RECORDS WITH PRICES:", JSON.stringify(materialPayloads, null, 2));
 
           const { data: matData, error: matErr } = await supabase
             .from('gh_material_used')
@@ -703,7 +771,7 @@ const submitActivityReport = async () => {
             throw matErr;
           }
 
-          console.log(`✅ ${matData.length} Material used record(s) created`);
+          console.log(`✅ ${matData.length} Material used record(s) created with prices`);
           console.log("   - Created records:", JSON.stringify(matData, null, 2));
         } else {
           console.log("⚠️ NO VALID MATERIALS to insert for activity:", activity_id);

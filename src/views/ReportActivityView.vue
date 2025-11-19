@@ -112,6 +112,37 @@ const formatDateTime = (dateStr) => {
   })
 }
 
+// Helper functions untuk format harga
+const formatNumber = (value) => {
+  if (!value && value !== 0) return '0'
+  return Number(value).toLocaleString('id-ID', {
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 2
+  })
+}
+
+const formatCurrency = (value) => {
+  if (!value && value !== 0) return 'Rp 0'
+  return 'Rp ' + Number(value).toLocaleString('id-ID', {
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 2
+  })
+}
+
+const calculateActivityTotal = (materials) => {
+  if (!materials || materials.length === 0) return 0
+  return materials.reduce((sum, mat) => sum + (Number(mat.total_price) || 0), 0)
+}
+
+const calculateReportTotal = () => {
+  if (!currentReport.value?.activities) return 0
+  
+  return currentReport.value.activities.reduce((sum, activity) => {
+    if (!activity.materials) return sum
+    return sum + calculateActivityTotal(activity.materials)
+  }, 0)
+}
+
 // ✅ PERBAIKAN: Fungsi printReport diperbarui
 const printReport = async () => {
   const loadingText = document.createElement('div')
@@ -409,39 +440,92 @@ const printReport = async () => {
                 </div>
 
                 <div v-if="activity.materials && activity.materials.length > 0" class="bg-blue-50 rounded-xl p-5 border-2 border-blue-200">
-                  <h4 class="text-base font-bold text-blue-900 flex items-center gap-2 mb-4">
-                    <span class="text-lg">📦</span>
-                    Material yang Digunakan ({{ activity.materials.length }})
-                  </h4>
-                  <div class="space-y-3">
-                    <div
-                      v-for="(mat) in activity.materials"
-                      :key="mat.material_used_id"
-                      class="flex items-center justify-between bg-white rounded-lg p-4 border border-blue-200"
-                    >
-                      <div class="flex-1">
-                        <p class="font-semibold text-gray-900">{{ mat.material_name }}</p>
+                <h4 class="text-base font-bold text-blue-900 flex items-center gap-2 mb-4">
+                  <span class="text-lg">📦</span>
+                  Material yang Digunakan ({{ activity.materials.length }})
+                </h4>
+                
+                <!-- Table untuk tampilan desktop -->
+                <div class="hidden md:block overflow-x-auto">
+                  <table class="w-full text-sm">
+                    <thead>
+                      <tr class="border-b-2 border-blue-300">
+                        <th class="text-left py-2 px-3 font-semibold text-blue-900">Material</th>
+                        <th class="text-right py-2 px-3 font-semibold text-blue-900">Qty</th>
+                        <th class="text-center py-2 px-3 font-semibold text-blue-900">UOM</th>
+                        <th class="text-right py-2 px-3 font-semibold text-blue-900">Unit Price</th>
+                        <th class="text-right py-2 px-3 font-semibold text-blue-900">Total</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr
+                        v-for="mat in activity.materials"
+                        :key="mat.material_used_id"
+                        class="border-b border-blue-200 bg-white hover:bg-blue-50 transition"
+                      >
+                        <td class="py-3 px-3 font-semibold text-gray-900">
+                          {{ mat.material_name }}
+                        </td>
+                        <td class="py-3 px-3 text-right font-semibold text-gray-900">
+                          {{ formatNumber(mat.qty) }}
+                        </td>
+                        <td class="py-3 px-3 text-center text-gray-600">
+                          {{ mat.uom }}
+                        </td>
+                        <td class="py-3 px-3 text-right text-gray-700">
+                          {{ formatCurrency(mat.unit_price || 0) }}
+                        </td>
+                        <td class="py-3 px-3 text-right font-bold text-blue-700">
+                          {{ formatCurrency(mat.total_price || 0) }}
+                        </td>
+                      </tr>
+                    </tbody>
+                    <tfoot>
+                      <tr class="border-t-2 border-blue-300 bg-blue-100">
+                        <td colspan="4" class="py-3 px-3 text-right font-bold text-blue-900">
+                          Subtotal:
+                        </td>
+                        <td class="py-3 px-3 text-right font-bold text-green-700 text-base">
+                          {{ formatCurrency(calculateActivityTotal(activity.materials)) }}
+                        </td>
+                      </tr>
+                    </tfoot>
+                  </table>
+                </div>
+
+                <!-- Card layout untuk mobile -->
+                <div class="md:hidden space-y-3">
+                  <div
+                    v-for="mat in activity.materials"
+                    :key="mat.material_used_id"
+                    class="bg-white rounded-lg p-4 border border-blue-200"
+                  >
+                    <p class="font-semibold text-gray-900 mb-3">{{ mat.material_name }}</p>
+                    <div class="grid grid-cols-2 gap-2 text-sm">
+                      <div>
+                        <span class="text-gray-600">Qty:</span>
+                        <span class="font-semibold ml-1">{{ formatNumber(mat.qty) }} {{ mat.uom }}</span>
                       </div>
-                      <div class="flex items-center gap-2">
-                        <span class="text-lg font-bold text-blue-700">{{ mat.qty }}</span>
-                        <span class="text-sm text-blue-600">{{ mat.uom }}</span>
+                      <div class="text-right">
+                        <span class="text-gray-600">Unit:</span>
+                        <span class="font-semibold ml-1">{{ formatCurrency(mat.unit_price || 0) }}</span>
+                      </div>
+                      <div class="col-span-2 pt-2 border-t border-gray-200">
+                        <span class="text-gray-600">Total:</span>
+                        <span class="font-bold text-blue-700 ml-1 text-base">{{ formatCurrency(mat.total_price || 0) }}</span>
                       </div>
                     </div>
                   </div>
+                  
+                  <!-- Subtotal untuk mobile -->
+                  <div class="bg-blue-100 rounded-lg p-4 border-2 border-blue-300">
+                    <div class="flex justify-between items-center">
+                      <span class="font-bold text-blue-900">Subtotal:</span>
+                      <span class="font-bold text-green-700 text-lg">{{ formatCurrency(calculateActivityTotal(activity.materials)) }}</span>
+                    </div>
+                  </div>
                 </div>
-
-                <div v-if="activity.approved_at" class="bg-green-50 rounded-lg p-4 border-2 border-green-200">
-                  <p class="text-xs text-green-600 font-semibold mb-2 flex items-center gap-2">
-                    <svg class="w-4 h-4" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512" fill="currentColor">
-                      <path d="M438.6 105.4c12.5 12.5 12.5 32.8 0 45.3l-256 256c-12.5 12.5-32.8 12.5-45.3 0l-128-128c-12.5-12.5-12.5-32.8 0-45.3s32.8-12.5 45.3 0L160 338.7 393.4 105.4c12.5-12.5 32.8-12.5 45.3 0z"/>
-                    </svg>
-                    Aktivitas Disetujui
-                  </p>
-                  <p class="text-sm text-green-900">
-                    <strong>By:</strong> {{ activity.approved_by }}<br>
-                    <strong>At:</strong> {{ formatDateTime(activity.approved_at) }}
-                  </p>
-                </div>
+              </div>
               </div>
             </div>
           </div>
@@ -461,6 +545,29 @@ const printReport = async () => {
                   <p><strong>Tanggal approval:</strong> {{ formatDateTime(currentReport.approved_at) }}</p>
                   <p><strong>Report ID:</strong> #{{ currentReport.report_id }}</p>
                 </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Grand Total Material Cost -->
+        <div v-if="currentReport.activities && currentReport.activities.some(a => a.materials && a.materials.length > 0)" class="mb-8 pdf-avoid-break-inside">
+          <h2 class="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-3">💰 Total Biaya Material</h2>
+          <div class="bg-gradient-to-br from-green-50 to-emerald-50 rounded-2xl border-2 border-green-200 shadow-sm p-6">
+            <div class="flex items-center justify-between">
+              <div class="flex items-center gap-4">
+                <div class="w-12 h-12 bg-green-500 rounded-xl flex items-center justify-center text-white text-2xl flex-shrink-0">
+                  💰
+                </div>
+                <div>
+                  <p class="text-sm text-green-600 font-semibold mb-1">Grand Total Material Cost</p>
+                  <p class="text-xs text-green-700">Total biaya semua material yang digunakan</p>
+                </div>
+              </div>
+              <div class="text-right">
+                <p class="text-3xl font-bold text-green-700">
+                  {{ formatCurrency(calculateReportTotal()) }}
+                </p>
               </div>
             </div>
           </div>

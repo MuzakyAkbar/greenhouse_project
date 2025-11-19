@@ -357,18 +357,17 @@ const initFaseChart = async () => {
   });
 };
 
-// Chart 2: Kepemilikan G2 (Pie Chart)
+// Chart 2: Distribusi Kepemilikan Kentang (Pie Chart)
 const initKepemilikanChart = async () => {
   const canvas = document.getElementById('kepemilikanChart');
   if (!canvas) return;
 
-  // Ambil data produksi G2 berdasarkan owner
+  // Ambil semua data produksi kentang
   const { data: productionData } = await supabase
     .from("gh_production")
-    .select("owner, qty")
-    .ilike("category", "%g2%");
+    .select("owner, qty, category");
 
-  // Aggregate berdasarkan owner
+  // Aggregate berdasarkan owner untuk semua kategori kentang
   const ownerData = {};
   productionData?.forEach(item => {
     const owner = item.owner || 'Tidak Diketahui';
@@ -378,7 +377,7 @@ const initKepemilikanChart = async () => {
 
   const labels = Object.keys(ownerData);
   const data = Object.values(ownerData);
-  const colors = ['#0071f3', '#00a8e8', '#ff6b6b', '#4ecdc4', '#ffd93d'];
+  const colors = ['#0071f3', '#00a8e8', '#ff6b6b', '#4ecdc4', '#ffd93d', '#a29bfe'];
 
   chartData.value.kepemilikanChart = new Chart(canvas, {
     type: 'pie',
@@ -401,7 +400,7 @@ const initKepemilikanChart = async () => {
         },
         title: {
           display: true,
-          text: 'Distribusi Kepemilikan G2',
+          text: 'Distribusi Kepemilikan Kentang',
           font: { size: 16, weight: 'bold' }
         },
         tooltip: {
@@ -528,6 +527,20 @@ const initPenjualanChart = async () => {
   });
 };
 
+// Helper function untuk menampilkan batch
+const getBatchesDisplay = (locationId) => {
+  const batches = locationBatches.value[locationId] || []
+  if (batches.length === 0) return 'Tidak ada batch'
+  if (batches.length <= 2) {
+    return batches.map(b => b.batch_name).join(', ')
+  }
+  return batches.slice(0, 2).map(b => b.batch_name).join(', ') + ', ...'
+}
+
+const getBatchCount = (locationId) => {
+  return locationBatches.value[locationId]?.length || 0
+}
+
 </script>
 
 <template>
@@ -588,7 +601,7 @@ const initPenjualanChart = async () => {
             </span>
           </button>
           <router-link
-            to="/location"
+            to="/add-location"
             class="bg-gradient-to-r from-gray-700 to-gray-800 hover:from-gray-800 hover:to-gray-900 text-white font-medium px-5 py-3 rounded-xl transition-all text-sm shadow-md hover:shadow-lg transform hover:-translate-y-0.5 inline-flex items-center"
           >
             📍 Add Location & Batch
@@ -703,7 +716,7 @@ const initPenjualanChart = async () => {
         <canvas id="penjualanChart"></canvas>
       </div>
 
-      <!-- Batch Cards -->
+      <!-- Location Cards dengan Batch List -->
       <div class="mb-8">
         <h2 class="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-3">Data Setiap Location</h2>
       </div>
@@ -711,38 +724,63 @@ const initPenjualanChart = async () => {
         <div
           v-for="loc in locationList"
           :key="loc.location_id"
-          class="group bg-white rounded-2xl border-2 border-gray-100 p-6 hover:border-[#0071f3] hover:shadow-xl transition-all transform hover:-translate-y-1"
+          class="bg-white rounded-2xl border-2 border-gray-100 hover:border-[#0071f3] hover:shadow-xl transition-all"
         >
-          <div class="flex items-start justify-between mb-4">
-            <h3 class="text-lg font-bold text-gray-900 flex-1">{{ loc.location }}</h3>
-            <div class="w-12 h-12 bg-gradient-to-br from-[#0071f3] to-[#8FABD4] rounded-xl flex items-center justify-center text-white text-xl">
-              📍
-            </div>
-          </div>
-
-          <div class="space-y-3 mb-6">
-            <div class="bg-gray-50 px-3 py-2 rounded-lg">
-              <span class="text-gray-600 font-medium block mb-1">Batch</span>
-
-              <div v-if="locationBatches[loc.location_id]?.length > 0">
-                <p 
-                  v-for="b in locationBatches[loc.location_id]" 
-                  :key="b.batch_id"
-                  class="text-sm font-semibold text-gray-900"
-                >
-                  • {{ b.batch_name }}
-                </p>
+          <!-- Header Location -->
+          <div class="p-6 border-b border-gray-100">
+            <div class="flex items-start justify-between">
+              <div class="flex-1">
+                <h3 class="text-lg font-bold text-gray-900 mb-1">{{ loc.location }}</h3>
+                <p class="text-xs text-gray-500">{{ getBatchCount(loc.location_id) }} Batch</p>
               </div>
-              <p v-else class="text-sm text-gray-500 italic">Tidak ada batch</p>
+              <div class="w-12 h-12 bg-gradient-to-br from-[#0071f3] to-[#8FABD4] rounded-xl flex items-center justify-center text-white text-xl flex-shrink-0">
+                📍
+              </div>
             </div>
           </div>
 
-          <button
-            class="w-full bg-gradient-to-r from-[#0071f3] to-[#0060d1] text-white py-3 rounded-xl font-semibold hover:shadow-lg transition-all text-sm"
-            @click="router.push(`/location/${loc.location_id}`)"
-          >
-            Lihat Detail →
-          </button>
+          <!-- Batch List -->
+          <div class="p-4">
+            <div v-if="getBatchCount(loc.location_id) === 0" class="text-center py-8 text-gray-400 text-sm">
+              Belum ada batch
+            </div>
+            <div v-else class="space-y-3">
+              <div
+                v-for="batch in locationBatches[loc.location_id]"
+                :key="batch.batch_id"
+                class="bg-gray-50 rounded-lg p-4 hover:bg-blue-50 transition-all group/batch"
+              >
+                <div class="flex items-start justify-between mb-3">
+                  <div class="flex-1">
+                    <h4 class="font-semibold text-gray-900 text-sm mb-1">{{ batch.batch_name }}</h4>
+                    <p class="text-xs text-gray-500">
+                      {{ batch.tanggal_mulai ? new Date(batch.tanggal_mulai).toLocaleDateString('id-ID') : 'Tanggal tidak tersedia' }}
+                    </p>
+                  </div>
+                  <div class="w-10 h-10 bg-gradient-to-br from-[#0071f3] to-[#8FABD4] rounded-lg flex items-center justify-center text-white font-bold text-sm flex-shrink-0">
+                    {{ batch.batch_name?.charAt(0) || 'B' }}
+                  </div>
+                </div>
+                
+                <button
+                  @click="router.push(`/batch/${batch.batch_id}`)"
+                  class="w-full bg-gradient-to-r from-[#0071f3] to-[#0060d1] text-white py-2.5 rounded-lg font-semibold hover:shadow-md transition-all text-xs group-hover/batch:shadow-lg"
+                >
+                  Lihat Detail Batch →
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <!-- Footer Button untuk Lihat Detail Lokasi -->
+          <div class="p-4 pt-0">
+            <button
+              class="w-full bg-white hover:bg-gray-50 text-[#0071f3] py-3 rounded-xl font-semibold border-2 border-[#0071f3] hover:shadow-md transition-all text-sm"
+              @click="router.push(`/location/${loc.location_id}`)"
+            >
+              📊 Lihat Detail Lokasi
+            </button>
+          </div>
         </div>
       </div>
 

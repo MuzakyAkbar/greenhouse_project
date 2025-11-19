@@ -8,6 +8,7 @@ import { useLocationStore } from '../stores/location'
 import { usePotatoActivityStore } from '../stores/potatoActivity'
 import { useMaterialStore } from '../stores/material'
 import { supabase } from '../lib/supabase'
+import openbravoApi from '@/lib/openbravo'
 
 const router = useRouter()
 const route = useRoute()
@@ -360,6 +361,89 @@ const onMaterialChange = (activityIndex, materialIndex, material_id) => {
   }
 }
 
+// ======================
+// GET MATERIAL PRICE FROM OPENBRAVO
+// ======================
+const getMaterialPrice = async (materialName) => {
+  try {
+    console.log('💰 Fetching price for:', materialName);
+
+    // STEP 1: Cari Product dengan mengambil semua data lalu filter di client
+    // Karena _identifier tidak bisa di-query langsung
+    const productRes = await openbravoApi.get(
+      '/org.openbravo.service.json.jsonrest/Product',
+      {
+        params: {
+          _selectedProperties: 'id,_identifier,name',
+          _maxResults: 1000  // Ambil banyak untuk di-filter
+        }
+      }
+    );
+
+    const products = productRes?.data?.response?.data || [];
+    
+    if (products.length === 0) {
+      console.warn(`⚠️ No products found in Openbravo`);
+      return 0;
+    }
+
+    // Filter di client side untuk cari yang _identifier match
+    const matchedProduct = products.find(p => 
+      p._identifier?.toLowerCase().trim() === materialName?.toLowerCase().trim()
+    );
+
+    if (!matchedProduct) {
+      console.warn(`⚠️ Product not found for: "${materialName}"`);
+      console.warn(`   Searched in ${products.length} products`);
+      console.warn(`   Sample products:`, products.slice(0, 5).map(p => p._identifier));
+      return 0;
+    }
+
+    const productId = matchedProduct.id;
+    
+    console.log(`   ✅ Product found:`, {
+      id: productId,
+      identifier: matchedProduct._identifier,
+      name: matchedProduct.name
+    });
+
+    // STEP 2: Ambil harga terbaru dari MaterialMgmtCosting
+    const costingRes = await openbravoApi.get(
+      '/org.openbravo.service.json.jsonrest/MaterialMgmtCosting',
+      {
+        params: {
+          _where: `product='${productId}'`,
+          _orderBy: 'updated desc',
+          _maxResults: 1
+        }
+      }
+    );
+
+    const costings = costingRes?.data?.response?.data || [];
+    
+    if (costings.length === 0) {
+      console.warn(`⚠️ No costing data found for product: ${materialName}`);
+      return 0;
+    }
+
+    const latestCosting = costings[0];
+    const price = parseFloat(latestCosting.price) || 0;
+    
+    console.log(`   ✅ Price found:`, {
+      identifier: latestCosting._identifier,
+      price: price,
+      updated: latestCosting.updated
+    });
+    
+    return price;
+
+  } catch (err) {
+    console.error(`❌ Error fetching price for ${materialName}:`, err);
+    console.error('   - Error details:', err.response?.data || err.message);
+    return 0;
+  }
+};
+
 // Material handlers
 const addMaterialRow = (activityIndex) => {
   activities.value[activityIndex].materials.push({
@@ -550,16 +634,16 @@ const handleSubmit = async () => {
         
         console.log(`  ✅ Confirmed newActivityId: ${newActivityId}`)
 
-        // ✅ STEP 3: INSERT MATERIALS (SIMPLIFIED LIKE FormReportActivity.vue)
+        // ✅ STEP 3: INSERT MATERIALS WITH PRICE FROM OPENBRAVO
         console.log(`  📦 Processing materials for activity ${newActivityId}`)
-        
+
         if (!act.materials || act.materials.length === 0) {
           console.log(`  ℹ️ No materials array`)
         } else {
           console.log(`  Total materials in array: ${act.materials.length}`)
           console.log(`  Materials data:`, JSON.stringify(act.materials, null, 2))
           
-          // ✅ FILTER - sama seperti FormReportActivity.vue
+          // ✅ FILTER valid materials
           const validMaterials = act.materials.filter(mat => {
             const isValid = mat.material_name && mat.qty && parseFloat(mat.qty) > 0
             console.log(`  Material: ${mat.material_name}, Qty: ${mat.qty}, Valid: ${isValid}`)
@@ -569,15 +653,40 @@ const handleSubmit = async () => {
           console.log(`  Valid materials: ${validMaterials.length}/${act.materials.length}`)
           
           if (validMaterials.length > 0) {
-            // ✅ MAP - sama seperti FormReportActivity.vue
-            const materialPayloads = validMaterials.map(mat => ({
-              activity_id: newActivityId,
-              material_name: mat.material_name,  // ✅ Langsung dari mat.material_name
-              qty: parseFloat(mat.qty),
-              uom: mat.uom || null  // ✅ Langsung dari mat.uom
-            }))
+            console.log(`  💰 Fetching prices from Openbravo for ${validMaterials.length} materials...`)
+            
+            // ✅ FETCH PRICE untuk setiap material dari Openbravo
+            const materialPayloads = await Promise.all(
+              validMaterials.map(async (mat) => {
+                const qty = parseFloat(mat.qty);
+                
+                // Ambil harga dari Openbravo berdasarkan material_name
+                console.log(`  🔍 Fetching price for: ${mat.material_name}`)
+                const unitPrice = await getMaterialPrice(mat.material_name);
+                const totalPrice = qty * unitPrice;
 
-            console.log(`  📦 Inserting ${materialPayloads.length} materials:`)
+                const payload = {
+                  activity_id: newActivityId,
+                  material_name: mat.material_name,
+                  qty: qty,
+                  uom: mat.uom || null,
+                  unit_price: unitPrice,
+                  total_price: totalPrice
+                };
+                
+                console.log(`  💵 Material payload:`, {
+                  material_name: payload.material_name,
+                  qty: payload.qty,
+                  uom: payload.uom,
+                  unit_price: payload.unit_price,
+                  total_price: payload.total_price
+                });
+                
+                return payload;
+              })
+            );
+
+            console.log(`  📦 INSERTING ${materialPayloads.length} materials WITH PRICES:`)
             console.log(JSON.stringify(materialPayloads, null, 2))
 
             const { data: matData, error: matErr } = await supabase
@@ -587,12 +696,16 @@ const handleSubmit = async () => {
 
             if (matErr) {
               console.error(`  ❌ INSERT ERROR:`, matErr)
+              console.error(`  Failed payloads:`, materialPayloads)
               throw new Error(`Gagal insert material: ${matErr.message}`)
             }
 
-            console.log(`  ✅ SUCCESS! Inserted ${matData.length} materials:`)
+            console.log(`  ✅ SUCCESS! Inserted ${matData.length} materials WITH PRICES`)
             matData.forEach((m, idx) => {
-              console.log(`    [${idx}] ID: ${m.material_used_id}, Name: ${m.material_name}, Qty: ${m.qty} ${m.uom}`)
+              console.log(`    [${idx}] Material: ${m.material_name}`)
+              console.log(`         Qty: ${m.qty} ${m.uom}`)
+              console.log(`         Unit Price: Rp ${new Intl.NumberFormat('id-ID').format(m.unit_price || 0)}`)
+              console.log(`         Total Price: Rp ${new Intl.NumberFormat('id-ID').format(m.total_price || 0)}`)
             })
           } else {
             console.log(`  ⚠️ No valid materials (all filtered out)`)

@@ -42,6 +42,56 @@ const phaseNames = {
   'harvest': 'Panen'
 }
 
+
+
+
+
+const getTotalMaterialCost = () => {
+  if (!currentReport.value?.activities) return 0
+  
+  return currentReport.value.activities.reduce((sum, activity) => {
+    if (!activity.materials) return sum
+    const activityTotal = activity.materials.reduce((matSum, mat) => {
+      return matSum + (Number(mat.total_price) || 0)
+    }, 0)
+    return sum + activityTotal
+  }, 0)
+}
+
+// Helper function untuk format angka
+const formatNumber = (value) => {
+  if (!value && value !== 0) return '0'
+  return Number(value).toLocaleString('id-ID', {
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 2
+  })
+}
+
+// Helper function untuk format currency
+const formatCurrency = (value) => {
+  if (!value && value !== 0) return 'Rp 0'
+  return 'Rp ' + Number(value).toLocaleString('id-ID', {
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 2
+  })
+}
+
+// Calculate total untuk satu activity
+const calculateActivityTotal = (materials) => {
+  if (!materials || materials.length === 0) return 0
+  return materials.reduce((sum, mat) => sum + (Number(mat.total_price) || 0), 0)
+}
+
+// Computed: Calculate total cost untuk seluruh report
+const reportTotalCost = computed(() => {
+  if (!currentReport.value?.activities) return 0
+  
+  return currentReport.value.activities.reduce((sum, activity) => {
+    const activityTotal = calculateActivityTotal(activity.materials || [])
+    return sum + activityTotal
+  }, 0)
+})
+
 onMounted(async () => {
   if (!authStore.isLoggedIn) {
     router.push('/')
@@ -73,12 +123,16 @@ const loadData = async () => {
         type_damages:gh_type_damage(*),
         activities:gh_activity(
           *,
-          materials:gh_material_used(*)
+          materials:gh_material_used(
+            *,
+            unit_price,
+            total_price
+          )
         )
       `)
       .eq('report_id', report_id.value)
       .single()
-    
+        
     if (fetchError) throw fetchError
 
     if (!report) {
@@ -1233,7 +1287,7 @@ const getStatusBadge = (status) => {
               </div>
             </div>
             
-            <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4 pt-4 border-t-2 border-blue-200">
+            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mt-4 pt-4 border-t-2 border-blue-200">
               <div class="bg-white rounded-lg p-4">
                 <p class="text-sm text-gray-600 font-semibold mb-2">🌾 Kerusakan Tanaman</p>
                 <div class="flex items-center gap-3">
@@ -1250,6 +1304,15 @@ const getStatusBadge = (status) => {
                   <span class="text-gray-500">/</span>
                   <span class="text-xl text-gray-600">{{ reportInfo.totalActivities }}</span>
                   <span class="text-sm text-gray-500">approved</span>
+                </div>
+              </div>
+              <!-- TAMBAHAN: Total Material Cost -->
+              <div class="bg-gradient-to-br from-green-50 to-emerald-50 rounded-lg p-4 border-2 border-green-200">
+                <p class="text-sm text-green-600 font-semibold mb-2">💰 Total Material Cost</p>
+                <div class="flex items-center gap-2">
+                  <span class="text-2xl font-bold text-green-700">
+                    {{ formatCurrency(getTotalMaterialCost()) }}
+                  </span>
                 </div>
               </div>
             </div>
@@ -1412,7 +1475,7 @@ const getStatusBadge = (status) => {
                   <div class="flex items-start justify-between gap-4 mb-4">
                     <div class="flex-1">
                       <p class="font-bold text-gray-900 text-lg mb-3">{{ activity.act_name }}</p>
-                      <div class="grid grid-cols-2 gap-3 mb-4">
+                      <div class="grid grid-cols-2 md:grid-cols-3 gap-3 mb-4">
                         <div class="bg-white rounded-lg p-3">
                           <p class="text-xs text-gray-500 font-semibold mb-1">CoA</p>
                           <p class="text-sm font-medium text-gray-900">{{ activity.CoA || '-' }}</p>
@@ -1421,6 +1484,13 @@ const getStatusBadge = (status) => {
                           <p class="text-xs text-gray-500 font-semibold mb-1">👷 Manpower</p>
                           <p class="text-sm font-medium text-gray-900">{{ activity.manpower || 0 }} pekerja</p>
                         </div>
+                        <!-- TAMBAHAN: Total Cost -->
+                        <div class="bg-gradient-to-br from-green-50 to-emerald-50 rounded-lg p-3 border-2 border-green-200">
+                          <p class="text-xs text-green-600 font-semibold mb-1">💰 Material Cost</p>
+                          <p class="text-base font-bold text-green-700">
+                            {{ formatCurrency(calculateActivityTotal(activity.materials || [])) }}
+                          </p>
+  </div>
                       </div>
 
                       <!-- Materials -->
@@ -1429,15 +1499,53 @@ const getStatusBadge = (status) => {
                           <span class="text-base">📦</span>
                           Materials ({{ activity.materials.length }})
                         </p>
-                        <div class="space-y-2">
-                          <div
-                            v-for="material in activity.materials"
-                            :key="material.material_used_id"
-                            class="flex items-center justify-between py-2 px-3 bg-blue-50 rounded-lg"
-                          >
-                            <span class="text-sm font-medium text-gray-900">{{ material.material_name }}</span>
-                            <span class="text-sm font-bold text-blue-700">{{ material.qty }} {{ material.uom }}</span>
-                          </div>
+                        
+                        <!-- Materials Table -->
+                        <div class="overflow-x-auto">
+                          <table class="w-full text-sm">
+                            <thead>
+                              <tr class="border-b-2 border-gray-200">
+                                <th class="text-left py-2 px-3 font-semibold text-gray-600">Material</th>
+                                <th class="text-right py-2 px-3 font-semibold text-gray-600">Qty</th>
+                                <th class="text-right py-2 px-3 font-semibold text-gray-600">UOM</th>
+                                <th class="text-right py-2 px-3 font-semibold text-gray-600">Unit Price</th>
+                                <th class="text-right py-2 px-3 font-semibold text-gray-600">Total</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              <tr
+                                v-for="material in activity.materials"
+                                :key="material.material_used_id"
+                                class="border-b border-gray-100 hover:bg-blue-50 transition"
+                              >
+                                <td class="py-2 px-3 font-medium text-gray-900">
+                                  {{ material.material_name }}
+                                </td>
+                                <td class="py-2 px-3 text-right font-semibold text-gray-900">
+                                  {{ formatNumber(material.qty) }}
+                                </td>
+                                <td class="py-2 px-3 text-right text-gray-600">
+                                  {{ material.uom }}
+                                </td>
+                                <td class="py-2 px-3 text-right text-gray-700">
+                                  {{ formatCurrency(material.unit_price || 0) }}
+                                </td>
+                                <td class="py-2 px-3 text-right font-bold text-blue-700">
+                                  {{ formatCurrency(material.total_price || 0) }}
+                                </td>
+                              </tr>
+                            </tbody>
+                            <tfoot>
+                              <tr class="border-t-2 border-gray-300 bg-gray-50">
+                                <td colspan="4" class="py-3 px-3 text-right font-bold text-gray-700">
+                                  Grand Total:
+                                </td>
+                                <td class="py-3 px-3 text-right font-bold text-green-700 text-base">
+                                  {{ formatCurrency(calculateActivityTotal(activity.materials)) }}
+                                </td>
+                              </tr>
+                            </tfoot>
+                          </table>
                         </div>
                       </div>
                     </div>

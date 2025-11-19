@@ -16,7 +16,6 @@ const selectedLocation = ref("");
 const selectedBatch = ref("");
 const productionType = ref("");
 const qty = ref(0);
-const damage = ref(0);
 const isSubmitting = ref(false);
 
 // ✅ Ambil data lokasi & semua batch saat awal
@@ -76,7 +75,6 @@ async function submitDataProduction() {
       batch_id: Number(selectedBatch.value),
       production_type: productionType.value,
       qty: Number(qty.value),
-      total_damage: Number(damage.value),
     };
 
     console.log("📤 Mengirim data ke gh_data_production:", payload);
@@ -109,7 +107,6 @@ function resetForm() {
   selectedBatch.value = "";
   productionType.value = "";
   qty.value = 0;
-  damage.value = 0;
 }
 </script>
 

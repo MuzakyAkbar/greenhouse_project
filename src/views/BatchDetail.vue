@@ -1,5 +1,6 @@
 <script setup>
 import { ref, onMounted } from 'vue'
+import { useRouter, useRoute } from 'vue-router'
 import {
   Chart,
   LineController,
@@ -18,6 +19,7 @@ import {
 import * as XLSX from 'xlsx'
 import html2canvas from 'html2canvas'
 import jsPDF from 'jspdf'
+import { supabase } from '@/lib/supabase'
 
 Chart.register(
   LineController,
@@ -34,188 +36,449 @@ Chart.register(
   BarElement
 )
 
+const router = useRouter()
+const route = useRoute()
+
+const batchId = ref(null)
+
 const batch = ref({
   id: 1,
-  nama: 'Batch Planlet Kentang A',
-  planlet: 500,
-  g0: 420,
-  g1: 360,
-  g2: 310,
-  sukses: 74,
-  terjual: 120,
-  pendapatan: 6500000,
-  pengeluaran: 4200000,
-  totalPlanlet: 2500,
-  g0Terjual: 200,
-  g0Diproduksi: 400,
-  g2Diproduksi: 300,
-  g2Terjual: 150,
-  g0Dirawat: 220,
-  g1Hidup: 180,
-  g1Mati: 40,
-  g2Mitra: 180,
-  g2Petani: 130
+  nama: 'Loading...',
+  planlet: 0,
+  g0: 0,
+  g1: 0,
+  g2: 0,
+  sukses: 0,
+  terjual: 0,
+  pendapatan: 0,
+  pengeluaran: 0,
+  totalPlanlet: 0,
+  g0Terjual: 0,
+  g0Diproduksi: 0,
+  g2Diproduksi: 0,
+  g2Terjual: 0,
+  g0Dirawat: 0,
+  g1Hidup: 0,
+  g1Mati: 0,
+  g2Mitra: 0,
+  g2Petani: 0
 })
 
 const progres = ref({
-  planletToG0: ((batch.value.g0 / batch.value.planlet) * 100).toFixed(1),
-  G0ToG1: ((batch.value.g1 / batch.value.g0) * 100).toFixed(1),
-  G1ToG2: ((batch.value.g2 / batch.value.g1) * 100).toFixed(1),
+  planletToG0: 0,
+  G0ToG1: 0,
+  G1ToG2: 0,
 })
 
-const activityReport = ref([
-  { report_id: 1, location: 'Greenhouse 1', Activity: 'Sterilisasi botol media', material_name: 'Botol Kultur', Qty: 50, UoM: 'pcs', manpower: 2 },
-  { report_id: 2, location: 'Greenhouse 1', Activity: 'Penanaman Planlet', material_name: 'Agar-agar', Qty: 2, UoM: 'kg', manpower: 3 },
-  { report_id: 3, location: 'Greenhouse 1', Activity: 'Pemeliharaan G0', material_name: 'Pupuk Cair', Qty: 5, UoM: 'liter', manpower: 2 },
-  { report_id: 4, location: 'Greenhouse 1', Activity: 'Panen G0', material_name: 'Label Batch', Qty: 100, UoM: 'pcs', manpower: 2 }
-])
-
-const materialList = ref([
-  { material_id: 1, material_name: 'Botol Kultur', Qty: 100, UoM: 'pcs', harga_satuan: 2500 },
-  { material_id: 2, material_name: 'Agar-agar', Qty: 2, UoM: 'kg', harga_satuan: 150000 },
-  { material_id: 3, material_name: 'Pupuk Cair', Qty: 5, UoM: 'liter', harga_satuan: 50000 },
-  { material_id: 4, material_name: 'Label Batch', Qty: 100, UoM: 'pcs', harga_satuan: 1000 }
-])
-
+const activityReport = ref([])
+const materialList = ref([])
 const totalMaterial = ref(0)
 
-onMounted(() => {
-  totalMaterial.value = materialList.value.reduce((sum, m) => sum + m.Qty * m.harga_satuan, 0)
+onMounted(async () => {
+  // Parse batch_id dari route params
+  const paramId = route.params.id
+  console.log('🔍 Route params:', route.params)
+  console.log('🔍 Param id:', paramId, 'Type:', typeof paramId)
+  
+  if (!paramId) {
+    console.error('❌ No batch_id in route params')
+    alert('Batch ID tidak ditemukan')
+    router.push('/dashboard')
+    return
+  }
+  
+  batchId.value = parseInt(paramId, 10)
+  
+  if (isNaN(batchId.value)) {
+    console.error('❌ Invalid batch_id (NaN)')
+    alert('Batch ID tidak valid')
+    router.push('/dashboard')
+    return
+  }
+  
+  console.log('✅ Valid batch_id:', batchId.value)
+  
+  await loadBatchData()
+  await loadActivityReports()
+  await loadMaterialData()
+  
+  // Inisialisasi charts setelah data dimuat
+  setTimeout(() => {
+    initCharts()
+  }, 500)
+})
 
-  // Fase Pertumbuhan
-  new Chart(document.getElementById('faseChart'), {
-    type: 'line',
-    data: {
-      labels: ['Planlet', 'G0', 'G1', 'G2'],
-      datasets: [{
-        label: batch.value.nama,
-        data: [batch.value.planlet, batch.value.g0, batch.value.g1, batch.value.g2],
-        borderColor: '#0071f3',
-        backgroundColor: 'rgba(0, 113, 243, 0.08)',
-        fill: true,
-        tension: 0.4,
-        borderWidth: 3,
-        pointRadius: 5,
-        pointHoverRadius: 7,
-        pointBackgroundColor: '#0071f3',
-        pointBorderColor: '#fff',
-        pointBorderWidth: 2,
-      }]
-    },
-    options: {
-      responsive: true,
-      maintainAspectRatio: false,
-      plugins: {
-        legend: { 
-          display: false
-        },
-        title: { 
-          display: true, 
-          text: 'Perkembangan Fase Pertumbuhan Kentang',
-          font: { size: 15, weight: '600' },
-          color: '#1f2937',
-          padding: { bottom: 20 }
+const loadBatchData = async () => {
+  console.log('📦 Loading batch data for ID:', batchId.value)
+  
+  // Ambil info batch
+  const { data: batchData, error: batchError } = await supabase
+    .from("gh_batch")
+    .select("*")
+    .eq("batch_id", batchId.value)
+    .single()
+
+  if (batchError) {
+    console.error('❌ Error loading batch:', batchError)
+    alert('Gagal memuat data batch')
+    router.push('/dashboard')
+    return
+  }
+
+  batch.value.nama = batchData.batch_name
+  console.log('✅ Batch loaded:', batchData)
+
+  // Ambil data produksi untuk batch ini
+  const { data: productionData } = await supabase
+    .from("gh_data_production")
+    .select("production_type, qty")
+    .eq("batch_id", batchId.value)
+
+  console.log('📊 Production data:', productionData)
+
+  if (productionData) {
+    productionData.forEach(item => {
+      const qty = parseFloat(item.qty) || 0
+      const type = item.production_type?.toLowerCase() || ''
+
+      if (type.includes('planlet')) {
+        batch.value.totalPlanlet += qty
+        batch.value.planlet += qty
+      } else if (type.includes('g0')) {
+        if (type.includes('terjual')) {
+          batch.value.g0Terjual += qty
+          batch.value.terjual += qty
+        } else if (type.includes('diproduksi') || type.includes('produksi')) {
+          batch.value.g0Diproduksi += qty
+          batch.value.g0 += qty
         }
-      },
-      scales: {
-        y: {
-          beginAtZero: true,
-          grid: { color: '#f3f4f6', drawBorder: false },
-          ticks: { color: '#6b7280', font: { size: 11 } }
-        },
-        x: {
-          grid: { display: false, drawBorder: false },
-          ticks: { color: '#6b7280', font: { size: 11 } }
+      } else if (type.includes('g1')) {
+        batch.value.g1 += qty
+        if (type.includes('hidup')) {
+          batch.value.g1Hidup += qty
+        } else if (type.includes('mati')) {
+          batch.value.g1Mati += qty
+        }
+      } else if (type.includes('g2')) {
+        if (type.includes('diproduksi') || type.includes('produksi')) {
+          batch.value.g2Diproduksi += qty
+          batch.value.g2 += qty
+        } else if (type.includes('terjual')) {
+          batch.value.g2Terjual += qty
         }
       }
+    })
+  }
+
+  // Ambil data penjualan
+  const { data: salesData } = await supabase
+    .from("gh_sales")
+    .select("qty, price")
+    .eq("batch_id", batchId.value)
+
+  if (salesData) {
+    batch.value.pendapatan = salesData.reduce((total, item) => {
+      return total + (parseFloat(item.qty) || 0) * (parseFloat(item.price) || 0)
+    }, 0)
+  }
+
+  // Hitung progres
+  progres.value.planletToG0 = batch.value.planlet > 0 
+    ? ((batch.value.g0 / batch.value.planlet) * 100).toFixed(1) 
+    : 0
+  progres.value.G0ToG1 = batch.value.g0 > 0 
+    ? ((batch.value.g1 / batch.value.g0) * 100).toFixed(1) 
+    : 0
+  progres.value.G1ToG2 = batch.value.g1 > 0 
+    ? ((batch.value.g2 / batch.value.g1) * 100).toFixed(1) 
+    : 0
+  
+  // Hitung success rate
+  batch.value.sukses = batch.value.planlet > 0 
+    ? ((batch.value.g2 / batch.value.planlet) * 100).toFixed(1) 
+    : 0
+}
+
+const loadActivityReports = async () => {
+  // Ambil reports untuk batch ini
+  const { data: reportData } = await supabase
+    .from("gh_report")
+    .select("report_id, location_id")
+    .eq("batch_id", batchId.value)
+    .eq("report_status", "approved")
+
+  if (!reportData || reportData.length === 0) {
+    console.log('⚠️ No activity reports found')
+    return
+  }
+
+  const reportIds = reportData.map(r => r.report_id)
+
+  // Ambil activities
+  const { data: activities } = await supabase
+    .from("gh_activity")
+    .select("activity_id, act_name, manpower, report_id")
+    .in("report_id", reportIds)
+    .eq("status", "approved")
+
+  if (!activities) return
+
+  // Ambil locations
+  const locationIds = [...new Set(reportData.map(r => r.location_id))]
+  const { data: locations } = await supabase
+    .from("gh_location")
+    .select("location_id, location")
+    .in("location_id", locationIds)
+
+  const locationMap = {}
+  locations?.forEach(loc => {
+    locationMap[loc.location_id] = loc.location
+  })
+
+  // ✅ PERUBAHAN: Ambil material used dengan field harga
+  const activityIds = activities.map(a => a.activity_id)
+  const { data: materialsUsed } = await supabase
+    .from("gh_material_used")
+    .select("material_name, qty, uom, unit_price, total_price, activity_id")
+    .in("activity_id", activityIds)
+
+  // ✅ PERUBAHAN: Map ke activity report dengan harga
+  activityReport.value = activities.map(activity => {
+    const report = reportData.find(r => r.report_id === activity.report_id)
+    const materials = materialsUsed?.filter(m => m.activity_id === activity.activity_id) || []
+    
+    // Hitung total untuk activity ini
+    const activityTotal = materials.reduce((sum, m) => sum + (Number(m.total_price) || 0), 0)
+    
+    // Untuk tampilan table, ambil material pertama (atau bisa di-loop nanti)
+    const firstMaterial = materials[0]
+    
+    return {
+      report_id: activity.report_id,
+      location: locationMap[report.location_id] || 'Unknown',
+      Activity: activity.act_name,
+      material_name: firstMaterial?.material_name || '-',
+      Qty: firstMaterial?.qty || 0,
+      UoM: firstMaterial?.uom || '-',
+      unit_price: firstMaterial?.unit_price || 0,
+      total_price: firstMaterial?.total_price || 0,
+      manpower: activity.manpower || 0,
+      materials: materials, // ✅ Simpan semua materials
+      activity_total: activityTotal // ✅ Total untuk activity ini
     }
   })
 
-  // Distribusi G2
-  new Chart(document.getElementById('kepemilikanChart'), {
-    type: 'doughnut',
-    data: {
-      labels: ['Milik Mitra', 'Milik Petani'],
-      datasets: [{
-        data: [batch.value.g2Mitra, batch.value.g2Petani],
-        backgroundColor: ['#0071f3', '#8FABD4'],
-        borderWidth: 0,
-        hoverOffset: 8,
-      }]
-    },
-    options: {
-      responsive: true,
-      maintainAspectRatio: false,
-      cutout: '60%',
-      plugins: {
-        legend: { 
-          position: 'bottom',
-          labels: {
-            padding: 15,
-            font: { size: 12, weight: '500' },
-            usePointStyle: true,
-            pointStyle: 'circle'
+  console.log('✅ Activity reports loaded:', activityReport.value.length)
+}
+
+const loadMaterialData = async () => {
+  // ✅ PERUBAHAN: Ambil dari gh_material_used yang sudah digunakan di activities
+  const { data: reportData } = await supabase
+    .from("gh_report")
+    .select("report_id")
+    .eq("batch_id", batchId.value)
+    .eq("report_status", "approved")
+
+  if (!reportData || reportData.length === 0) {
+    console.log('⚠️ No reports for material data')
+    return
+  }
+
+  const reportIds = reportData.map(r => r.report_id)
+
+  const { data: activities } = await supabase
+    .from("gh_activity")
+    .select("activity_id")
+    .in("report_id", reportIds)
+    .eq("status", "approved")
+
+  if (!activities || activities.length === 0) return
+
+  const activityIds = activities.map(a => a.activity_id)
+
+  // ✅ Ambil semua material yang digunakan dengan harga
+  const { data: materialsUsed } = await supabase
+    .from("gh_material_used")
+    .select("material_name, qty, uom, unit_price, total_price")
+    .in("activity_id", activityIds)
+
+  if (materialsUsed && materialsUsed.length > 0) {
+    // ✅ Group by material_name dan sum qty & total_price
+    const materialMap = {}
+    
+    materialsUsed.forEach(m => {
+      const name = m.material_name
+      if (!materialMap[name]) {
+        materialMap[name] = {
+          material_name: name,
+          Qty: 0,
+          UoM: m.uom,
+          unit_price: Number(m.unit_price) || 0,
+          total_price: 0
+        }
+      }
+      materialMap[name].Qty += Number(m.qty) || 0
+      materialMap[name].total_price += Number(m.total_price) || 0
+    })
+
+    materialList.value = Object.values(materialMap).map((m, index) => ({
+      material_id: index + 1,
+      material_name: m.material_name,
+      Qty: m.Qty,
+      UoM: m.UoM,
+      harga_satuan: m.unit_price,
+      total_harga: m.total_price
+    }))
+
+    // ✅ Hitung total dari semua material
+    totalMaterial.value = materialList.value.reduce((sum, m) => sum + m.total_harga, 0)
+  }
+
+  console.log('✅ Material data loaded:', materialList.value.length, 'Total:', totalMaterial.value)
+}
+
+const initCharts = () => {
+  // Fase Pertumbuhan
+  const faseCanvas = document.getElementById('faseChart')
+  if (faseCanvas) {
+    new Chart(faseCanvas, {
+      type: 'line',
+      data: {
+        labels: ['Planlet', 'G0', 'G1', 'G2'],
+        datasets: [{
+          label: batch.value.nama,
+          data: [batch.value.planlet, batch.value.g0, batch.value.g1, batch.value.g2],
+          borderColor: '#0071f3',
+          backgroundColor: 'rgba(0, 113, 243, 0.08)',
+          fill: true,
+          tension: 0.4,
+          borderWidth: 3,
+          pointRadius: 5,
+          pointHoverRadius: 7,
+          pointBackgroundColor: '#0071f3',
+          pointBorderColor: '#fff',
+          pointBorderWidth: 2,
+        }]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+          legend: { display: false },
+          title: { 
+            display: true, 
+            text: 'Perkembangan Fase Pertumbuhan Kentang',
+            font: { size: 15, weight: '600' },
+            color: '#1f2937',
+            padding: { bottom: 20 }
           }
         },
-        title: { 
-          display: true, 
-          text: 'Distribusi Kepemilikan G2',
-          font: { size: 15, weight: '600' },
-          color: '#1f2937',
-          padding: { bottom: 20 }
+        scales: {
+          y: {
+            beginAtZero: true,
+            grid: { color: '#f3f4f6', drawBorder: false },
+            ticks: { color: '#6b7280', font: { size: 11 } }
+          },
+          x: {
+            grid: { display: false, drawBorder: false },
+            ticks: { color: '#6b7280', font: { size: 11 } }
+          }
         }
       }
-    }
-  })
+    })
+  }
+
+  // Distribusi G2
+  const kepemilikanCanvas = document.getElementById('kepemilikanChart')
+  if (kepemilikanCanvas) {
+    new Chart(kepemilikanCanvas, {
+      type: 'doughnut',
+      data: {
+        labels: ['Milik Mitra', 'Milik Petani'],
+        datasets: [{
+          data: [batch.value.g2Mitra || 180, batch.value.g2Petani || 130],
+          backgroundColor: ['#0071f3', '#8FABD4'],
+          borderWidth: 0,
+          hoverOffset: 8,
+        }]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        cutout: '60%',
+        plugins: {
+          legend: { 
+            position: 'bottom',
+            labels: {
+              padding: 15,
+              font: { size: 12, weight: '500' },
+              usePointStyle: true,
+              pointStyle: 'circle'
+            }
+          },
+          title: { 
+            display: true, 
+            text: 'Distribusi Kepemilikan G2',
+            font: { size: 15, weight: '600' },
+            color: '#1f2937',
+            padding: { bottom: 20 }
+          }
+        }
+      }
+    })
+  }
 
   // Keuangan
-  new Chart(document.getElementById('keuanganChart'), {
-    type: 'bar',
-    data: {
-      labels: ['Pendapatan', 'Pengeluaran', 'Material Cost'],
-      datasets: [{
-        label: 'Nilai (Rp)',
-        data: [batch.value.pendapatan, batch.value.pengeluaran, totalMaterial.value],
-        backgroundColor: ['#0071f3', '#374151', '#8FABD4'],
-        borderRadius: 8,
-        borderSkipped: false,
-      }]
-    },
-    options: {
-      responsive: true,
-      maintainAspectRatio: false,
-      scales: { 
-        y: { 
-          beginAtZero: true,
-          grid: { color: '#f3f4f6', drawBorder: false },
-          ticks: { color: '#6b7280', font: { size: 11 } }
-        },
-        x: {
-          grid: { display: false, drawBorder: false },
-          ticks: { color: '#6b7280', font: { size: 11 } }
-        }
+  const keuanganCanvas = document.getElementById('keuanganChart')
+  if (keuanganCanvas) {
+    new Chart(keuanganCanvas, {
+      type: 'bar',
+      data: {
+        labels: ['Pendapatan', 'Pengeluaran', 'Material Cost'],
+        datasets: [{
+          label: 'Nilai (Rp)',
+          data: [batch.value.pendapatan, batch.value.pengeluaran || 4200000, totalMaterial.value],
+          backgroundColor: ['#0071f3', '#374151', '#8FABD4'],
+          borderRadius: 8,
+          borderSkipped: false,
+        }]
       },
-      plugins: {
-        legend: { display: false },
-        title: { 
-          display: true, 
-          text: 'Perbandingan Keuangan Batch',
-          font: { size: 15, weight: '600' },
-          color: '#1f2937',
-          padding: { bottom: 20 }
-        },
-        tooltip: {
-          callbacks: {
-            label: (ctx) => `Rp ${ctx.parsed.y.toLocaleString('id-ID')}`
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        scales: { 
+          y: { 
+            beginAtZero: true,
+            grid: { color: '#f3f4f6', drawBorder: false },
+            ticks: { color: '#6b7280', font: { size: 11 } }
           },
-          backgroundColor: '#1f2937',
-          padding: 12,
-          cornerRadius: 8,
+          x: {
+            grid: { display: false, drawBorder: false },
+            ticks: { color: '#6b7280', font: { size: 11 } }
+          }
+        },
+        plugins: {
+          legend: { display: false },
+          title: { 
+            display: true, 
+            text: 'Perbandingan Keuangan Batch',
+            font: { size: 15, weight: '600' },
+            color: '#1f2937',
+            padding: { bottom: 20 }
+          },
+          tooltip: {
+            callbacks: {
+              label: (ctx) => `Rp ${ctx.parsed.y.toLocaleString('id-ID')}`
+            },
+            backgroundColor: '#1f2937',
+            padding: 12,
+            cornerRadius: 8,
+          }
         }
       }
-    }
-  })
-})
+    })
+  }
+}
 
 function exportToExcel() {
   const wb = XLSX.utils.book_new()
@@ -270,14 +533,14 @@ async function exportToPDF() {
       <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-5">
         <div class="flex justify-between items-center">
           <div class="flex items-center gap-4">
-            <router-link
-              to="/dashboard"
+            <button
+              @click="router.back()"
               class="flex items-center justify-center w-10 h-10 rounded-lg hover:bg-gray-100 transition text-gray-700"
             >
               <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 640" class="w-5 h-5 fill-current">
                 <path d="M73.4 297.4C60.9 309.9 60.9 330.2 73.4 342.7L233.4 502.7C245.9 515.2 266.2 515.2 278.7 502.7C291.2 490.2 291.2 469.9 278.7 457.4L173.3 352L544 352C561.7 352 576 337.7 576 320C576 302.3 561.7 288 544 288L173.3 288L278.7 182.6C291.2 170.1 291.2 149.8 278.7 137.3C266.2 124.8 245.9 124.8 233.4 137.3L73.4 297.3z"/>
               </svg>
-            </router-link>
+            </button>
             <div>
               <h1 class="text-2xl font-bold text-gray-900 flex items-center gap-3">
                 <span class="w-10 h-10 bg-gradient-to-br from-[#0071f3] to-[#8FABD4] rounded-lg flex items-center justify-center text-white text-lg">
@@ -376,28 +639,6 @@ async function exportToPDF() {
             <h2 class="text-5xl font-bold text-gray-900 mb-2">{{ progres.planletToG0 }}%</h2>
             <p class="text-sm text-gray-500 mb-3">{{ batch.g0 }} / {{ batch.planlet }} unit</p>
             <div class="h-3 bg-gray-100 rounded-full overflow-hidden">
-              <div class="h-full bg-gradient-to-r from-[#0071f3] to-[#8FABD4] rounded-full transition-all duration-500" :style="`width: ${progres.planletToG0}%`"></div>
-            </div>
-          </div>
-          <div class="bg-white rounded-2xl p-6 shadow-sm border-2 border-gray-100 hover:shadow-lg transition-all">
-            <div class="flex items-center justify-between mb-3">
-              <p class="text-sm font-semibold text-gray-600">G0 → G1</p>
-              <span class="text-2xl">🌿</span>
-            </div>
-            <h2 class="text-5xl font-bold text-gray-900 mb-2">{{ progres.G0ToG1 }}%</h2>
-            <p class="text-sm text-gray-500 mb-3">{{ batch.g1 }} / {{ batch.g0 }} unit</p>
-            <div class="h-3 bg-gray-100 rounded-full overflow-hidden">
-              <div class="h-full bg-gradient-to-r from-[#0071f3] to-[#8FABD4] rounded-full transition-all duration-500" :style="`width: ${progres.G0ToG1}%`"></div>
-            </div>
-          </div>
-          <div class="bg-white rounded-2xl p-6 shadow-sm border-2 border-gray-100 hover:shadow-lg transition-all">
-            <div class="flex items-center justify-between mb-3">
-              <p class="text-sm font-semibold text-gray-600">G1 → G2</p>
-              <span class="text-2xl">🥔</span>
-            </div>
-            <h2 class="text-5xl font-bold text-gray-900 mb-2">{{ progres.G1ToG2 }}%</h2>
-            <p class="text-sm text-gray-500 mb-3">{{ batch.g2 }} / {{ batch.g1 }} unit</p>
-            <div class="h-3 bg-gray-100 rounded-full overflow-hidden">
               <div class="h-full bg-gradient-to-r from-[#0071f3] to-[#8FABD4] rounded-full transition-all duration-500" :style="`width: ${progres.G1ToG2}%`"></div>
             </div>
           </div>
@@ -424,7 +665,10 @@ async function exportToPDF() {
       <!-- Activity Report -->
       <div class="mb-8">
         <h2 class="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-3">Laporan Aktivitas</h2>
-        <div class="bg-white rounded-2xl border-2 border-gray-100 shadow-sm hover:shadow-lg transition-all overflow-hidden">
+        <div v-if="activityReport.length === 0" class="bg-white rounded-2xl border-2 border-gray-100 p-8 text-center text-gray-500">
+          Belum ada laporan aktivitas untuk batch ini
+        </div>
+        <div v-else class="bg-white rounded-2xl border-2 border-gray-100 shadow-sm hover:shadow-lg transition-all overflow-hidden">
           <div class="overflow-x-auto">
             <table class="min-w-full">
               <thead class="bg-gradient-to-r from-[#0071f3] to-[#0060d1]">
@@ -432,21 +676,64 @@ async function exportToPDF() {
                   <th class="px-6 py-4 text-left text-xs font-semibold text-white uppercase tracking-wider">Lokasi</th>
                   <th class="px-6 py-4 text-left text-xs font-semibold text-white uppercase tracking-wider">Aktivitas</th>
                   <th class="px-6 py-4 text-left text-xs font-semibold text-white uppercase tracking-wider">Material</th>
-                  <th class="px-6 py-4 text-left text-xs font-semibold text-white uppercase tracking-wider">Qty</th>
-                  <th class="px-6 py-4 text-left text-xs font-semibold text-white uppercase tracking-wider">UoM</th>
-                  <th class="px-6 py-4 text-left text-xs font-semibold text-white uppercase tracking-wider">Manpower</th>
+                  <th class="px-6 py-4 text-right text-xs font-semibold text-white uppercase tracking-wider">Qty</th>
+                  <th class="px-6 py-4 text-center text-xs font-semibold text-white uppercase tracking-wider">UoM</th>
+                  <th class="px-6 py-4 text-right text-xs font-semibold text-white uppercase tracking-wider">Unit Price</th>
+                  <th class="px-6 py-4 text-right text-xs font-semibold text-white uppercase tracking-wider">Total</th>
+                  <th class="px-6 py-4 text-center text-xs font-semibold text-white uppercase tracking-wider">Manpower</th>
                 </tr>
               </thead>
               <tbody class="bg-white divide-y divide-gray-200">
                 <tr v-for="item in activityReport" :key="item.report_id" class="hover:bg-blue-50 transition">
                   <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900 font-medium">{{ item.location }}</td>
                   <td class="px-6 py-4 text-sm text-gray-700">{{ item.Activity }}</td>
-                  <td class="px-6 py-4 text-sm text-gray-700">{{ item.material_name }}</td>
-                  <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900 font-semibold">{{ item.Qty }}</td>
-                  <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-600">{{ item.UoM }}</td>
-                  <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900 font-semibold">{{ item.manpower }}</td>
+                  <td class="px-6 py-4 text-sm text-gray-700">
+                    <div v-if="item.materials && item.materials.length > 1" class="space-y-1">
+                      <div v-for="mat in item.materials" :key="mat.material_name" class="text-xs">
+                        • {{ mat.material_name }}
+                      </div>
+                    </div>
+                    <div v-else>{{ item.material_name }}</div>
+                  </td>
+                  <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900 font-semibold text-right">
+                    <div v-if="item.materials && item.materials.length > 1" class="space-y-1">
+                      <div v-for="mat in item.materials" :key="mat.material_name" class="text-xs">
+                        {{ mat.qty }}
+                      </div>
+                    </div>
+                    <div v-else>{{ item.Qty }}</div>
+                  </td>
+                  <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-600 text-center">
+                    <div v-if="item.materials && item.materials.length > 1" class="space-y-1">
+                      <div v-for="mat in item.materials" :key="mat.material_name" class="text-xs">
+                        {{ mat.uom }}
+                      </div>
+                    </div>
+                    <div v-else>{{ item.UoM }}</div>
+                  </td>
+                  <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-700 text-right">
+                    <div v-if="item.materials && item.materials.length > 1" class="space-y-1">
+                      <div v-for="mat in item.materials" :key="mat.material_name" class="text-xs">
+                        Rp {{ (mat.unit_price || 0).toLocaleString('id-ID') }}
+                      </div>
+                    </div>
+                    <div v-else>Rp {{ (item.unit_price || 0).toLocaleString('id-ID') }}</div>
+                  </td>
+                  <td class="px-6 py-4 whitespace-nowrap text-sm font-bold text-blue-700 text-right">
+                    Rp {{ (item.activity_total || 0).toLocaleString('id-ID') }}
+                  </td>
+                  <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900 font-semibold text-center">{{ item.manpower }}</td>
                 </tr>
               </tbody>
+              <tfoot>
+                <tr class="bg-gradient-to-r from-blue-50 to-white">
+                  <td colspan="6" class="px-6 py-4 text-right text-sm font-bold text-gray-900">Total Biaya Activities:</td>
+                  <td class="px-6 py-4 whitespace-nowrap text-sm font-bold text-green-600 text-right">
+                    Rp {{ activityReport.reduce((sum, item) => sum + (item.activity_total || 0), 0).toLocaleString('id-ID') }}
+                  </td>
+                  <td></td>
+                </tr>
+              </tfoot>
             </table>
           </div>
         </div>
@@ -454,30 +741,33 @@ async function exportToPDF() {
 
       <!-- Material List -->
       <div class="mb-8">
-        <h2 class="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-3">Material yang Digunakan</h2>
-        <div class="bg-white rounded-2xl border-2 border-gray-100 shadow-sm hover:shadow-lg transition-all overflow-hidden">
+        <h2 class="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-3">Material yang Digunakan (Summary)</h2>
+        <div v-if="materialList.length === 0" class="bg-white rounded-2xl border-2 border-gray-100 p-8 text-center text-gray-500">
+          Belum ada data material
+        </div>
+        <div v-else class="bg-white rounded-2xl border-2 border-gray-100 shadow-sm hover:shadow-lg transition-all overflow-hidden">
           <div class="overflow-x-auto">
             <table class="min-w-full">
               <thead class="bg-gradient-to-r from-[#0071f3] to-[#0060d1]">
                 <tr>
                   <th class="px-6 py-4 text-left text-xs font-semibold text-white uppercase tracking-wider">Nama Material</th>
-                  <th class="px-6 py-4 text-left text-xs font-semibold text-white uppercase tracking-wider">Qty</th>
-                  <th class="px-6 py-4 text-left text-xs font-semibold text-white uppercase tracking-wider">UoM</th>
-                  <th class="px-6 py-4 text-left text-xs font-semibold text-white uppercase tracking-wider">Harga Satuan</th>
-                  <th class="px-6 py-4 text-left text-xs font-semibold text-white uppercase tracking-wider">Total Harga</th>
+                  <th class="px-6 py-4 text-right text-xs font-semibold text-white uppercase tracking-wider">Total Qty</th>
+                  <th class="px-6 py-4 text-center text-xs font-semibold text-white uppercase tracking-wider">UoM</th>
+                  <th class="px-6 py-4 text-right text-xs font-semibold text-white uppercase tracking-wider">Avg Unit Price</th>
+                  <th class="px-6 py-4 text-right text-xs font-semibold text-white uppercase tracking-wider">Total Harga</th>
                 </tr>
               </thead>
               <tbody class="bg-white divide-y divide-gray-200">
                 <tr v-for="mat in materialList" :key="mat.material_id" class="hover:bg-blue-50 transition">
                   <td class="px-6 py-4 text-sm text-gray-900 font-medium">{{ mat.material_name }}</td>
-                  <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900 font-semibold">{{ mat.Qty }}</td>
-                  <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-600">{{ mat.UoM }}</td>
-                  <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900 font-semibold">Rp {{ mat.harga_satuan.toLocaleString('id-ID') }}</td>
-                  <td class="px-6 py-4 whitespace-nowrap text-sm text-green-600 font-bold">Rp {{ (mat.Qty * mat.harga_satuan).toLocaleString('id-ID') }}</td>
+                  <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900 font-semibold text-right">{{ mat.Qty.toLocaleString('id-ID') }}</td>
+                  <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-600 text-center">{{ mat.UoM }}</td>
+                  <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-700 text-right">Rp {{ (mat.harga_satuan || 0).toLocaleString('id-ID') }}</td>
+                  <td class="px-6 py-4 whitespace-nowrap text-sm text-green-600 font-bold text-right">Rp {{ (mat.total_harga || 0).toLocaleString('id-ID') }}</td>
                 </tr>
-                <tr class="bg-gradient-to-r from-blue-50 to-white">
-                  <td colspan="4" class="px-6 py-4 text-right text-sm font-bold text-gray-900">Total Biaya Material:</td>
-                  <td class="px-6 py-4 whitespace-nowrap text-sm font-bold text-[#0071f3]">Rp {{ totalMaterial.toLocaleString('id-ID') }}</td>
+                <tr class="bg-gradient-to-r from-green-50 to-white">
+                  <td colspan="4" class="px-6 py-4 text-right text-sm font-bold text-gray-900">Grand Total Material Cost:</td>
+                  <td class="px-6 py-4 whitespace-nowrap text-sm font-bold text-[#0071f3] text-right">Rp {{ totalMaterial.toLocaleString('id-ID') }}</td>
                 </tr>
               </tbody>
             </table>

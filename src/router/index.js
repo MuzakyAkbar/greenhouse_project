@@ -187,7 +187,7 @@ const router = createRouter({
       meta: { requiresAuth: true },
     },
     {
-      path: "/location",
+      path: "/location/:location_id",
       name: "location",
       component: () => import("../views/location.vue"),
       meta: { requiresAuth: true },
