@@ -99,7 +99,11 @@ const fetchPlanningData = async () => {
       date: selectedDate.value
     });
 
+<<<<<<< HEAD
     // Fetch planning report dengan activities dan materials
+=======
+    // Fetch planning report dengan activities dan materials (hanya yang approved)
+>>>>>>> 8175f7ff635de1c79113717bf65c6b1c8a4a7f39
     const { data, error } = await supabase
       .from('gh_planning_report')
       .select(`
@@ -124,6 +128,10 @@ const fetchPlanningData = async () => {
       .eq('location_id', selectedLocation.value)
       .eq('batch_id', selectedBatch.value)
       .eq('planning_date', selectedDate.value)
+<<<<<<< HEAD
+=======
+      .eq('status', 'approved')
+>>>>>>> 8175f7ff635de1c79113717bf65c6b1c8a4a7f39
       .order('planning_id', { ascending: false })
       .limit(1);
 

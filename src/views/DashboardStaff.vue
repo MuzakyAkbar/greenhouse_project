@@ -1,7 +1,8 @@
 <script setup>
-import { ref } from 'vue'
+import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAuthStore } from '../stores/auth'
+import { supabase } from '@/lib/supabase'
 
 const authStore = useAuthStore()
 const router = useRouter()
@@ -18,45 +19,160 @@ const logout = async () => {
 
 // Navigasi halaman
 const bukaFormActivity = () => router.push('/formReportActivity')
-const bukaLaporanActivity = () => router.push('/reportActivityList')
+const bukaLaporanActivity = () => router.push('/planningReportList')
 
 // Quick stats untuk staff
 const quickStats = ref({
-  taskToday: 5,
-  taskCompleted: 12,
-  pendingReports: 3,
+  taskToday: 0,
+  taskCompleted: 0,
+  pendingReports: 0,
 })
 
-// Recent activities dummy data
-const recentActivities = ref([
-  {
-    id: 1,
-    type: 'form',
-    title: 'Pelaporan Aktivitas Harian',
-    description: 'Monitoring perkembangan G0 - Batch A',
-    time: '2 jam yang lalu',
-    status: 'completed',
-    icon: '✅',
-  },
-  {
-    id: 2,
-    type: 'report',
-    title: 'Laporan Produksi Mingguan',
-    description: 'Review hasil produksi minggu ke-2',
-    time: '1 hari yang lalu',
-    status: 'pending',
-    icon: '⏳',
-  },
-  {
-    id: 3,
-    type: 'movement',
-    title: 'Transfer Barang',
-    description: 'Perpindahan material ke Gudang B',
-    time: '2 hari yang lalu',
-    status: 'completed',
-    icon: '✅',
-  },
-])
+// Recent activities data from database
+const recentActivities = ref([])
+
+// Helper function to calculate time ago
+const getTimeAgo = (date) => {
+  const now = new Date()
+  const diff = now - date
+  const minutes = Math.floor(diff / 60000)
+  const hours = Math.floor(diff / 3600000)
+  const days = Math.floor(diff / 86400000)
+
+  if (minutes < 60) return `${minutes} menit yang lalu`
+  if (hours < 24) return `${hours} jam yang lalu`
+  return `${days} hari yang lalu`
+}
+
+onMounted(async () => {
+  try {
+    // Get recent reports with location and batch info
+    const { data: reports, error: reportError } = await supabase
+      .from('gh_report')
+      .select(`
+        report_id,
+        phase,
+        report_date,
+        report_status,
+        created_at,
+        location_id,
+        batch_id,
+        gh_location(location),
+        gh_batch(batch_name)
+      `)
+      .order('created_at', { ascending: false })
+      .limit(5)
+
+    if (reportError) throw reportError
+
+    // Get recent planning with location and batch info
+    const { data: plannings, error: planningError } = await supabase
+      .from('gh_planning_report')
+      .select(`
+        planning_id,
+        phase_plan,
+        planning_date,
+        status,
+        updated_at,
+        location_id,
+        batch_id,
+        gh_location(location),
+        gh_batch(batch_name)
+      `)
+      .order('updated_at', { ascending: false })
+      .limit(5)
+
+    if (planningError) throw planningError
+
+    // Combine and format activities
+    const activities = []
+
+    // Helper function to get icon and badge color based on status
+    const getStatusInfo = (status) => {
+      const statusMap = {
+        'approved': { icon: '✅', badge: 'bg-green-100 text-green-700', label: 'Approved' },
+        'onReview': { icon: '⏳', badge: 'bg-orange-100 text-orange-700', label: 'On Review' },
+        'needRevision': { icon: '🔄', badge: 'bg-red-100 text-red-700', label: 'Need Revision' },
+        'pending': { icon: '⏳', badge: 'bg-blue-100 text-blue-700', label: 'Pending' },
+        'draft': { icon: '📝', badge: 'bg-gray-100 text-gray-700', label: 'Draft' }
+      }
+      return statusMap[status] || statusMap['pending']
+    }
+
+    // Add reports
+    if (reports) {
+      reports.forEach(r => {
+        const timeAgo = getTimeAgo(new Date(r.created_at))
+        const statusInfo = getStatusInfo(r.report_status)
+        
+        activities.push({
+          id: `report-${r.report_id}`,
+          type: 'report',
+          title: `Report Activity - ${r.phase || 'N/A'}`,
+          description: `${r.gh_batch?.batch_name || 'Unknown Batch'} - ${r.gh_location?.location || 'Unknown Location'}`,
+          time: timeAgo,
+          status: r.report_status,
+          statusLabel: statusInfo.label,
+          icon: statusInfo.icon,
+          badgeClass: statusInfo.badge,
+          date: r.created_at
+        })
+      })
+    }
+
+    // Add plannings
+    if (plannings) {
+      plannings.forEach(p => {
+        const timeAgo = getTimeAgo(new Date(p.updated_at))
+        const statusInfo = getStatusInfo(p.status)
+        
+        activities.push({
+          id: `planning-${p.planning_id}`,
+          type: 'planning',
+          title: `Planning Activity - ${p.phase_plan || 'N/A'}`,
+          description: `${p.gh_batch?.batch_name || 'Unknown Batch'} - ${p.gh_location?.location || 'Unknown Location'}`,
+          time: timeAgo,
+          status: p.status,
+          statusLabel: statusInfo.label,
+          icon: statusInfo.icon,
+          badgeClass: statusInfo.badge,
+          date: p.updated_at
+        })
+      })
+    }
+
+    // Sort by date and take top 5
+    activities.sort((a, b) => new Date(b.date) - new Date(a.date))
+    recentActivities.value = activities.slice(0, 5)
+
+    // Calculate quick stats
+    const today = new Date().toISOString().split('T')[0]
+    
+    const { data: todayReports } = await supabase
+      .from('gh_report')
+      .select('report_id', { count: 'exact' })
+      .eq('report_date', today)
+    
+    const { data: completedReports } = await supabase
+      .from('gh_report')
+      .select('report_id', { count: 'exact' })
+      .eq('report_status', 'approved')
+    
+    const { data: pendingReports } = await supabase
+      .from('gh_report')
+      .select('report_id', { count: 'exact' })
+      .eq('report_status', 'onReview')
+
+    quickStats.value = {
+      taskToday: todayReports?.length || 0,
+      taskCompleted: completedReports?.length || 0,
+      pendingReports: pendingReports?.length || 0,
+    }
+
+  } catch (error) {
+    console.error('Error fetching activities:', error)
+  }
+})
 </script>
 
 <template>
@@ -70,7 +186,7 @@ const recentActivities = ref([
               <span class="w-10 h-10 bg-gradient-to-br from-[#ffffff] to-[#ffffff] rounded-lg flex items-center justify-center text-white text-lg">
                 🌱
               </span>
-              Dashboard Kentang GreenHouse
+              Dashboard MHN GreenHouse
             </h1>
             <p class="text-sm text-gray-500 mt-1 ml-13">Dashboard Staff</p>
           </div>
@@ -122,7 +238,7 @@ const recentActivities = ref([
                 ✅
               </div>
               <div>
-                <p class="text-sm font-semibold text-gray-500 mb-1">Selesai Bulan Ini</p>
+                <p class="text-sm font-semibold text-gray-500 mb-1">Selesai</p>
                 <h3 class="text-3xl font-bold text-gray-900">{{ quickStats.taskCompleted }}</h3>
               </div>
             </div>
@@ -147,31 +263,7 @@ const recentActivities = ref([
         <h2 class="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-3">Aksi Cepat</h2>
         <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
           
-          <!-- Form Aktivitas -->
-          <button
-            @click="bukaFormActivity"
-            class="group bg-white border-2 border-gray-100 hover:border-[#0071f3] rounded-2xl p-6 text-left hover:shadow-xl transition-all transform hover:-translate-y-1"
-          >
-            <div class="flex items-start gap-4">
-              <div class="w-14 h-14 bg-gradient-to-br from-[#0071f3] to-[#0060d1] rounded-xl flex items-center justify-center text-white text-2xl shadow-md group-hover:shadow-lg transition-all">
-                📝
-              </div>
-              <div class="flex-1">
-                <h3 class="text-lg font-bold text-gray-900 mb-2 group-hover:text-[#0071f3] transition-colors">
-                  Isi Form Aktivitas
-                </h3>
-                <p class="text-sm text-gray-500 leading-relaxed">
-                  Laporkan aktivitas harian dan perkembangan produksi
-                </p>
-              </div>
-            </div>
-            <div class="mt-4 pt-4 border-t border-gray-100 flex items-center justify-between">
-              <span class="text-xs font-semibold text-gray-400 uppercase tracking-wide">Input Data</span>
-              <span class="text-[#0071f3] font-bold group-hover:translate-x-1 transition-transform">→</span>
-            </div>
-          </button>
-
-          <!-- Lihat Laporan -->
+          <!-- Planning & Report List -->
           <button
             @click="bukaLaporanActivity"
             class="group bg-white border-2 border-gray-100 hover:border-[#0071f3] rounded-2xl p-6 text-left hover:shadow-xl transition-all transform hover:-translate-y-1"
@@ -182,7 +274,7 @@ const recentActivities = ref([
               </div>
               <div class="flex-1">
                 <h3 class="text-lg font-bold text-gray-900 mb-2 group-hover:text-[#0071f3] transition-colors">
-                  Lihat Laporan
+                  Planning & Report List
                 </h3>
                 <p class="text-sm text-gray-500 leading-relaxed">
                   Review dan pantau laporan aktivitas yang telah dibuat
@@ -195,29 +287,53 @@ const recentActivities = ref([
             </div>
           </button>
 
-          <!-- Laporan Produksi -->
+          <!-- Form Activity Planning -->
           <router-link
-            to="/report-production"
+            to="/planningActivity"
             class="group bg-white border-2 border-gray-100 hover:border-[#0071f3] rounded-2xl p-6 text-left hover:shadow-xl transition-all transform hover:-translate-y-1"
           >
             <div class="flex items-start gap-4">
-              <div class="w-14 h-14 bg-gradient-to-br from-green-500 to-green-600 rounded-xl flex items-center justify-center text-white text-2xl shadow-md group-hover:shadow-lg transition-all">
-                📈
+              <div class="w-14 h-14 bg-gradient-to-br from-[#0071f3] to-[#0060d1] rounded-xl flex items-center justify-center text-white text-2xl shadow-md group-hover:shadow-lg transition-all">
+                📝
               </div>
               <div class="flex-1">
                 <h3 class="text-lg font-bold text-gray-900 mb-2 group-hover:text-[#0071f3] transition-colors">
-                  Laporan Produksi
+                  Form Activity Planning
                 </h3>
                 <p class="text-sm text-gray-500 leading-relaxed">
-                  Akses laporan produksi dan analisis performa
+                  Buat rencana aktivitas untuk produksi mendatang
                 </p>
               </div>
             </div>
             <div class="mt-4 pt-4 border-t border-gray-100 flex items-center justify-between">
-              <span class="text-xs font-semibold text-gray-400 uppercase tracking-wide">Production</span>
+              <span class="text-xs font-semibold text-gray-400 uppercase tracking-wide">Planning</span>
               <span class="text-[#0071f3] font-bold group-hover:translate-x-1 transition-transform">→</span>
             </div>
           </router-link>
+
+          <!-- Form Activity Report -->
+          <button
+            @click="bukaFormActivity"
+            class="group bg-white border-2 border-gray-100 hover:border-[#0071f3] rounded-2xl p-6 text-left hover:shadow-xl transition-all transform hover:-translate-y-1"
+          >
+            <div class="flex items-start gap-4">
+              <div class="w-14 h-14 bg-gradient-to-br from-[#0071f3] to-[#0060d1] rounded-xl flex items-center justify-center text-white text-2xl shadow-md group-hover:shadow-lg transition-all">
+                📝
+              </div>
+              <div class="flex-1">
+                <h3 class="text-lg font-bold text-gray-900 mb-2 group-hover:text-[#0071f3] transition-colors">
+                  Form Activity Report
+                </h3>
+                <p class="text-sm text-gray-500 leading-relaxed">
+                  Laporkan aktivitas harian dan perkembangan produksi
+                </p>
+              </div>
+            </div>
+            <div class="mt-4 pt-4 border-t border-gray-100 flex items-center justify-between">
+              <span class="text-xs font-semibold text-gray-400 uppercase tracking-wide">Report</span>
+              <span class="text-[#0071f3] font-bold group-hover:translate-x-1 transition-transform">→</span>
+            </div>
+          </button>
 
           <!-- Location & Batch -->
           <router-link
@@ -267,7 +383,7 @@ const recentActivities = ref([
             </div>
           </router-link>
 
-          <!-- Help & Support (Bonus) -->
+          <!-- Help & Support -->
           <div class="group bg-gradient-to-br from-amber-50 to-orange-50 border-2 border-amber-200 rounded-2xl p-6 text-left hover:shadow-xl transition-all">
             <div class="flex items-start gap-4">
               <div class="w-14 h-14 bg-gradient-to-br from-amber-500 to-orange-500 rounded-xl flex items-center justify-center text-white text-2xl shadow-md">
@@ -294,7 +410,7 @@ const recentActivities = ref([
       <div class="mb-8">
         <h2 class="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-3">Aktivitas Terbaru</h2>
         <div class="bg-white rounded-2xl border-2 border-gray-100 shadow-sm hover:shadow-lg transition-all">
-          <div class="divide-y divide-gray-100">
+          <div v-if="recentActivities.length > 0" class="divide-y divide-gray-100">
             <div 
               v-for="activity in recentActivities" 
               :key="activity.id"
@@ -303,7 +419,9 @@ const recentActivities = ref([
               <div class="flex items-start gap-4">
                 <div 
                   class="w-12 h-12 rounded-xl flex items-center justify-center text-2xl shrink-0"
-                  :class="activity.status === 'completed' ? 'bg-green-100' : 'bg-orange-100'"
+                  :class="activity.status === 'approved' ? 'bg-green-100' : 
+                          activity.status === 'needRevision' ? 'bg-red-100' : 
+                          activity.status === 'draft' ? 'bg-gray-100' : 'bg-orange-100'"
                 >
                   {{ activity.icon }}
                 </div>
@@ -312,11 +430,9 @@ const recentActivities = ref([
                     <h4 class="font-bold text-gray-900 text-sm">{{ activity.title }}</h4>
                     <span 
                       class="text-xs font-semibold px-3 py-1 rounded-full shrink-0"
-                      :class="activity.status === 'completed' 
-                        ? 'bg-green-100 text-green-700' 
-                        : 'bg-orange-100 text-orange-700'"
+                      :class="activity.badgeClass"
                     >
-                      {{ activity.status === 'completed' ? 'Selesai' : 'Pending' }}
+                      {{ activity.statusLabel }}
                     </span>
                   </div>
                   <p class="text-sm text-gray-600 mb-2">{{ activity.description }}</p>
@@ -327,6 +443,10 @@ const recentActivities = ref([
                 </div>
               </div>
             </div>
+          </div>
+          <div v-else class="p-8 text-center text-gray-400">
+            <p class="text-lg mb-2">📭</p>
+            <p class="text-sm">Belum ada aktivitas terbaru</p>
           </div>
         </div>
       </div>
@@ -340,7 +460,7 @@ const recentActivities = ref([
           <div class="flex-1">
             <h3 class="font-bold text-gray-900 text-lg mb-2">Tips Hari Ini</h3>
             <p class="text-gray-700 leading-relaxed">
-              Pastikan untuk mengisi form aktivitas setiap hari sebelum pukul 16.00 WIB untuk memastikan data tercatat dengan akurat. Gunakan fitur "Lihat Laporan" untuk mereview aktivitas minggu ini.
+              Pastikan untuk mengisi form aktivitas setiap hari sebelum pukul 16.00 WIB untuk memastikan data tercatat dengan akurat. Gunakan fitur "Planning & Report List" untuk mereview aktivitas minggu ini.
             </p>
           </div>
         </div>

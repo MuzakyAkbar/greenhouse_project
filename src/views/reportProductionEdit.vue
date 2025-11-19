@@ -183,7 +183,11 @@ const handleSubmit = async () => {
     }
 
     alert('✅ Laporan produksi & penjualan berhasil diperbarui!')
+<<<<<<< HEAD
     router.push('/reportActivityList')
+=======
+    router.push('/planningReportList')
+>>>>>>> 8175f7ff635de1c79113717bf65c6b1c8a4a7f39
   } catch (err) {
     console.error('Error updating report:', err)
     error.value = err.message
@@ -195,7 +199,11 @@ const handleSubmit = async () => {
 
 const handleCancel = () => {
   if (confirm('Batalkan perubahan? Data yang belum disimpan akan hilang.')) {
+<<<<<<< HEAD
     router.push('/reportActivityList')
+=======
+    router.push('/planningReportList')
+>>>>>>> 8175f7ff635de1c79113717bf65c6b1c8a4a7f39
   }
 }
 </script>
