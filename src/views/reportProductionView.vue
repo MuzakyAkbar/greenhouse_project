@@ -1,3 +1,4 @@
+
 <script setup>
 import { RouterLink, useRouter } from 'vue-router'
 import { useAuthStore } from '../stores/auth'
@@ -36,7 +37,7 @@ const productionData = ref([
       <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-5">
         <div class="flex items-center gap-4">
           <RouterLink
-            to="/reportActivityList"
+            to="/planningReportList"
             class="flex items-center justify-center w-10 h-10 bg-gray-100 hover:bg-gray-200 rounded-lg transition"
           >
             <svg class="w-5 h-5 text-gray-700" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512" fill="currentColor">
@@ -201,7 +202,7 @@ const productionData = ref([
       <!-- Action Button -->
       <div class="flex justify-center mb-8">
         <router-link
-          to="/reportActivityList"
+          to="/planningReportList"
           class="bg-white hover:bg-gray-50 text-gray-700 font-semibold px-8 py-3 rounded-xl border-2 border-gray-200 hover:border-[#0071f3] shadow-sm hover:shadow-lg transition-all flex items-center gap-2"
         >
           <svg class="w-5 h-5" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" fill="currentColor">

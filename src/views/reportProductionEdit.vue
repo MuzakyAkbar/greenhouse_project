@@ -183,7 +183,7 @@ const handleSubmit = async () => {
     }
 
     alert('✅ Laporan produksi & penjualan berhasil diperbarui!')
-    router.push('/planningReportList')
+    router.push('/reportActivityList')
   } catch (err) {
     console.error('Error updating report:', err)
     error.value = err.message
@@ -195,7 +195,7 @@ const handleSubmit = async () => {
 
 const handleCancel = () => {
   if (confirm('Batalkan perubahan? Data yang belum disimpan akan hilang.')) {
-    router.push('/planningReportList')
+    router.push('/reportActivityList')
   }
 }
 </script>

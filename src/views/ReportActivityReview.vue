@@ -1,195 +1,1511 @@
+
+<script setup>
+import { ref, onMounted, computed } from 'vue'
+import { useRouter, useRoute } from 'vue-router'
+import { useAuthStore } from '../stores/auth'
+import { useBatchStore } from '../stores/batch'
+import { useLocationStore } from '../stores/location'
+import { supabase } from '../lib/supabase'
+import openbravoApi from '@/lib/openbravo'
+import axios from 'axios'
+
+const router = useRouter()
+const route = useRoute()
+const authStore = useAuthStore()
+const batchStore = useBatchStore()
+const locationStore = useLocationStore()
+
+const report_id = ref(route.params.report_id || null)
+
+const sourcePage = ref(route.query.from || '/planningReportList')
+
+const loading = ref(true)
+const processing = ref(false)
+const error = ref(null)
+
+const currentReport = ref(null)
+const revisionModal = ref({
+  show: false,
+  type: null,
+  itemId: null,
+  notes: ''
+})
+
+const warehouseInfo = ref({
+  warehouse: null,
+  bin: null,
+  location_name: null
+})
+
+const phaseNames = {
+  'generative': 'Generatif',
+  'vegetative': 'Vegetatif',
+  'harvest': 'Panen'
+}
+
+onMounted(async () => {
+  if (!authStore.isLoggedIn) {
+    router.push('/')
+    return
+  }
+
+  if (!report_id.value) {
+    alert('⚠️ Report ID tidak ditemukan')
+    router.push(sourcePage.value)
+    return
+  }
+
+  await loadData()
+})
+
+const loadData = async () => {
+  try {
+    loading.value = true
+    
+    await Promise.all([
+      batchStore.getBatches(),
+      locationStore.fetchAll()
+    ])
+
+    const { data: report, error: fetchError } = await supabase
+      .from('gh_report')
+      .select(`
+        *,
+        type_damages:gh_type_damage(*),
+        activities:gh_activity(
+          *,
+          materials:gh_material_used(*)
+        )
+      `)
+      .eq('report_id', report_id.value)
+      .single()
+    
+    if (fetchError) throw fetchError
+
+    if (!report) {
+      throw new Error('Laporan tidak ditemukan')
+    }
+
+    currentReport.value = report
+    console.log('✅ Loaded report:', report)
+    console.log('📊 Report Phase:', report.phase)
+    
+    if (report.location_id) {
+      await loadWarehouseAndBin(report.location_id)
+    }
+    
+    await updateReportStatus()
+    
+  } catch (err) {
+    console.error('❌ Error loading data:', err)
+    error.value = err.message
+    alert('❌ Gagal memuat data: ' + err.message)
+    router.push(sourcePage.value)
+  } finally {
+    loading.value = false
+  }
+}
+
+const loadWarehouseAndBin = async (locationId) => {
+  try {
+    const location = locationStore.locations.find(l => l.location_id == locationId)
+    if (!location) {
+      console.warn('⚠️ Location not found:', locationId)
+      return
+    }
+
+    const locationName = location.location
+    warehouseInfo.value.location_name = locationName
+    
+    console.log('🏢 Loading warehouse for location:', locationName)
+
+    const warehouseRes = await openbravoApi.get(
+      '/org.openbravo.service.json.jsonrest/Warehouse',
+      { params: { _where: `name='${locationName}'` } }
+    )
+
+    const warehouses = warehouseRes?.data?.response?.data || []
+    if (!warehouses.length) {
+      console.warn('⚠️ Warehouse not found for location:', locationName)
+      return
+    }
+
+    const warehouse = warehouses[0]
+    warehouseInfo.value.warehouse = warehouse
+    console.log('✅ Warehouse found:', warehouse.name)
+
+    const binRes = await openbravoApi.get(
+      '/org.openbravo.service.json.jsonrest/Locator',
+      { params: { _where: `M_Warehouse_ID='${warehouse.id}'` } }
+    )
+
+    const bins = binRes?.data?.response?.data || []
+    if (!bins.length) {
+      console.warn('⚠️ Bin not found for warehouse:', warehouse.name)
+      return
+    }
+
+    warehouseInfo.value.bin = bins[0]
+    console.log('✅ Bin found:', bins[0].name)
+
+  } catch (err) {
+    console.error('❌ Error loading warehouse/bin:', err)
+  }
+}
+
+// ✅ FIXED VERSION - Create Internal Consumption menggunakan API yang benar
+const createAndProcessMovement = async (materials, activityName) => {
+  try {
+    if (!warehouseInfo.value.bin || !warehouseInfo.value.warehouse) {
+      throw new Error('Warehouse/Bin tidak ditemukan untuk location ini')
+    }
+
+    const warehouse = warehouseInfo.value.warehouse
+    const bin = warehouseInfo.value.bin
+    
+    const warehouseId = warehouse.id
+    const binId = bin.id // ✅ Ini adalah Locator ID dari gh_location.id_openbravo
+    
+    // Ambil organization & client dari warehouse
+    const orgId = warehouse.organization?.id || warehouse.organization || '96D7D37973EF450383B8ADCFDB666725'
+    const clientId = warehouse.client?.id || warehouse.client || '025F309A89714992995442D9CDE13A15'
+    
+    console.log(`\n${'='.repeat(60)}`)
+    console.log(`🔄 CREATING INTERNAL CONSUMPTION (MATERIAL USAGE)`)
+    console.log(`${'='.repeat(60)}`)
+    console.log('Activity:', activityName)
+    console.log('Warehouse ID:', warehouseId)
+    console.log('Warehouse Name:', warehouse.name)
+    console.log('Bin/Locator ID:', binId) // ✅ Ini harus sama dengan id_openbravo dari Supabase
+    console.log('Bin/Locator Name:', bin.searchKey || bin.name)
+    console.log('Org ID:', orgId)
+    console.log('Client ID:', clientId)
+    console.log(`${'='.repeat(60)}\n`)
+
+    // ✅ STEP 1: Create Internal Consumption header menggunakan endpoint yang benar
+    console.log('🔄 STEP 1: Creating Internal Consumption header...')
+    
+    const now = new Date()
+    const movementDate = now.toISOString().split('T')[0]
+    const consumptionName = `GH-${activityName.replace(/[^a-zA-Z0-9]/g, '').substring(0, 20)}-${Date.now()}`
+    
+    // ✅ Format payload sesuai contoh Postman Anda
+    const headerPayload = {
+      data: [
+        {
+          _entityName: 'MaterialMgmtInternalConsumption',
+          client: clientId,
+          organization: orgId,
+          name: consumptionName,
+          movementDate: movementDate
+        }
+      ]
+    }
+
+    console.log('📤 Header Payload:', JSON.stringify(headerPayload, null, 2))
+
+    // ✅ POST ke endpoint yang benar
+    const headerRes = await openbravoApi.post(
+      '/org.openbravo.service.json.jsonrest/MaterialMgmtInternalConsumption',
+      headerPayload
+    )
+
+    console.log('📥 Header Response:', JSON.stringify(headerRes?.data, null, 2))
+    
+    // Check error
+    if (headerRes?.data?.response?.status === -1) {
+      const obError = headerRes.data.response.error
+      console.error('❌ Openbravo Error:', obError)
+      throw new Error(`Openbravo Error: ${obError?.message || JSON.stringify(obError)}`)
+    }
+
+    // Get consumption ID dari response
+    let consumptionId = null
+    
+    if (headerRes?.data?.response?.data?.[0]?.id) {
+      consumptionId = headerRes.data.response.data[0].id
+    } else if (headerRes?.data?.data?.[0]?.id) {
+      consumptionId = headerRes.data.data[0].id
+    } else if (headerRes?.data?.id) {
+      consumptionId = headerRes.data.id
+    }
+    
+    if (!consumptionId) {
+      console.error('❌ No consumption ID in response')
+      throw new Error('Gagal mendapatkan Internal Consumption ID')
+    }
+
+    console.log(`✅ Internal Consumption created: ${consumptionId}`)
+
+    // ✅ STEP 2: Create consumption lines
+    console.log('\n🔄 STEP 2: Creating consumption lines...')
+    
+    let successCount = 0
+    let errors = []
+
+    for (const material of materials) {
+      try {
+        console.log(`\n  📦 Processing: ${material.material_name}`)
+        
+        // Get product
+        const productRes = await openbravoApi.get(
+          '/org.openbravo.service.json.jsonrest/Product',
+          {
+            params: {
+              _where: `name='${material.material_name}'`,
+              _selectedProperties: 'id,name,uOM',
+              _startRow: 0,
+              _endRow: 1
+            }
+          }
+        )
+
+        const products = productRes?.data?.response?.data || []
+        if (!products.length) {
+          errors.push(`${material.material_name}: Product not found`)
+          console.error(`    ❌ Product not found`)
+          continue
+        }
+
+        const product = products[0]
+        let uomId = product.uOM
+
+        // Get UOM if specified
+        if (material.uom) {
+          const uomRes = await openbravoApi.get(
+            '/org.openbravo.service.json.jsonrest/UOM',
+            {
+              params: {
+                _where: `name='${material.uom}'`,
+                _startRow: 0,
+                _endRow: 1
+              }
+            }
+          )
+
+          const uoms = uomRes?.data?.response?.data || []
+          if (uoms.length > 0) {
+            uomId = uoms[0].id
+          }
+        }
+
+        // Check stock dari bin/locator yang sama dengan id_openbravo
+        const stockRes = await openbravoApi.get(
+          '/org.openbravo.service.json.jsonrest/MaterialMgmtStorageDetail',
+          {
+            params: {
+              _where: `storageBin='${binId}' AND product='${product.id}'`,
+              _selectedProperties: 'quantityOnHand',
+              _startRow: 0,
+              _endRow: 1
+            }
+          }
+        )
+
+        const stockDetails = stockRes?.data?.response?.data || []
+        const currentStock = stockDetails[0]?.quantityOnHand || 0
+
+        console.log(`    📊 Stock di Bin/Locator (${bin.searchKey || bin.name}): ${currentStock}, Need: ${material.qty}`)
+
+        if (currentStock < material.qty) {
+          errors.push(`${material.material_name}: Insufficient stock (${currentStock}/${material.qty})`)
+          console.warn(`    ⚠️ Insufficient stock`)
+          continue
+        }
+
+        // ✅ Create line sesuai format Postman Anda
+        // storageBin harus sama dengan id_openbravo dari gh_location
+        const linePayload = {
+          data: [
+            {
+              _entityName: 'MaterialMgmtInternalConsumptionLine',
+              client: clientId,
+              organization: orgId,
+              internalConsumption: consumptionId,
+              lineNo: (successCount + 1) * 10,
+              product: product.id,
+              uOM: uomId,
+              movementQuantity: material.qty,
+              storageBin: binId // ✅ Bin/Locator ID dari gh_location.id_openbravo
+            }
+          ]
+        }
+
+        console.log('    📤 Line Payload:', JSON.stringify(linePayload, null, 2))
+        console.log('    📍 StorageBin ID:', binId, '(from gh_location.id_openbravo)')
+
+        // ✅ POST ke endpoint yang benar
+        const lineRes = await openbravoApi.post(
+          '/org.openbravo.service.json.jsonrest/MaterialMgmtInternalConsumptionLine',
+          linePayload
+        )
+
+        if (lineRes?.data?.response?.status === -1) {
+          const lineError = lineRes.data.response.error
+          throw new Error(lineError?.message || 'Failed to create line')
+        }
+
+        console.log(`    ✅ Line created`)
+        successCount++
+
+      } catch (err) {
+        console.error(`    ❌ Error:`, err.message)
+        errors.push(`${material.material_name}: ${err.message}`)
+      }
+    }
+
+    if (successCount === 0) {
+      throw new Error('No materials were added to the consumption')
+    }
+
+    console.log(`\n✅ Lines created: ${successCount}/${materials.length}`)
+
+    // ✅ STEP 3: Process Internal Consumption untuk reduce stock
+    // API: POST http://202.59.169.85:8090/api/process
+    // Payload: { ad_process_id: "800131", ad_client_id, ad_org_id, data: [{id: consumptionId}] }
+    console.log('\n🔄 STEP 3: Processing Internal Consumption...')
+    
+    const apiUrl = (import.meta.env.VITE_OPENBRAVO_URL || '').trim()
+    const apiPort = (import.meta.env.VITE_API_PORT || '').trim()
+    const username = (import.meta.env.VITE_API_USER || '').trim()
+    const password = (import.meta.env.VITE_API_PASS || '').trim()
+
+    if (!apiUrl || !apiPort || !username || !password) {
+      console.warn('⚠️ API credentials not fully configured - skipping process step')
+      console.log(`✅ Internal Consumption created but NOT processed: ${consumptionId}`)
+      console.log(`${'='.repeat(60)}\n`)
+      
+      return {
+        success: true,
+        movementId: consumptionId,
+        successCount,
+        totalMaterials: materials.length,
+        errors: errors.length > 0 ? errors : null,
+        warning: 'Internal Consumption created but not processed. Please process manually in Openbravo.'
+      }
+    }
+
+    // ✅ Endpoint: http://202.59.169.85:8090/api/process
+    const endpoint = `${apiUrl.replace(/\/+$/, '')}:${apiPort}/api/process`
+    const token = btoa(unescape(encodeURIComponent(`${username}:${password}`)))
+
+    // ✅ Process ID untuk Internal Consumption yang BENAR
+    // AD_Process_ID: 800131 (sesuai dengan API Openbravo Anda)
+    const processPayload = {
+      ad_process_id: '800131',  // ✅ ID yang benar untuk process Internal Consumption
+      ad_client_id: clientId,   // ✅ Tetap sama: 025F309A89714992995442D9CDE13A15
+      ad_org_id: orgId,          // ✅ Tetap sama: 96D7D37973EF450383B8ADCFDB666725
+      data: [{ id: consumptionId }] // ✅ ID dari Internal Consumption yang baru dibuat
+    }
+
+    console.log('📤 Process Payload:', JSON.stringify(processPayload, null, 2))
+    console.log('📤 Endpoint:', endpoint)
+
+    try {
+      const processRes = await axios.post(endpoint, processPayload, {
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Basic ${token}`,
+          'X-Requested-With': 'XMLHttpRequest'
+        },
+        withCredentials: false,
+        timeout: 30000
+      })
+
+      console.log('📥 Process Response Status:', processRes?.status)
+      console.log('📥 Process Response:', JSON.stringify(processRes?.data, null, 2))
+
+      const resultObj = processRes?.data?.data?.[0]
+      
+      console.log('📊 Result Object:', JSON.stringify(resultObj, null, 2))
+      
+      if (!resultObj) {
+        console.warn('⚠️ No result object in response')
+        console.log(`✅ Internal Consumption created but process status unclear: ${consumptionId}`)
+        console.log(`${'='.repeat(60)}\n`)
+        
+        return {
+          success: true,
+          movementId: consumptionId,
+          successCount,
+          totalMaterials: materials.length,
+          errors: errors.length > 0 ? errors : null,
+          warning: 'Internal Consumption created but process response unclear. Please check in Openbravo.'
+        }
+      }
+      
+      // ✅ PENTING: Cek apakah result === 1 (sukses) atau 0 (gagal)
+      console.log('🔍 Process Result Code:', resultObj.result)
+      
+      if (resultObj.result !== 1) {
+        const errorMsg = resultObj.errormsg || resultObj.message || 'Process failed with unknown error'
+        console.error('❌ Process error:', errorMsg)
+        console.log('📋 Full error object:', JSON.stringify(resultObj, null, 2))
+        console.log(`⚠️ Internal Consumption created but process failed: ${consumptionId}`)
+        console.log(`${'='.repeat(60)}\n`)
+        
+        return {
+          success: true,
+          movementId: consumptionId,
+          successCount,
+          totalMaterials: materials.length,
+          errors: errors.length > 0 ? errors : null,
+          warning: `Internal Consumption created but process failed: ${errorMsg}. Please process manually in Openbravo.`
+        }
+      }
+
+      console.log(`✅ Internal Consumption processed successfully`)
+      console.log(`📋 Process Message:`, resultObj.message || 'No message')
+      console.log(`${'='.repeat(60)}\n`)
+      
+    } catch (processErr) {
+      console.error('❌ Process API error:', processErr.message)
+      console.error('Error details:', processErr.response?.data || processErr)
+      console.log(`⚠️ Internal Consumption created but process API failed: ${consumptionId}`)
+      
+      // ✅ ALTERNATIF: Coba update status processed & posted langsung via REST API
+      console.log('\n🔄 Trying alternative: Direct status update...')
+      
+      try {
+        const updatePayload = {
+          processed: true,
+          posted: 'Y',
+          documentAction: 'CO',
+          documentStatus: 'CO'
+        }
+        
+        console.log('📤 Update Payload:', JSON.stringify(updatePayload, null, 2))
+        
+        const updateRes = await openbravoApi.put(
+          `/org.openbravo.service.json.jsonrest/MaterialMgmtInternalConsumption/${consumptionId}`,
+          updatePayload
+        )
+        
+        console.log('📥 Update Response:', JSON.stringify(updateRes?.data, null, 2))
+        
+        if (updateRes?.data?.response?.status === 0) {
+          console.log('✅ Status updated via direct REST API')
+          console.log(`${'='.repeat(60)}\n`)
+          
+          return {
+            success: true,
+            movementId: consumptionId,
+            successCount,
+            totalMaterials: materials.length,
+            errors: errors.length > 0 ? errors : null,
+            warning: 'Internal Consumption processed via alternative method. Please verify stock in Openbravo.'
+          }
+        }
+      } catch (updateErr) {
+        console.error('❌ Direct update also failed:', updateErr.message)
+      }
+      
+      console.log(`${'='.repeat(60)}\n`)
+      
+      return {
+        success: true,
+        movementId: consumptionId,
+        successCount,
+        totalMaterials: materials.length,
+        errors: errors.length > 0 ? errors : null,
+        warning: `Internal Consumption created but process API failed: ${processErr.message}. Please process manually in Openbravo.`
+      }
+    }
+
+    return {
+      success: true,
+      movementId: consumptionId,
+      successCount,
+      totalMaterials: materials.length,
+      errors: errors.length > 0 ? errors : null
+    }
+
+  } catch (err) {
+    console.error('\n❌ FATAL ERROR:', err.message)
+    console.error('Stack:', err.stack)
+    
+    return {
+      success: false,
+      error: err.message,
+      errors: [],
+      fullError: err
+    }
+  }
+}
+
+// ✅ UPDATE REPORT STATUS
+const updateReportStatus = async () => {
+  try {
+    if (!currentReport.value) return
+    
+    const report = currentReport.value
+    const username = authStore.user?.username || authStore.user?.email || 'Admin'
+    
+    let hasNeedRevision = false
+    let allApproved = true
+    let totalItems = 0
+    let revisionNotes = []
+    let revisionRequestedBy = null
+    let revisionRequestedAt = null
+    
+    // Check type_damages
+    if (report.type_damages && report.type_damages.length > 0) {
+      totalItems += report.type_damages.length
+      for (const td of report.type_damages) {
+        if (td.status === 'needRevision') {
+          hasNeedRevision = true
+          allApproved = false
+          if (td.revision_notes) {
+            revisionNotes.push(`[Kerusakan: ${td.type_damage}] ${td.revision_notes}`)
+          }
+          if (td.revision_requested_by && !revisionRequestedBy) {
+            revisionRequestedBy = td.revision_requested_by
+            revisionRequestedAt = td.revision_requested_at
+          }
+        }
+        if (td.status !== 'approved') {
+          allApproved = false
+        }
+      }
+    }
+    
+    // Check activities
+    if (report.activities && report.activities.length > 0) {
+      totalItems += report.activities.length
+      for (const act of report.activities) {
+        if (act.status === 'needRevision') {
+          hasNeedRevision = true
+          allApproved = false
+          if (act.revision_notes) {
+            revisionNotes.push(`[Aktivitas: ${act.act_name}] ${act.revision_notes}`)
+          }
+          if (act.revision_requested_by && !revisionRequestedBy) {
+            revisionRequestedBy = act.revision_requested_by
+            revisionRequestedAt = act.revision_requested_at
+          }
+        }
+        if (act.status !== 'approved') {
+          allApproved = false
+        }
+      }
+    }
+    
+    // Determine status
+    let newStatus = 'onReview'
+    const updateData = { report_status: null }
+    
+    if (hasNeedRevision) {
+      newStatus = 'needRevision'
+      updateData.report_status = newStatus
+      updateData.revision_notes = revisionNotes.join('\n\n')
+      updateData.revision_requested_by = revisionRequestedBy
+      updateData.revision_requested_at = revisionRequestedAt
+      updateData.approved_by = null
+      updateData.approved_at = null
+    } else if (allApproved && totalItems > 0) {
+      newStatus = 'approved'
+      updateData.report_status = newStatus
+      updateData.approved_by = username
+      updateData.approved_at = new Date().toISOString()
+      updateData.revision_notes = null
+      updateData.revision_requested_by = null
+      updateData.revision_requested_at = null
+    } else {
+      newStatus = 'onReview'
+      updateData.report_status = newStatus
+      updateData.revision_notes = null
+      updateData.revision_requested_by = null
+      updateData.revision_requested_at = null
+      updateData.approved_by = null
+      updateData.approved_at = null
+    }
+    
+    // Update if changed
+    if (report.report_status !== newStatus) {
+      console.log(`🔄 Updating report ${report.report_id} status: ${report.report_status} → ${newStatus}`)
+      
+      const { error: updateErr } = await supabase
+        .from('gh_report')
+        .update(updateData)
+        .eq('report_id', report.report_id)
+      
+      if (updateErr) {
+        console.error('❌ Error updating report status:', updateErr)
+      } else {
+        console.log(`✅ Report ${report.report_id} status updated to ${newStatus}`)
+        Object.assign(currentReport.value, updateData)
+      }
+    } else {
+      // ✅ EVEN IF STATUS SAME, UPDATE REVISION/APPROVAL INFO
+      console.log(`🔄 Status unchanged (${newStatus}), but updating related fields...`)
+      
+      const { error: updateErr } = await supabase
+        .from('gh_report')
+        .update(updateData)
+        .eq('report_id', report.report_id)
+      
+      if (updateErr) {
+        console.error('❌ Error updating report fields:', updateErr)
+      } else {
+        console.log(`✅ Report ${report.report_id} fields updated`)
+        Object.assign(currentReport.value, updateData)
+      }
+    }
+  } catch (err) {
+    console.error('❌ Error in updateReportStatus:', err)
+  }
+}
+
+// Helper functions
+const getBatchName = (batchId) => {
+  const batch = batchStore.batches.find(b => b.batch_id == batchId)
+  return batch?.batch_name || `Batch ${batchId}`
+}
+
+const getLocationName = (locationId) => {
+  const location = locationStore.locations.find(l => l.location_id == locationId)
+  return location?.location || `Location ${locationId}`
+}
+
+const formatDate = (dateStr) => {
+  if (!dateStr) return '-'
+  const date = new Date(dateStr)
+  return date.toLocaleDateString('id-ID', { 
+    day: '2-digit', 
+    month: 'long', 
+    year: 'numeric' 
+  })
+}
+
+const formatDateTime = (dateStr) => {
+  if (!dateStr) return '-'
+  const date = new Date(dateStr)
+  return date.toLocaleString('id-ID', { 
+    day: '2-digit', 
+    month: 'long', 
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit'
+  })
+}
+
+// Computed properties
+const reportInfo = computed(() => {
+  if (!currentReport.value) return null
+  
+  const report = currentReport.value
+  let totalTypeDamages = 0
+  let approvedTypeDamages = 0
+  let revisionTypeDamages = 0
+  let totalActivities = 0
+  let approvedActivities = 0
+  let revisionActivities = 0
+  
+  if (report.type_damages) {
+    totalTypeDamages = report.type_damages.length
+    approvedTypeDamages = report.type_damages.filter(td => td.status === 'approved').length
+    revisionTypeDamages = report.type_damages.filter(td => td.status === 'needRevision').length
+  }
+  if (report.activities) {
+    totalActivities = report.activities.length
+    approvedActivities = report.activities.filter(act => act.status === 'approved').length
+    revisionActivities = report.activities.filter(act => act.status === 'needRevision').length
+  }
+  
+  const hasRevision = revisionTypeDamages > 0 || revisionActivities > 0
+  const allApproved = (approvedTypeDamages === totalTypeDamages) && (approvedActivities === totalActivities) && (totalTypeDamages + totalActivities > 0)
+  
+  return {
+    report_id: report.report_id,
+    location_id: report.location_id,
+    location_name: getLocationName(report.location_id),
+    batch_id: report.batch_id,
+    batch_name: getBatchName(report.batch_id),
+    report_date: report.report_date,
+    report_status: report.report_status,
+    phase: report.phase,
+    phase_name: phaseNames[report.phase] || report.phase || '-',
+    totalTypeDamages,
+    approvedTypeDamages,
+    revisionTypeDamages,
+    totalActivities,
+    approvedActivities,
+    revisionActivities,
+    allApproved,
+    hasRevision,
+    revision_notes: report.revision_notes,
+    revision_requested_by: report.revision_requested_by,
+    revision_requested_at: report.revision_requested_at,
+    approved_by: report.approved_by,
+    approved_at: report.approved_at
+  }
+})
+
+// ✅ APPROVE TYPE DAMAGE
+const approveTypeDamage = async (typeDamageId) => {
+  if (!confirm('✅ Approve data kerusakan tanaman ini?')) return
+
+  try {
+    processing.value = true
+    
+    const username = authStore.user?.username || authStore.user?.email || 'Admin'
+    
+    console.log('📋 Approving type_damage:', typeDamageId)
+    
+    const { error: updateErr } = await supabase
+      .from('gh_type_damage')
+      .update({
+        status: 'approved',
+        approved_by: username,
+        approved_at: new Date().toISOString()
+      })
+      .eq('typedamage_id', typeDamageId)
+    
+    if (updateErr) throw updateErr
+    
+    console.log('✅ Type damage approved')
+    
+    await loadData()
+    alert('✅ Data kerusakan berhasil disetujui!')
+    
+  } catch (err) {
+    console.error('❌ Error:', err)
+    alert('❌ Gagal approve: ' + err.message)
+  } finally {
+    processing.value = false
+  }
+}
+
+// ✅ APPROVE ACTIVITY (FIXED - Create & Process Movement)
+const approveActivity = async (activityId) => {
+  if (!confirm('✅ Approve aktivitas ini?\n\nProses akan membuat dokumen internal dan material akan dikurangi dari stock.')) return
+
+  try {
+    processing.value = true
+    
+    const username = authStore.user?.username || authStore.user?.email || 'Admin'
+    
+    // ✅ CHECK STATUS
+    const { data: checkActivity, error: checkError } = await supabase
+      .from('gh_activity')
+      .select('status, activity_id')
+      .eq('activity_id', activityId)
+      .single()
+    
+    if (checkError) throw checkError
+    
+    if (checkActivity.status === 'approved') {
+      alert('⚠️ Activity ini sudah di-approve sebelumnya!')
+      await loadData()
+      return
+    }
+    
+    // Get activity with materials
+    const { data: activityData, error: getError } = await supabase
+      .from('gh_activity')
+      .select(`
+        *,
+        materials:gh_material_used(*)
+      `)
+      .eq('activity_id', activityId)
+      .single()
+    
+    if (getError) throw getError
+    if (!activityData) throw new Error('Activity tidak ditemukan')
+    
+    // ✅ CREATE & PROCESS INTERNAL MOVEMENT
+    let movementResult = null
+    
+    if (activityData.materials && activityData.materials.length > 0) {
+      console.log('📦 Creating Internal Movement for materials:', activityData.materials.length)
+      
+      movementResult = await createAndProcessMovement(
+        activityData.materials,
+        activityData.act_name
+      )
+      
+      if (!movementResult.success) {
+        const proceed = confirm(
+          `⚠️ Gagal membuat movement:\n${movementResult.error}\n\nTetap approve activity ini?`
+        )
+        if (!proceed) {
+          processing.value = false
+          return
+        }
+      } else if (movementResult.errors && movementResult.errors.length > 0) {
+        const proceed = confirm(
+          `⚠️ Beberapa material gagal:\n\n${movementResult.errors.slice(0, 3).join('\n')}${movementResult.errors.length > 3 ? '\n...' : ''}\n\nTetap approve activity ini?`
+        )
+        if (!proceed) {
+          processing.value = false
+          return
+        }
+      }
+    }
+    
+    // ✅ UPDATE STATUS ACTIVITY
+    const updateData = {
+      status: 'approved',
+      approved_by: username,
+      approved_at: new Date().toISOString()
+    }
+    
+    // Simpan movement ID jika ada
+    if (movementResult?.movementId) {
+      updateData.openbravo_movement_id = movementResult.movementId
+    }
+    
+    const { error: updateErr } = await supabase
+      .from('gh_activity')
+      .update(updateData)
+      .eq('activity_id', activityId)
+    
+    if (updateErr) throw updateErr
+    
+    console.log('✅ Activity approved')
+    
+    await loadData()
+    
+    if (movementResult?.success) {
+      const detailMsg = `
+✅ Aktivitas berhasil disetujui!
+
+Dokumen ID: ${movementResult.movementId}
+Material berhasil diproses: ${movementResult.successCount}/${movementResult.totalMaterials}
+
+${movementResult.errors ? '\n⚠️ Beberapa material gagal:\n' + movementResult.errors.join('\n') : ''}
+
+Silakan cek perubahan stock untuk memastikan.
+      `.trim()
+      alert(detailMsg)
+    } else {
+      alert('✅ Aktivitas berhasil disetujui!\n\n⚠️ Namun tidak ada material yang diproses.')
+    }
+    
+  } catch (err) {
+    console.error('❌ Error:', err)
+    alert('❌ Gagal approve: ' + err.message)
+  } finally {
+    processing.value = false
+  }
+}
+
+// ✅ APPROVE ALL TYPE DAMAGES
+const approveAllTypeDamages = async () => {
+  if (!reportInfo.value || !currentReport.value) return
+  
+  if (!confirm(`✅ Approve SEMUA (${reportInfo.value.totalTypeDamages}) data kerusakan tanaman?`)) return
+
+  try {
+    processing.value = true
+    
+    const username = authStore.user?.username || authStore.user?.email || 'Admin'
+    const typeDamageIds = []
+    
+    if (currentReport.value.type_damages) {
+      currentReport.value.type_damages.forEach(td => {
+        if (!td.status || td.status === 'onReview') {
+          typeDamageIds.push(td.typedamage_id)
+        }
+      })
+    }
+    
+    if (typeDamageIds.length === 0) {
+      alert('⚠️ Tidak ada data kerusakan yang perlu disetujui')
+      return
+    }
+    
+    const { error: updateErr } = await supabase
+      .from('gh_type_damage')
+      .update({
+        status: 'approved',
+        approved_by: username,
+        approved_at: new Date().toISOString()
+      })
+      .in('typedamage_id', typeDamageIds)
+    
+    if (updateErr) throw updateErr
+    
+    await loadData()
+    alert(`✅ ${typeDamageIds.length} data kerusakan berhasil disetujui!`)
+    
+  } catch (err) {
+    console.error('❌ Error:', err)
+    alert('❌ Gagal approve: ' + err.message)
+  } finally {
+    processing.value = false
+  }
+}
+
+// ✅ APPROVE ALL ACTIVITIES (FIXED)
+const approveAllActivities = async () => {
+  if (!reportInfo.value || !currentReport.value) return
+  
+  if (!confirm(`✅ Approve SEMUA (${reportInfo.value.totalActivities}) aktivitas?\n\nProses akan membuat dokumen internal untuk setiap aktivitas dan material akan dikurangi dari stock.`)) return
+
+  try {
+    processing.value = true
+    
+    const username = authStore.user?.username || authStore.user?.email || 'Admin'
+    
+    const activitiesToApprove = []
+    let allMovementResults = []
+    
+    if (currentReport.value.activities) {
+      for (const act of currentReport.value.activities) {
+        if (!act.status || act.status === 'onReview') {
+          const { data: checkAct } = await supabase
+            .from('gh_activity')
+            .select('status')
+            .eq('activity_id', act.activity_id)
+            .single()
+          
+          if (checkAct && checkAct.status !== 'approved') {
+            activitiesToApprove.push(act)
+            
+            // ✅ CREATE & PROCESS MOVEMENT untuk setiap activity
+            if (act.materials && act.materials.length > 0) {
+              console.log(`📦 Creating movement for activity: ${act.act_name}`)
+              
+              const movementResult = await createAndProcessMovement(
+                act.materials,
+                act.act_name
+              )
+              
+              allMovementResults.push({
+                activityName: act.act_name,
+                result: movementResult
+              })
+              
+              // Simpan movement ID ke activity jika berhasil
+              if (movementResult.success && movementResult.movementId) {
+                await supabase
+                  .from('gh_activity')
+                  .update({ openbravo_movement_id: movementResult.movementId })
+                  .eq('activity_id', act.activity_id)
+              }
+            }
+          }
+        }
+      }
+    }
+    
+    if (activitiesToApprove.length === 0) {
+      alert('⚠️ Tidak ada aktivitas yang perlu disetujui')
+      return
+    }
+    
+    // Collect errors
+    const failedMovements = allMovementResults.filter(r => !r.result.success)
+    
+    if (failedMovements.length > 0) {
+      const errorMsg = failedMovements
+        .map(f => `${f.activityName}: ${f.result.error}`)
+        .slice(0, 3)
+        .join('\n')
+      
+      const proceed = confirm(
+        `⚠️ Beberapa movement gagal:\n\n${errorMsg}${failedMovements.length > 3 ? '\n...' : ''}\n\nTetap approve semua activity?`
+      )
+      if (!proceed) {
+        processing.value = false
+        return
+      }
+    }
+    
+    // ✅ BULK UPDATE STATUS
+    const activityIds = activitiesToApprove.map(a => a.activity_id)
+    
+    const { error: updateErr } = await supabase
+      .from('gh_activity')
+      .update({
+        status: 'approved',
+        approved_by: username,
+        approved_at: new Date().toISOString()
+      })
+      .in('activity_id', activityIds)
+    
+    if (updateErr) throw updateErr
+    
+    await loadData()
+    
+    const successCount = allMovementResults.filter(r => r.result.success).length
+    alert(`✅ ${activitiesToApprove.length} aktivitas berhasil disetujui!\n\nDokumen berhasil dibuat: ${successCount}/${allMovementResults.length}`)
+    
+  } catch (err) {
+    console.error('❌ Error:', err)
+    alert('❌ Gagal approve: ' + err.message)
+  } finally {
+    processing.value = false
+  }
+}
+
+// ✅ APPROVE EVERYTHING
+const approveEverything = async () => {
+  if (!reportInfo.value) return
+  
+  if (reportInfo.value.hasRevision) {
+    alert('⚠️ Tidak bisa approve semua!\n\nMasih ada item yang memerlukan revisi.')
+    return
+  }
+  
+  const total = reportInfo.value.totalTypeDamages + reportInfo.value.totalActivities
+  
+  if (!confirm(`✅ Approve SEMUA (${total} items)?`)) return
+
+  try {
+    processing.value = true
+    
+    await approveAllTypeDamages()
+    await approveAllActivities()
+    
+    alert('✅ Semua item berhasil disetujui!')
+    router.push(sourcePage.value)
+    
+  } catch (err) {
+    console.error('❌ Error:', err)
+    alert('❌ Gagal approve semua: ' + err.message)
+  } finally {
+    processing.value = false
+  }
+}
+
+// ✅ REQUEST REVISION
+const openRevisionModal = (type, itemId) => {
+  revisionModal.value = {
+    show: true,
+    type,
+    itemId,
+    notes: ''
+  }
+}
+
+const closeRevisionModal = () => {
+  revisionModal.value = {
+    show: false,
+    type: null,
+    itemId: null,
+    notes: ''
+  }
+}
+
+const handleRevision = async () => {
+  const { type, itemId, notes } = revisionModal.value
+  
+  if (!notes.trim() || notes.trim().length < 10) {
+    alert('⚠️ Catatan revisi minimal 10 karakter')
+    return
+  }
+
+  if (!confirm(`🔄 Kirim permintaan revisi?`)) return
+
+  try {
+    processing.value = true
+    
+    const username = authStore.user?.username || authStore.user?.email || 'Admin'
+    const table = type === 'type_damage' ? 'gh_type_damage' : 'gh_activity'
+    const idField = type === 'type_damage' ? 'typedamage_id' : 'activity_id'
+    
+    const { error: updateErr } = await supabase
+      .from(table)
+      .update({
+        status: 'needRevision',
+        revision_notes: notes,
+        revision_requested_by: username,
+        revision_requested_at: new Date().toISOString()
+      })
+      .eq(idField, itemId)
+    
+    if (updateErr) throw updateErr
+    
+    await loadData()
+    closeRevisionModal()
+    alert('✅ Permintaan revisi berhasil dikirim!')
+    
+  } catch (err) {
+    console.error('❌ Error:', err)
+    alert('❌ Gagal mengirim revisi: ' + err.message)
+  } finally {
+    processing.value = false
+  }
+}
+
+const getStatusBadge = (status) => {
+  const badges = {
+    'onReview': {
+      text: '⏳ Review',
+      class: 'bg-yellow-100 text-yellow-800 border-yellow-200'
+    },
+    'needRevision': {
+      text: '🔄 Revision',
+      class: 'bg-red-100 text-red-800 border-red-200'
+    },
+    'approved': {
+      text: '✅ Approved',
+      class: 'bg-green-100 text-green-800 border-green-200'
+    }
+  }
+  return badges[status || 'onReview'] || badges['onReview']
+}
+</script>
+
 <template>
   <div class="min-h-screen bg-gradient-to-br from-gray-50 to-white">
     <!-- Header Bar -->
     <div class="bg-white border-b border-gray-200 shadow-sm sticky top-0 z-40">
       <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-5">
-        <div class="flex items-center gap-4">
-          <RouterLink
-            to="/reportActivityList"
-            class="flex items-center justify-center w-10 h-10 bg-gray-100 hover:bg-gray-200 rounded-lg transition"
-          >
-            <svg class="w-5 h-5 text-gray-700" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512" fill="currentColor">
-              <path d="M9.4 233.4c-12.5 12.5-12.5 32.8 0 45.3l160 160c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L109.2 288 416 288c17.7 0 32-14.3 32-32s-14.3-32-32-32l-306.7 0L214.6 118.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0l-160 160z"/>
-            </svg>
-          </RouterLink>
-          <div>
-            <h1 class="text-2xl font-bold text-gray-900 flex items-center gap-3">
-              <span class="w-10 h-10 bg-gradient-to-br from-yellow-400 to-yellow-500 rounded-lg flex items-center justify-center text-white text-lg">
-                ⏳
-              </span>
-              Review Activity Report
-            </h1>
-            <p class="text-sm text-gray-500 mt-1 ml-13">Tinjau & Approve Laporan Aktivitas</p>
+        <div class="flex items-center justify-between gap-4">
+          <div class="flex items-center gap-4">
+            <button
+              @click="() => router.push(sourcePage)"
+              class="flex items-center justify-center w-10 h-10 bg-gray-100 hover:bg-gray-200 rounded-lg transition"
+            >
+              <svg class="w-5 h-5 text-gray-700" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512" fill="currentColor">
+                <path d="M9.4 233.4c-12.5 12.5-12.5 32.8 0 45.3l160 160c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L109.2 288 416 288c17.7 0 32-14.3 32-32s-14.3-32-32-32l-306.7 0L214.6 118.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0l-160 160z"/>
+              </svg>
+            </button>
+            <div>
+              <h1 class="text-2xl font-bold text-gray-900 flex items-center gap-3">
+                <span class="w-10 h-10 bg-gradient-to-br from-yellow-400 to-yellow-500 rounded-lg flex items-center justify-center text-white text-lg">
+                  ⏳
+                </span>
+                Review Activity Report
+              </h1>
+              <p class="text-sm text-gray-500 mt-1">Report ID: #{{ report_id }}</p>
+            </div>
           </div>
         </div>
       </div>
     </div>
 
     <!-- Main Content -->
-    <div class="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
       
-      <!-- Info Section -->
-      <div class="mb-8">
-        <h2 class="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-3">Informasi Laporan</h2>
-        <div class="bg-white rounded-2xl border-2 border-gray-100 shadow-sm p-6">
-          <div class="grid grid-cols-1 md:grid-cols-3 gap-5">
-            <!-- Date -->
-            <div class="flex flex-col">
-              <label class="text-sm font-semibold text-gray-700 mb-2 flex items-center gap-2">
-                <svg class="w-4 h-4 text-[#0071f3]" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512" fill="currentColor">
-                  <path d="M128 0c17.7 0 32 14.3 32 32l0 32 128 0 0-32c0-17.7 14.3-32 32-32s32 14.3 32 32l0 32 48 0c26.5 0 48 21.5 48 48l0 48L0 160l0-48C0 85.5 21.5 64 48 64l48 0 0-32c0-17.7 14.3-32 32-32zM0 192l448 0 0 272c0 26.5-21.5 48-48 48L48 512c-26.5 0-48-21.5-48-48L0 192z"/>
-                </svg>
-                Tanggal
-              </label>
-              <div class="px-4 py-3 border-2 border-gray-200 rounded-xl bg-gray-50 text-gray-700 font-medium">
-                17/10/2025
-              </div>
-            </div>
+      <!-- Loading State -->
+      <div v-if="loading" class="flex items-center justify-center py-20">
+        <div class="text-center">
+          <div class="inline-block w-12 h-12 border-4 border-[#0071f3] border-t-transparent rounded-full animate-spin"></div>
+          <p class="mt-4 text-gray-600 font-semibold">Memuat data laporan...</p>
+        </div>
+      </div>
 
-            <!-- Location -->
-            <div class="flex flex-col">
-              <label class="text-sm font-semibold text-gray-700 mb-2 flex items-center gap-2">
-                <span class="text-lg">📍</span>
-                Lokasi
-              </label>
-              <select
-                disabled
-                class="px-4 py-3 border-2 border-gray-200 rounded-xl bg-gray-50 text-gray-700 font-medium focus:outline-none cursor-not-allowed appearance-none"
-              >
-                <option selected>Lokasi A</option>
-              </select>
-            </div>
-
-            <!-- Batch -->
-            <div class="flex flex-col">
-              <label class="text-sm font-semibold text-gray-700 mb-2 flex items-center gap-2">
-                <span class="text-lg">🏷️</span>
-                Batch
-              </label>
-              <select
-                disabled
-                class="px-4 py-3 border-2 border-gray-200 rounded-xl bg-gray-50 text-gray-700 font-medium focus:outline-none cursor-not-allowed appearance-none"
-              >
-                <option selected>Batch 1</option>
-              </select>
-            </div>
+      <!-- Error State -->
+      <div v-else-if="error" class="bg-red-50 border-2 border-red-200 rounded-2xl p-6 mb-6">
+        <div class="flex items-center gap-3">
+          <span class="text-3xl">❌</span>
+          <div>
+            <p class="font-bold text-red-900">Terjadi Kesalahan</p>
+            <p class="text-sm text-red-700 mt-1">{{ error }}</p>
           </div>
         </div>
       </div>
 
-      <!-- Activity Details -->
-      <div class="mb-8">
-        <h2 class="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-3">Detail Aktivitas</h2>
-        <div class="bg-white rounded-2xl border-2 border-gray-100 shadow-sm p-6">
-          <div class="space-y-5">
-            <!-- Activity -->
-            <div class="flex flex-col">
-              <label class="text-sm font-semibold text-gray-700 mb-2">Activity</label>
-              <select
-                disabled
-                class="px-4 py-3 border-2 border-gray-200 rounded-xl bg-gray-50 text-gray-700 font-medium focus:outline-none cursor-not-allowed appearance-none"
+      <!-- Content -->
+      <template v-else-if="reportInfo && currentReport">
+        
+        <!-- Report Info -->
+        <div class="mb-6">
+          <div class="bg-gradient-to-r from-blue-50 to-indigo-50 border-2 border-blue-200 rounded-2xl p-6">
+            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
+              <div>
+                <p class="text-sm text-gray-600 font-semibold mb-1">📍 Lokasi</p>
+                <p class="text-lg font-bold text-gray-900">{{ reportInfo.location_name }}</p>
+              </div>
+              <div>
+                <p class="text-sm text-gray-600 font-semibold mb-1">🏷️ Batch</p>
+                <p class="text-lg font-bold text-gray-900">{{ reportInfo.batch_name }}</p>
+              </div>
+              <div>
+                <p class="text-sm text-gray-600 font-semibold mb-1">🌱 Fase</p>
+                <p class="text-lg font-bold text-gray-900">{{ reportInfo.phase_name }}</p>
+              </div>
+              <div>
+                <p class="text-sm text-gray-600 font-semibold mb-1">📅 Tanggal</p>
+                <p class="text-lg font-bold text-gray-900">{{ formatDate(reportInfo.report_date) }}</p>
+              </div>
+              <div>
+                <p class="text-sm text-gray-600 font-semibold mb-1">📊 Status</p>
+                <span 
+                  :class="getStatusBadge(reportInfo.report_status).class"
+                  class="inline-block px-3 py-1 rounded-lg font-bold text-xs border-2"
+                >
+                  {{ getStatusBadge(reportInfo.report_status).text }}
+                </span>
+              </div>
+            </div>
+            
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4 pt-4 border-t-2 border-blue-200">
+              <div class="bg-white rounded-lg p-4">
+                <p class="text-sm text-gray-600 font-semibold mb-2">🌾 Kerusakan Tanaman</p>
+                <div class="flex items-center gap-3">
+                  <span class="text-2xl font-bold text-gray-900">{{ reportInfo.approvedTypeDamages }}</span>
+                  <span class="text-gray-500">/</span>
+                  <span class="text-xl text-gray-600">{{ reportInfo.totalTypeDamages }}</span>
+                  <span class="text-sm text-gray-500">approved</span>
+                </div>
+              </div>
+              <div class="bg-white rounded-lg p-4">
+                <p class="text-sm text-gray-600 font-semibold mb-2">⚙️ Aktivitas</p>
+                <div class="flex items-center gap-3">
+                  <span class="text-2xl font-bold text-gray-900">{{ reportInfo.approvedActivities }}</span>
+                  <span class="text-gray-500">/</span>
+                  <span class="text-xl text-gray-600">{{ reportInfo.totalActivities }}</span>
+                  <span class="text-sm text-gray-500">approved</span>
+                </div>
+              </div>
+            </div>
+
+            <!-- Report-level Revision Notes -->
+            <div v-if="reportInfo.revision_notes" class="mt-4 pt-4 border-t-2 border-blue-200">
+              <div class="bg-red-50 border-2 border-red-200 rounded-lg p-4">
+                <p class="text-sm font-bold text-red-900 mb-2 flex items-center gap-2">
+                  <span class="text-lg">🔄</span>
+                  Catatan Revisi Report
+                </p>
+                <p class="text-sm text-red-900 whitespace-pre-wrap">{{ reportInfo.revision_notes }}</p>
+                <p class="text-xs text-red-600 mt-2">
+                  Requested by: {{ reportInfo.revision_requested_by }} • {{ formatDateTime(reportInfo.revision_requested_at) }}
+                </p>
+              </div>
+            </div>
+
+            <!-- Report-level Approval Info -->
+            <div v-if="reportInfo.approved_at" class="mt-4 pt-4 border-t-2 border-blue-200">
+              <div class="bg-green-50 border-2 border-green-200 rounded-lg p-4">
+                <p class="text-sm font-bold text-green-900 mb-2 flex items-center gap-2">
+                  <span class="text-lg">✅</span>
+                  Report Approved
+                </p>
+                <p class="text-sm text-green-900">
+                  Approved by: {{ reportInfo.approved_by }} • {{ formatDateTime(reportInfo.approved_at) }}
+                </p>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Bulk Actions -->
+        <div class="mb-6">
+          <div class="bg-white rounded-2xl border-2 border-gray-100 shadow-sm p-5">
+            <p class="text-sm font-bold text-gray-700 mb-4">🚀 Bulk Actions</p>
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
+              <button
+                @click="approveAllTypeDamages"
+                :disabled="processing || reportInfo.approvedTypeDamages === reportInfo.totalTypeDamages"
+                class="bg-blue-500 hover:bg-blue-600 text-white font-semibold py-3 rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
               >
-                <option selected>Pekerjaan A</option>
-              </select>
+                <span>✅ Approve All Damages</span>
+              </button>
+              <button
+                @click="approveAllActivities"
+                :disabled="processing || reportInfo.approvedActivities === reportInfo.totalActivities"
+                class="bg-purple-500 hover:bg-purple-600 text-white font-semibold py-3 rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+              >
+                <span>✅ Approve All Activities</span>
+              </button>
+              <button
+                @click="approveEverything"
+                :disabled="processing || reportInfo.allApproved"
+                class="bg-green-500 hover:bg-green-600 text-white font-semibold py-3 rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+              >
+                <span>✅ Approve Everything</span>
+              </button>
             </div>
+          </div>
+        </div>
 
-            <!-- CoA -->
-            <div class="flex flex-col">
-              <label class="text-sm font-semibold text-gray-700 mb-2">Chart of Account (CoA)</label>
-              <input
-                type="text"
-                value="CoA 001"
-                disabled
-                class="px-4 py-3 border-2 border-gray-200 rounded-xl bg-gray-50 text-gray-700 font-medium focus:outline-none cursor-not-allowed"
-              />
+        <!-- Report Content -->
+        <div class="bg-white rounded-2xl border-2 border-gray-100 shadow-sm overflow-hidden">
+          <!-- Report Header -->
+          <div class="bg-gradient-to-r from-gray-50 to-white p-5 border-b-2 border-gray-100">
+            <div class="flex items-center gap-3">
+              <div class="w-10 h-10 bg-gradient-to-br from-[#0071f3] to-[#8FABD4] rounded-lg flex items-center justify-center text-white font-bold text-lg">
+                #
+              </div>
+              <div>
+                <p class="text-sm text-gray-500 font-semibold">Report ID</p>
+                <p class="text-lg font-bold text-gray-900">#{{ currentReport.report_id }}</p>
+              </div>
             </div>
+          </div>
 
-            <!-- Material Section -->
-            <div class="bg-gray-50 rounded-xl p-5">
-              <h4 class="text-base font-bold text-gray-900 flex items-center gap-2 mb-4">
-                <span class="text-lg">📦</span>
-                Material
+          <!-- Report Content -->
+          <div class="p-6 space-y-6">
+            
+            <!-- Type Damages Section -->
+            <div v-if="currentReport.type_damages && currentReport.type_damages.length > 0">
+              <h4 class="text-lg font-bold text-gray-900 mb-4 flex items-center gap-2">
+                <span class="text-2xl">🌾</span>
+                Kerusakan Tanaman ({{ currentReport.type_damages.length }})
               </h4>
-              <div class="flex flex-col sm:flex-row gap-4 bg-white rounded-lg p-4 border border-gray-200">
-                <div class="flex-1 flex flex-col">
-                  <label class="text-xs font-semibold text-gray-600 mb-2">Nama Material</label>
-                  <select
-                    disabled
-                    class="px-4 py-2.5 border-2 border-gray-200 rounded-lg bg-gray-50 text-gray-700 text-sm font-medium focus:outline-none cursor-not-allowed appearance-none"
-                  >
-                    <option selected>Pestisida selektif</option>
-                  </select>
-                </div>
-                <div class="w-full sm:w-32 flex flex-col">
-                  <label class="text-xs font-semibold text-gray-600 mb-2">Qty</label>
-                  <input
-                    type="number"
-                    value="50"
-                    disabled
-                    class="px-4 py-2.5 border-2 border-gray-200 rounded-lg bg-gray-50 text-gray-700 text-sm font-medium focus:outline-none cursor-not-allowed"
-                  />
-                </div>
-                <div class="w-full sm:w-32 flex flex-col">
-                  <label class="text-xs font-semibold text-gray-600 mb-2">Unit</label>
-                  <input
-                    type="text"
-                    value="kg"
-                    disabled
-                    class="px-4 py-2.5 border-2 border-gray-200 rounded-lg bg-gray-50 text-gray-700 text-sm font-medium focus:outline-none cursor-not-allowed"
-                  />
+              <div class="space-y-3">
+                <div
+                  v-for="damage in currentReport.type_damages"
+                  :key="damage.typedamage_id"
+                  class="bg-gray-50 rounded-xl p-5 border-2 border-gray-200"
+                >
+                  <div class="flex items-start justify-between gap-4 mb-4">
+                    <div class="flex-1">
+                      <p class="font-bold text-gray-900 text-lg mb-3">{{ damage.type_damage || 'Kerusakan' }}</p>
+                      <div class="grid grid-cols-3 gap-3">
+                        <div class="bg-white rounded-lg p-3">
+                          <p class="text-xs text-gray-500 font-semibold mb-1">🟡 Kuning</p>
+                          <p class="text-2xl font-bold text-gray-900">{{ damage.kuning || 0 }}</p>
+                        </div>
+                        <div class="bg-white rounded-lg p-3">
+                          <p class="text-xs text-gray-500 font-semibold mb-1">🟠 Kutilang</p>
+                          <p class="text-2xl font-bold text-gray-900">{{ damage.kutilang || 0 }}</p>
+                        </div>
+                        <div class="bg-white rounded-lg p-3">
+                          <p class="text-xs text-gray-500 font-semibold mb-1">🔴 Busuk</p>
+                          <p class="text-2xl font-bold text-gray-900">{{ damage.busuk || 0 }}</p>
+                        </div>
+                      </div>
+                    </div>
+                    <div class="flex flex-col items-end gap-2">
+                      <span 
+                        :class="getStatusBadge(damage.status).class"
+                        class="px-3 py-1 rounded-lg font-bold text-xs border-2 whitespace-nowrap"
+                      >
+                        {{ getStatusBadge(damage.status).text }}
+                      </span>
+                      <button
+                        v-if="!damage.status || damage.status === 'onReview'"
+                        @click="approveTypeDamage(damage.typedamage_id)"
+                        :disabled="processing"
+                        class="bg-green-500 hover:bg-green-600 text-white font-semibold px-4 py-2 rounded-lg transition disabled:opacity-50 text-sm"
+                      >
+                        ✅ Approve
+                      </button>
+                      <button
+                        v-if="!damage.status || damage.status === 'onReview'"
+                        @click="openRevisionModal('type_damage', damage.typedamage_id)"
+                        :disabled="processing"
+                        class="bg-red-500 hover:bg-red-600 text-white font-semibold px-4 py-2 rounded-lg transition disabled:opacity-50 text-sm"
+                      >
+                        🔄 Revise
+                      </button>
+                    </div>
+                  </div>
+                  
+                  <!-- Revision Info -->
+                  <div v-if="damage.revision_notes" class="mt-3 bg-red-50 border-2 border-red-200 rounded-lg p-3">
+                    <p class="text-xs text-red-600 font-semibold mb-1">Revision Notes:</p>
+                    <p class="text-sm text-red-900">{{ damage.revision_notes }}</p>
+                    <p class="text-xs text-red-600 mt-2">By: {{ damage.revision_requested_by }} • {{ formatDateTime(damage.revision_requested_at) }}</p>
+                  </div>
                 </div>
               </div>
             </div>
 
-            <!-- Worker Section -->
-            <div class="bg-gray-50 rounded-xl p-5">
-              <h4 class="text-base font-bold text-gray-900 flex items-center gap-2 mb-4">
-                <span class="text-lg">👷</span>
-                Tenaga Kerja
+            <!-- Activities Section -->
+            <div v-if="currentReport.activities && currentReport.activities.length > 0">
+              <h4 class="text-lg font-bold text-gray-900 mb-4 flex items-center gap-2">
+                <span class="text-2xl">⚙️</span>
+                Aktivitas ({{ currentReport.activities.length }})
               </h4>
-              <div class="flex gap-3 bg-white rounded-lg p-4 border border-gray-200">
-                <div class="w-full sm:w-32 flex flex-col">
-                  <label class="text-xs font-semibold text-gray-600 mb-2">Jumlah Pekerja</label>
-                  <input
-                    type="number"
-                    value="5"
-                    disabled
-                    class="px-4 py-2.5 border-2 border-gray-200 rounded-lg bg-gray-50 text-gray-700 text-sm font-medium focus:outline-none cursor-not-allowed"
-                  />
+              <div class="space-y-4">
+                <div
+                  v-for="activity in currentReport.activities"
+                  :key="activity.activity_id"
+                  class="bg-gray-50 rounded-xl p-5 border-2 border-gray-200"
+                >
+                  <div class="flex items-start justify-between gap-4 mb-4">
+                    <div class="flex-1">
+                      <p class="font-bold text-gray-900 text-lg mb-3">{{ activity.act_name }}</p>
+                      <div class="grid grid-cols-2 gap-3 mb-4">
+                        <div class="bg-white rounded-lg p-3">
+                          <p class="text-xs text-gray-500 font-semibold mb-1">CoA</p>
+                          <p class="text-sm font-medium text-gray-900">{{ activity.CoA || '-' }}</p>
+                        </div>
+                        <div class="bg-white rounded-lg p-3">
+                          <p class="text-xs text-gray-500 font-semibold mb-1">👷 Manpower</p>
+                          <p class="text-sm font-medium text-gray-900">{{ activity.manpower || 0 }} pekerja</p>
+                        </div>
+                      </div>
+
+                      <!-- Materials -->
+                      <div v-if="activity.materials && activity.materials.length > 0" class="bg-white rounded-lg p-4">
+                        <p class="text-sm font-bold text-gray-700 mb-3 flex items-center gap-2">
+                          <span class="text-base">📦</span>
+                          Materials ({{ activity.materials.length }})
+                        </p>
+                        <div class="space-y-2">
+                          <div
+                            v-for="material in activity.materials"
+                            :key="material.material_used_id"
+                            class="flex items-center justify-between py-2 px-3 bg-blue-50 rounded-lg"
+                          >
+                            <span class="text-sm font-medium text-gray-900">{{ material.material_name }}</span>
+                            <span class="text-sm font-bold text-blue-700">{{ material.qty }} {{ material.uom }}</span>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                    
+                    <div class="flex flex-col items-end gap-2">
+                      <span 
+                        :class="getStatusBadge(activity.status).class"
+                        class="px-3 py-1 rounded-lg font-bold text-xs border-2 whitespace-nowrap"
+                      >
+                        {{ getStatusBadge(activity.status).text }}
+                      </span>
+                      <button
+                        v-if="!activity.status || activity.status === 'onReview'"
+                        @click="approveActivity(activity.activity_id)"
+                        :disabled="processing"
+                        class="bg-green-500 hover:bg-green-600 text-white font-semibold px-4 py-2 rounded-lg transition disabled:opacity-50 text-sm whitespace-nowrap"
+                      >
+                        ✅ Approve
+                      </button>
+                      <button
+                        v-if="!activity.status || activity.status === 'onReview'"
+                        @click="openRevisionModal('activity', activity.activity_id)"
+                        :disabled="processing"
+                        class="bg-red-500 hover:bg-red-600 text-white font-semibold px-4 py-2 rounded-lg transition disabled:opacity-50 text-sm whitespace-nowrap"
+                      >
+                        🔄 Revise
+                      </button>
+                    </div>
+                  </div>
+
+                  <!-- Approval Info -->
+                  <div v-if="activity.approved_at" class="mt-3 bg-green-50 border-2 border-green-200 rounded-lg p-3">
+                    <p class="text-xs text-green-600 font-semibold mb-1">✅ Approved</p>
+                    <p class="text-sm text-green-900">By: {{ activity.approved_by }} • {{ formatDateTime(activity.approved_at) }}</p>
+                    <p v-if="activity.openbravo_movement_id" class="text-xs text-green-700 mt-1">Document ID: {{ activity.openbravo_movement_id }}</p>
+                  </div>
+                  
+                  <!-- Revision Info -->
+                  <div v-if="activity.revision_notes" class="mt-3 bg-red-50 border-2 border-red-200 rounded-lg p-3">
+                    <p class="text-xs text-red-600 font-semibold mb-1">Revision Notes:</p>
+                    <p class="text-sm text-red-900">{{ activity.revision_notes }}</p>
+                    <p class="text-xs text-red-600 mt-2">By: {{ activity.revision_requested_by }} • {{ formatDateTime(activity.revision_requested_at) }}</p>
+                  </div>
                 </div>
               </div>
             </div>
           </div>
         </div>
-      </div>
 
-      <!-- Action Buttons -->
-      <div class="mb-8">
-        <h2 class="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-3">Review Action</h2>
-        <div class="bg-white rounded-2xl border-2 border-gray-100 shadow-sm p-6">
-          <div class="flex flex-col sm:flex-row gap-4">
-            <router-link
-              to="/reportActivityList"
-              class="flex-1 bg-gradient-to-r from-green-500 to-green-600 hover:from-green-600 hover:to-green-700 text-white font-semibold py-4 rounded-xl transition-all shadow-md hover:shadow-lg transform hover:-translate-y-0.5 text-center flex items-center justify-center gap-2 text-lg"
-            >
-              <svg class="w-5 h-5" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512" fill="currentColor">
-                <path d="M438.6 105.4c12.5 12.5 12.5 32.8 0 45.3l-256 256c-12.5 12.5-32.8 12.5-45.3 0l-128-128c-12.5-12.5-12.5-32.8 0-45.3s32.8-12.5 45.3 0L160 338.7 393.4 105.4c12.5-12.5 32.8-12.5 45.3 0z"/>
-              </svg>
-              Approve
-            </router-link>
-
-            <router-link
-              to="/reportActivityList"
-              class="flex-1 bg-gradient-to-r from-red-500 to-red-600 hover:from-red-600 hover:to-red-700 text-white font-semibold py-4 rounded-xl transition-all shadow-md hover:shadow-lg transform hover:-translate-y-0.5 text-center flex items-center justify-center gap-2 text-lg"
-            >
-              <svg class="w-5 h-5" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" fill="currentColor">
-                <path d="M142.9 142.9c-17.5 17.5-30.1 38-37.8 59.8c-5.9 16.7-24.2 25.4-40.8 19.5s-25.4-24.2-19.5-40.8C55.6 150.7 73.2 122 97.6 97.6c87.2-87.2 228.3-87.5 315.8-1L455 55c6.9-6.9 17.2-8.9 26.2-5.2s14.8 12.5 14.8 22.2l0 128c0 13.3-10.7 24-24 24l-8.4 0c0 0 0 0 0 0L344 224c-9.7 0-18.5-5.8-22.2-14.8s-1.7-19.3 5.2-26.2l41.1-41.1c-62.6-61.5-163.1-61.2-225.3 1zM16 312c0-13.3 10.7-24 24-24l7.6 0 .7 0L168 288c9.7 0 18.5 5.8 22.2 14.8s1.7 19.3-5.2 26.2l-41.1 41.1c62.6 61.5 163.1 61.2 225.3-1c17.5-17.5 30.1-38 37.8-59.8c5.9-16.7 24.2-25.4 40.8-19.5s25.4 24.2 19.5 40.8c-10.8 30.6-28.4 59.3-52.9 83.8c-87.2 87.2-228.3 87.5-315.8 1L57 457c-6.9 6.9-17.2 8.9-26.2 5.2S16 449.7 16 440l0-119.6 0-.7 0-7.6z"/>
-              </svg>
-              Request Revision
-            </router-link>
+        <!-- Info Box -->
+        <div class="bg-blue-50 border-2 border-blue-200 rounded-2xl p-5 mt-6">
+          <div class="flex items-start gap-3">
+            <span class="text-2xl">💡</span>
+            <div class="flex-1">
+              <p class="font-bold text-blue-900 mb-2">Cara Review</p>
+              <ul class="text-sm text-blue-800 space-y-1">
+                <li>• <strong>Per Item:</strong> Klik "Approve" atau "Revise" pada setiap kerusakan tanaman atau aktivitas</li>
+                <li>• <strong>Bulk Actions:</strong> Gunakan tombol di atas untuk approve semua sekaligus</li>
+                <li>• <strong>Material Stock:</strong> Saat approve aktivitas, sistem akan otomatis memproses pengurangan stock material</li>
+                <li>• <strong>Status Report:</strong> Report akan berstatus "Approved" hanya jika SEMUA item sudah approved</li>
+                <li>• <strong>Revision:</strong> Item yang direquest revision akan dikembalikan ke staff untuk diperbaiki</li>
+              </ul>
+            </div>
           </div>
         </div>
-      </div>
+
+      </template>
 
       <!-- Footer -->
       <footer class="text-center py-10 mt-8 border-t border-gray-200">
@@ -200,29 +1516,95 @@
         <p class="text-gray-400 text-xs">© 2025 All Rights Reserved</p>
       </footer>
     </div>
+
+    <!-- Revision Modal -->
+    <div v-if="revisionModal.show" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+      <div class="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl animate-fade-in">
+        <div class="flex items-center justify-between mb-4">
+          <h3 class="text-xl font-bold text-gray-900 flex items-center gap-2">
+            <span class="text-2xl">🔄</span>
+            Request Revision
+          </h3>
+          <button 
+            @click="closeRevisionModal" 
+            class="text-gray-400 hover:text-gray-600 transition"
+            :disabled="processing"
+          >
+            <svg class="w-6 h-6" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 384 512" fill="currentColor">
+              <path d="M342.6 150.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0L192 210.7 86.6 105.4c-12.5-12.5-32.8-12.5-45.3 0s-12.5 32.8 0 45.3L146.7 256 41.4 361.4c-12.5 12.5-12.5 32.8 0 45.3s32.8 12.5 45.3 0L192 301.3 297.4 406.6c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L237.3 256 342.6 150.6z"/>
+            </svg>
+          </button>
+        </div>
+        
+        <div class="mb-6">
+          <label class="block text-sm font-semibold text-gray-700 mb-2">
+            Item Type
+          </label>
+          <div class="px-4 py-3 border-2 border-gray-200 rounded-xl bg-gray-50 text-gray-700 font-medium">
+            {{ revisionModal.type === 'type_damage' ? '🌾 Kerusakan Tanaman' : '⚙️ Aktivitas' }}
+          </div>
+        </div>
+
+        <div class="mb-6">
+          <label class="block text-sm font-semibold text-gray-700 mb-2">
+            Catatan Revisi <span class="text-red-500">*</span>
+          </label>
+          <textarea
+            v-model="revisionModal.notes"
+            rows="6"
+            placeholder="Tuliskan dengan jelas apa yang perlu diperbaiki...&#10;&#10;Contoh untuk kerusakan:&#10;- Data kuning perlu diverifikasi ulang&#10;- Jumlah busuk tidak sesuai dengan kondisi aktual&#10;&#10;Contoh untuk aktivitas:&#10;- Material yang digunakan belum sesuai&#10;- Jumlah qty perlu diperbaiki&#10;- CoA salah"
+            class="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:border-[#0071f3] focus:outline-none transition resize-none"
+            :disabled="processing"
+          ></textarea>
+          <p class="text-xs text-gray-500 mt-2">
+            Minimal 10 karakter. Berikan penjelasan yang detail.
+          </p>
+          <div class="mt-3 flex items-center gap-2 text-sm">
+            <span class="font-semibold" :class="revisionModal.notes.trim().length < 10 ? 'text-red-600' : 'text-green-600'">
+              {{ revisionModal.notes.trim().length }} / 10
+            </span>
+            <span class="text-gray-500">karakter</span>
+          </div>
+        </div>
+
+        <div class="flex gap-3">
+          <button
+            @click="closeRevisionModal"
+            :disabled="processing"
+            class="flex-1 px-4 py-3 bg-gray-100 hover:bg-gray-200 text-gray-700 font-semibold rounded-xl transition disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            Batal
+          </button>
+          <button
+            @click="handleRevision"
+            :disabled="!revisionModal.notes.trim() || revisionModal.notes.trim().length < 10 || processing"
+            class="flex-1 px-4 py-3 bg-gradient-to-r from-red-500 to-red-600 hover:from-red-600 hover:to-red-700 text-white font-semibold rounded-xl transition disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+          >
+            <svg v-if="processing" class="w-5 h-5 animate-spin" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+              <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+              <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+            </svg>
+            <span>{{ processing ? 'Mengirim...' : 'Kirim Revisi' }}</span>
+          </button>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
-<script setup>
-import { RouterLink } from 'vue-router'
-</script>
-
 <style scoped>
-select {
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3E%3Cpath stroke='%236b7280' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.5' d='m6 8 4 4 4-4'/%3E%3C/svg%3E");
-  background-position: right 0.75rem center;
-  background-repeat: no-repeat;
-  background-size: 1.5em 1.5em;
-  padding-right: 2.5rem;
-}
-
-.ml-13 {
-  margin-left: 3.25rem;
-}
-
-@media (max-width: 640px) {
-  .ml-13 {
-    margin-left: 0;
+@keyframes fade-in {
+  from {
+    opacity: 0;
+    transform: scale(0.95);
   }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.animate-fade-in {
+  animation: fade-in 0.2s ease-out;
 }
 </style>

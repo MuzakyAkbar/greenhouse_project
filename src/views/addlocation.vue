@@ -454,7 +454,6 @@ async function submitToSupabase() {
         {
           location: locationName.value,
           id_openbravo: openbravoId.value,
-          batch_id: null
         }
       ])
       .select()

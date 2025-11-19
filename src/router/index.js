@@ -1,7 +1,5 @@
 import { createRouter, createWebHistory } from "vue-router";
 import { useAuthStore } from "../stores/auth";
-
-// 🔹 Import tambahan untuk halaman AddBatch
 import AddBatch from "../views/AddBatch.vue";
 
 const router = createRouter({
@@ -18,7 +16,6 @@ const router = createRouter({
       component: () => import("../views/dashboard.vue"),
       meta: { requiresAuth: true, roles: ["manager", "admin"] },
     },
-    // 🔹 Dashboard Staff (NEW)
     {
       path: "/dashboard-staff",
       name: "dashboardStaff",
@@ -26,17 +23,88 @@ const router = createRouter({
       meta: { requiresAuth: true, roles: ["staff"] },
     },
     {
-      path: "/reportActivityList",
-      name: "reportActivityList",
-      component: () => import("../views/ReportActivityList.vue"),
+      path: "/planningReportList",
+      name: "planningReportList",
+      component: () => import("../views/planningReportList.vue"),
       meta: { requiresAuth: true },
     },
+    
+    // ✅ PLANNING ROUTES - Menggunakan planning_id sebagai param
     {
-      path: "/reportActivityReview",
+      path: "/planningActivityReview/:planning_id",
+      name: "planningActivityReview",
+      component: () => import("../views/planningActivityReview.vue"),
+      meta: { requiresAuth: true },
+      beforeEnter: (to, from, next) => {
+        console.log('🔍 planningActivityReview beforeEnter guard')
+        console.log('  - to.params.planning_id:', to.params.planning_id)
+        console.log('  - from.path:', from.path)
+        
+        if (!to.params.planning_id) {
+          console.log('❌ No planning_id in params - Redirecting to planningReportList')
+          alert('⚠️ Planning ID tidak valid')
+          next({ name: 'planningReportList' })
+        } else {
+          console.log('✅ Valid planning_id - Proceeding')
+          next()
+        }
+      }
+    },
+    {
+      path: "/planningActivityView/:planning_id",
+      name: "planningActivityView",
+      component: () => import("../views/planningActivityView.vue"),
+      meta: { requiresAuth: true },
+      beforeEnter: (to, from, next) => {
+        console.log('🔍 planningActivityView beforeEnter guard')
+        console.log('  - to.params.planning_id:', to.params.planning_id)
+        
+        if (!to.params.planning_id) {
+          console.log('❌ No planning_id in params - Redirecting to planningReportList')
+          alert('⚠️ Planning ID tidak valid')
+          next({ name: 'planningReportList' })
+        } else {
+          console.log('✅ Valid planning_id - Proceeding')
+          next()
+        }
+      }
+    },
+    
+    // ✅ REPORT ACTIVITY ROUTES - Menggunakan report_id sebagai param
+    {
+      path: "/reportActivityReview/:report_id",
       name: "reportActivityReview",
       component: () => import("../views/ReportActivityReview.vue"),
       meta: { requiresAuth: true },
     },
+    {
+      path: "/reportActivityView/:report_id",
+      name: "reportActivityView",
+      component: () => import("../views/ReportActivityView.vue"),
+      meta: { requiresAuth: true },
+    },
+    {
+      path: "/reportActivityEdit/:report_id",
+      name: "reportActivityEdit",
+      component: () => import("../views/ReportActivityEdit.vue"),
+      meta: { requiresAuth: true },
+      beforeEnter: (to, from, next) => {
+        console.log('🔍 reportActivityEdit beforeEnter guard')
+        console.log('  - to.params.report_id:', to.params.report_id)
+        console.log('  - from.path:', from.path)
+        
+        if (!to.params.report_id) {
+          console.log('❌ No report_id in params - Redirecting to planningReportList')
+          alert('⚠️ Report ID tidak valid')
+          next({ name: 'planningReportList' })
+        } else {
+          console.log('✅ Valid report_id - Proceeding')
+          next()
+        }
+      }
+    },
+    
+    // Form pages
     {
       path: "/formReportActivity",
       name: "formReportActivity",
@@ -44,11 +112,13 @@ const router = createRouter({
       meta: { requiresAuth: true },
     },
     {
-      path: "/reportActivityView",
-      name: "reportActivityView",
-      component: () => import("../views/ReportActivityView.vue"),
+      path: "/planningActivity",
+      name: "planningActivity",
+      component: () => import("../views/planningActivity.vue"),
       meta: { requiresAuth: true },
     },
+    
+    // Batch routes
     {
       path: "/batch/:id",
       name: "BatchDetail",
@@ -61,8 +131,8 @@ const router = createRouter({
       component: AddBatch,
       meta: { requiresAuth: true },
     },
-
-    // 🔹 Routing Production & Sales
+    
+    // Production routes
     {
       path: "/reportProductionReview",
       name: "reportProductionReview",
@@ -81,6 +151,8 @@ const router = createRouter({
       component: () => import("../views/reportProduction.vue"),
       meta: { requiresAuth: true },
     },
+    
+    // Good movement routes
     {
       path: "/goodmovement",
       name: "goodmovement",
@@ -106,6 +178,8 @@ const router = createRouter({
       component: () => import("../views/detailmovement.vue"),
       meta: { requiresAuth: true },
     },
+    
+    // Location routes
     {
       path: "/add-location",
       name: "addlocation",
@@ -121,44 +195,60 @@ const router = createRouter({
   ],
 });
 
-// 🔒 Middleware auth guard — aman anti infinite redirect
+// 🔒 Middleware auth guard
 router.beforeEach((to, from, next) => {
   const authStore = useAuthStore();
   const isLoggedIn = !!authStore.isLoggedIn;
   const userRole = authStore.user?.role?.toLowerCase() || null;
 
-  // 1) Butuh auth tapi belum login → ke login (hindari redirect berulang)
+  console.log('🔐 Router Guard:', {
+    to: to.path,
+    from: from.path,
+    isLoggedIn,
+    userRole
+  })
+
+  // 1) Butuh auth tapi belum login → ke login
   if (to.meta.requiresAuth && !isLoggedIn) {
     if (to.name !== "login") {
+      console.log('❌ Not logged in - Redirect to login')
       return next({ name: "login", query: { redirect: to.fullPath } });
     }
     return next();
   }
 
-  // 2) Sudah login tapi ke login → arahkan sesuai role (fix: nama route benar)
+  // 2) Sudah login tapi ke login → arahkan sesuai role
   if (to.name === "login" && isLoggedIn) {
     const target = userRole === "staff" ? "dashboardStaff" : "dashboard";
     if (to.name !== target) {
+      console.log('✅ Already logged in - Redirect to', target)
       return next({ name: target });
     }
     return next();
   }
 
-  // 3) Role-based access: hanya cek kalau role sudah ada
+  // 3) Role-based access
   if (to.meta.roles && to.meta.roles.length > 0) {
     if (userRole && !to.meta.roles.includes(userRole)) {
       const fallback = userRole === "staff" ? "dashboardStaff" : "dashboard";
-      // Hindari redirect ke route yang sama
       if (to.name !== fallback) {
+        console.log('❌ Role mismatch - Redirect to', fallback)
         return next({ name: fallback });
       }
       return next();
     }
-    // Jika role belum terisi (store belum ter-hydrate), jangan redirect dulu
-    // biar tidak loop — izinkan lanjut
   }
 
+  console.log('✅ Navigation allowed')
   return next();
 });
+
+// ✅ Global after hook untuk debugging
+router.afterEach((to, from) => {
+  console.log('📍 Navigation completed:')
+  console.log('  - From:', from.path)
+  console.log('  - To:', to.path)
+  console.log('  - Params:', to.params)
+})
 
 export default router;
