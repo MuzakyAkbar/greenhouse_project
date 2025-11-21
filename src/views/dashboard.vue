@@ -2,10 +2,7 @@
 import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import ModalView from '@/components/ModalView.vue'
-<<<<<<< HEAD
-=======
 import PotatoProgressBar from '@/components/PotatoProgressBar.vue'
->>>>>>> 8175f7ff635de1c79113717bf65c6b1c8a4a7f39
 import {
   Chart,
   LineController,
@@ -140,21 +137,12 @@ onMounted(async () => {
 
   const grouped = {};
 
-<<<<<<< HEAD
-  batchData.forEach(b => {
-=======
   batchData?.forEach(b => {
->>>>>>> 8175f7ff635de1c79113717bf65c6b1c8a4a7f39
     if (!grouped[b.location_id]) grouped[b.location_id] = [];
     grouped[b.location_id].push(b);
   });
 
   locationBatches.value = grouped;
-<<<<<<< HEAD
-});
-
-
-=======
 
   // Ambil data produksi dari database dengan location_id
   const { data: productionData } = await supabase
@@ -540,7 +528,6 @@ const initPenjualanChart = async () => {
   });
 };
 
->>>>>>> 8175f7ff635de1c79113717bf65c6b1c8a4a7f39
 </script>
 
 <template>
@@ -584,15 +571,6 @@ const initPenjualanChart = async () => {
           >
             📊 Planning & Report List
           </button>
-<<<<<<< HEAD
-          <!-- <router-link
-            to="/report-production"
-            class="bg-white hover:bg-gray-50 text-gray-700 font-medium px-5 py-3 rounded-xl transition-all text-sm border-2 border-gray-200 hover:border-[#0071f3] shadow-sm hover:shadow inline-flex items-center"
-          >
-            📈 Laporan Produksi
-          </router-link> -->
-=======
->>>>>>> 8175f7ff635de1c79113717bf65c6b1c8a4a7f39
           <router-link
             to="/planningActivity"
             class="group bg-gradient-to-r from-[#0071f3] to-[#0060d1] hover:from-[#0060d1] hover:to-[#0050b1] text-white font-medium px-5 py-3 rounded-xl transition-all text-sm shadow-md hover:shadow-lg transform hover:-translate-y-0.5"
@@ -730,18 +708,6 @@ const initPenjualanChart = async () => {
         <h2 class="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-3">Data Setiap Location</h2>
       </div>
       <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-<<<<<<< HEAD
-      <div
-        v-for="loc in locationList"
-        :key="loc.location_id"
-        class="group bg-white rounded-2xl border-2 border-gray-100 p-6 hover:border-[#0071f3] hover:shadow-xl transition-all transform hover:-translate-y-1"
-      >
-        <div class="flex items-start justify-between mb-4">
-          <h3 class="text-lg font-bold text-gray-900 flex-1">{{ loc.location }}</h3>
-          <div class="w-12 h-12 bg-gradient-to-br from-[#0071f3] to-[#8FABD4] rounded-xl flex items-center justify-center text-white text-xl">
-            📍
-          </div>
-=======
         <div
           v-for="loc in locationList"
           :key="loc.location_id"
@@ -777,36 +743,8 @@ const initPenjualanChart = async () => {
           >
             Lihat Detail →
           </button>
->>>>>>> 8175f7ff635de1c79113717bf65c6b1c8a4a7f39
         </div>
-
-        <!-- contoh display default angka (nanti bisa kamu ganti real data) -->
-        <div class="space-y-3 mb-6">
-          <div class="bg-gray-50 px-3 py-2 rounded-lg">
-      <span class="text-gray-600 font-medium block mb-1">Batch</span>
-
-      <div v-if="locationBatches[loc.location_id]?.length > 0">
-        <p 
-          v-for="b in locationBatches[loc.location_id]" 
-          :key="b.batch_id"
-          class="text-sm font-semibold text-gray-900"
-        >
-          • {{ b.batch_name }}
-        </p>
       </div>
-      <p v-else class="text-sm text-gray-500 italic">Tidak ada batch</p>
-    </div>
-    </div>
-
-    <button
-      class="w-full bg-gradient-to-r from-[#0071f3] to-[#0060d1] text-white py-3 rounded-xl font-semibold hover:shadow-lg transition-all text-sm"
-      @click="router.push(`/location/${loc.location_id}`)"
-    >
-      Lihat Detail →
-    </button>
-  </div>
-</div>
-
 
       <!-- Footer -->
       <footer class="text-center py-10 mt-16 border-t border-gray-200">

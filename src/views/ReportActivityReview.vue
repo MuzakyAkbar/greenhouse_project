@@ -1,7 +1,3 @@
-<<<<<<< HEAD
-
-=======
->>>>>>> 8175f7ff635de1c79113717bf65c6b1c8a4a7f39
 <script setup>
 import { ref, onMounted, computed } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
@@ -1610,8 +1606,4 @@ const getStatusBadge = (status) => {
 .animate-fade-in {
   animation: fade-in 0.2s ease-out;
 }
-<<<<<<< HEAD
 </style>
-=======
-</style>
->>>>>>> 8175f7ff635de1c79113717bf65c6b1c8a4a7f39

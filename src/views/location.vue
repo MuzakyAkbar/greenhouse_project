@@ -23,15 +23,26 @@
               <p class="text-sm text-gray-500 mt-1 ml-13">Kelola lokasi kebun dan batch produksi</p>
             </div>
           </div>
-          <router-link
-            to="/add-location"
-            class="flex items-center gap-2 bg-gradient-to-r from-[#0071f3] to-[#0060d1] hover:from-[#0060d1] hover:to-[#0050b1] text-white px-5 py-2.5 rounded-lg transition font-medium text-sm shadow-md hover:shadow-lg transform hover:-translate-y-0.5"
-          >
-            <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
-              <path fill-rule="evenodd" d="M10 3a1 1 0 011 1v5h5a1 1 0 110 2h-5v5a1 1 0 11-2 0v-5H4a1 1 0 110-2h5V4a1 1 0 011-1z" clip-rule="evenodd"/>
-            </svg>
-            Tambah Lokasi
-          </router-link>
+          <div class="flex items-center gap-3">
+            <router-link
+              to="/add-phase"
+              class="flex items-center gap-2 bg-white border-2 border-[#0060d1] hover:bg-[#0071f3] hover:text-white text-[#0060d1] px-5 py-2.5 rounded-lg transition font-medium text-sm shadow-md hover:shadow-lg transform hover:-translate-y-0.5"
+            >
+              <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
+                <path fill-rule="evenodd" d="M10 3a1 1 0 011 1v5h5a1 1 0 110 2h-5v5a1 1 0 11-2 0v-5H4a1 1 0 110-2h5V4a1 1 0 011-1z" clip-rule="evenodd"/>
+              </svg>
+              Add Phase
+            </router-link>
+            <router-link
+              to="/add-location"
+              class="flex items-center gap-2 bg-gradient-to-r from-[#0071f3] to-[#0060d1] hover:from-[#0060d1] hover:to-[#0050b1] text-white px-5 py-2.5 rounded-lg transition font-medium text-sm shadow-md hover:shadow-lg transform hover:-translate-y-0.5"
+            >
+              <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
+                <path fill-rule="evenodd" d="M10 3a1 1 0 011 1v5h5a1 1 0 110 2h-5v5a1 1 0 11-2 0v-5H4a1 1 0 110-2h5V4a1 1 0 011-1z" clip-rule="evenodd"/>
+              </svg>
+              Tambah Lokasi
+            </router-link>
+          </div>
         </div>
       </div>
     </div>
@@ -153,6 +164,14 @@
                       <div class="flex-1">
                         <p class="font-semibold text-gray-900 group-hover:text-[#0071f3] transition">{{ batch.batch_name }}</p>
                         <p class="text-xs text-gray-500 mt-0.5">Status: {{ batch.status || 'Aktif' }}</p>
+                        <!-- Phase Name -->
+                        <p class="text-xs text-gray-500 mt-1">
+                          Phase:
+                          <span v-if="phasesForBatch[batch.batch_id]?.length > 0" class="font-semibold text-gray-900">
+                            {{ phasesForBatch[batch.batch_id].map(p => p.phase_name).join(", ") }}
+                          </span>
+                          <span v-else class="text-gray-400">-</span>
+                        </p>
                       </div>
                     </div>
                     <div class="flex gap-2">
@@ -353,6 +372,23 @@ import { useLocationStore } from '../stores/location'
 import { useBatchStore } from '../stores/batch'
 import QRCode from 'qrcode'
 import jsPDF from 'jspdf'
+import { usePhaseStore } from "@/stores/phase";
+
+const phaseStore = usePhaseStore();
+onMounted(() => {
+  phaseStore.fetchPhases();
+});
+
+const loadPhasesForBatch = async (batchId) => {
+  const phases = await phaseStore.getPhasesForBatch(batchId);
+  phasesForBatch.value[batchId] = phases;
+};
+
+
+const phasesForBatch = ref({});
+const fetchBatchPhases = async (batchId) => {
+  return await phaseStore.getPhasesForBatch(batchId);
+};
 
 const locationStore = useLocationStore()
 const batchStore = useBatchStore()
@@ -854,5 +890,12 @@ const downloadAllQRPDF = async () => {
 onMounted(async () => {
   await locationStore.fetchAll()
   await batchStore.getBatches()
+
+  // WAJIB! supaya phase bisa muncul di UI
+  await phaseStore.fetchPhases()
+  for (const batch of batchStore.batches) {
+    loadPhasesForBatch(batch.batch_id);
+  }
 })
+
 </script>

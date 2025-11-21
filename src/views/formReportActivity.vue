@@ -12,6 +12,7 @@ import { usePotatoActivityStore } from "@/stores/potatoActivity";
 import { useActivityReportStore } from "@/stores/activityReport";
 import { useActivityStore } from "@/stores/activity";
 import { useTypeDamageStore } from "@/stores/typeDamage";
+import { useBatchPhaseStore } from "@/stores/batchPhase";
 
 // Initialize stores
 const locationStore = useLocationStore();
@@ -21,14 +22,21 @@ const potatoActivityStore = usePotatoActivityStore();
 const activityReportStore = useActivityReportStore();
 const activityStore = useActivityStore();
 const typeDamageStore = useTypeDamageStore();
+const batchPhaseStore = useBatchPhaseStore();
 
 // ======================
-// STATE
+// STATE - DECLARE ALL REF VARIABLES FIRST
 // ======================
 const selectedDate = ref("");
 const selectedLocation = ref("");
 const selectedBatch = ref("");
-const selectedPhase = ref("");
+const selectedPhase = ref(""); 
+const phaseList = ref([]);
+
+const formData = ref({
+  batch_id: "",
+  phase_id: ""
+});
 
 // Planning data state
 const planningData = ref(null);
@@ -99,11 +107,7 @@ const fetchPlanningData = async () => {
       date: selectedDate.value
     });
 
-<<<<<<< HEAD
-    // Fetch planning report dengan activities dan materials
-=======
     // Fetch planning report dengan activities dan materials (hanya yang approved)
->>>>>>> 8175f7ff635de1c79113717bf65c6b1c8a4a7f39
     const { data, error } = await supabase
       .from('gh_planning_report')
       .select(`
@@ -128,10 +132,7 @@ const fetchPlanningData = async () => {
       .eq('location_id', selectedLocation.value)
       .eq('batch_id', selectedBatch.value)
       .eq('planning_date', selectedDate.value)
-<<<<<<< HEAD
-=======
       .eq('status', 'approved')
->>>>>>> 8175f7ff635de1c79113717bf65c6b1c8a4a7f39
       .order('planning_id', { ascending: false })
       .limit(1);
 
@@ -163,90 +164,6 @@ const fetchPlanningData = async () => {
     loadingPlanning.value = false;
   }
 };
-
-// ======================
-// WATCHERS
-// ======================
-
-// Watch untuk trigger fetch planning data
-watch([selectedLocation, selectedBatch, selectedDate], () => {
-  fetchPlanningData();
-});
-
-// Watch selectedPhase untuk auto-sync ke semua sections
-watch(selectedPhase, (newPhase) => {
-  formSections.value.forEach(section => {
-    section.phase = newPhase;
-  });
-});
-
-// Watcher - Auto-fill CoA
-watch(
-  formSections,
-  (sections) => {
-    sections.forEach((s) => {
-      const selected = potatoActivities.value.find(
-        (a) => a.activity_id == s.activity_id
-      );
-      s.coa = selected ? selected.CoA_code : "";
-    });
-  },
-  { deep: true }
-);
-
-// Watcher untuk auto-fill UoM
-watch(
-  formSections,
-  (sections) => {
-    sections.forEach((section) => {
-      section.materials.forEach((material) => {
-        if (material.material_name) {
-          const selectedMaterial = availableMaterials.value.find(
-            (m) => m.material_name === material.material_name
-          );
-          
-          if (selectedMaterial) {
-            material.uom = selectedMaterial.uom || "";
-          }
-          
-          console.log("🔍 Auto-fill UoM:", {
-            material_name: material.material_name,
-            uom: material.uom
-          });
-        } else {
-          material.uom = "";
-        }
-      });
-    });
-  },
-  { deep: true }
-);
-
-// ======================
-// LIFECYCLE HOOKS
-// ======================
-onMounted(async () => {
-  console.log("🚀 Memuat data awal...");
-  selectedDate.value = new Date().toISOString().split("T")[0];
-
-  try {
-    await Promise.all([
-      locationStore.fetchAll(),
-      batchStore.getBatches(),
-      potatoActivityStore.fetchAll(),
-    ]);
-
-    console.log("✅ Data berhasil dimuat");
-    console.log("Activities:", potatoActivities.value);
-  } catch (error) {
-    console.error("❌ Gagal memuat data:", error);
-    alert("Gagal memuat data. Silakan refresh halaman.");
-  }
-});
-
-onUnmounted(() => {
-  stopScanner();
-});
 
 // ======================
 // LOAD WAREHOUSE & BIN BY LOCATION NAME
@@ -797,6 +714,100 @@ function formatDate(dateString) {
   });
 }
 
+// ======================
+// WATCHERS - DECLARE AFTER ALL REF VARIABLES
+// ======================
+
+// Watch untuk trigger fetch planning data
+watch([selectedLocation, selectedBatch, selectedDate], () => {
+  fetchPlanningData();
+});
+
+// Watch selectedBatch untuk load phases
+watch(selectedBatch, async (batch) => {
+  formData.value.batch_id = batch;
+
+  if (batch) {
+    phaseList.value = await batchPhaseStore.fetchPhasesForBatch(batch);
+  } else {
+    phaseList.value = [];
+  }
+});
+
+// Watch selectedPhase untuk auto-sync ke semua sections
+watch(selectedPhase, (newPhase) => {
+  formSections.value.forEach(section => {
+    section.phase = newPhase;
+  });
+});
+
+// Watcher - Auto-fill CoA
+watch(
+  formSections,
+  (sections) => {
+    sections.forEach((s) => {
+      const selected = potatoActivities.value.find(
+        (a) => a.activity_id == s.activity_id
+      );
+      s.coa = selected ? selected.CoA_code : "";
+    });
+  },
+  { deep: true }
+);
+
+// Watcher untuk auto-fill UoM
+watch(
+  formSections,
+  (sections) => {
+    sections.forEach((section) => {
+      section.materials.forEach((material) => {
+        if (material.material_name) {
+          const selectedMaterial = availableMaterials.value.find(
+            (m) => m.material_name === material.material_name
+          );
+          
+          if (selectedMaterial) {
+            material.uom = selectedMaterial.uom || "";
+          }
+          
+          console.log("🔍 Auto-fill UoM:", {
+            material_name: material.material_name,
+            uom: material.uom
+          });
+        } else {
+          material.uom = "";
+        }
+      });
+    });
+  },
+  { deep: true }
+);
+
+// ======================
+// LIFECYCLE HOOKS
+// ======================
+onMounted(async () => {
+  console.log("🚀 Memuat data awal...");
+  selectedDate.value = new Date().toISOString().split("T")[0];
+
+  try {
+    await Promise.all([
+      locationStore.fetchAll(),
+      batchStore.getBatches(),
+      potatoActivityStore.fetchAll(),
+    ]);
+
+    console.log("✅ Data berhasil dimuat");
+    console.log("Activities:", potatoActivities.value);
+  } catch (error) {
+    console.error("❌ Gagal memuat data:", error);
+    alert("Gagal memuat data. Silakan refresh halaman.");
+  }
+});
+
+onUnmounted(() => {
+  stopScanner();
+});
 </script>
 
 <template>
@@ -831,11 +842,11 @@ function formatDate(dateString) {
       
       <!-- Date, Phase, Location & Batch Section -->
       <div class="mb-8">
-        <div class="flex justify-between items-center mb-3">
+        <div class="flex justify-between items-center mb-4">
           <h2 class="text-sm font-semibold text-gray-500 uppercase tracking-wide">Informasi Dasar</h2>
           <button
             @click="startScanner"
-            class="flex items-center gap-2 bg-gradient-to-r from-[#0071f3] to-[#0060d1] hover:from-[#0060d1] hover:to-[#0050b1] text-white px-4 py-2 rounded-lg transition font-medium text-sm shadow-md hover:shadow-lg"
+            class="flex items-center gap-2 bg-gradient-to-r from-[#0071f3] to-[#0060d1] hover:from-[#0060d1] hover:to-[#0050b1] text-white px-4 py-2.5 rounded-xl transition font-medium text-sm shadow-md hover:shadow-lg"
           >
             <svg class="w-4 h-4" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" fill="currentColor">
               <path d="M149.1 64.8L138.7 96H64C28.7 96 0 124.7 0 160V416c0 35.3 28.7 64 64 64H448c35.3 0 64-28.7 64-64V160c0-35.3-28.7-64-64-64H373.3L362.9 64.8C356.4 45.2 338.1 32 317.4 32H194.6c-20.7 0-39 13.2-45.5 32.8zM256 192a96 96 0 1 1 0 192 96 96 0 1 1 0-192z"/>
@@ -843,74 +854,107 @@ function formatDate(dateString) {
             Scan QR Code
           </button>
         </div>
+
         <div class="bg-white rounded-2xl border-2 border-gray-100 shadow-sm hover:shadow-lg transition-all p-6">
-          <div class="grid grid-cols-1 md:grid-cols-4 gap-5">
+          <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+            
             <!-- Date Picker -->
             <div class="flex flex-col">
-              <label class="text-sm font-semibold text-gray-700 mb-2 flex items-center gap-2">
-                <svg class="w-4 h-4 text-[#0071f3]" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512" fill="currentColor">
-                  <path d="M128 0c17.7 0 32 14.3 32 32l0 32 128 0 0-32c0-17.7 14.3-32 32-32s32 14.3 32 32l0 32 48 0c26.5 0 48 21.5 48 48l0 48L0 160l0-48C0 85.5 21.5 64 48 64l48 0 0-32c0-17.7 14.3-32 32-32zM0 192l448 0 0 272c0 26.5-21.5 48-48 48L48 512c-26.5 0-48-21.5-48-48L0 192z"/>
-                </svg>
-                Tanggal
+              <label class="text-sm font-bold text-gray-700 mb-3 flex items-center gap-2">
+                <div class="w-8 h-8 bg-blue-100 rounded-lg flex items-center justify-center">
+                  <svg class="w-4 h-4 text-blue-600" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512" fill="currentColor">
+                    <path d="M128 0c17.7 0 32 14.3 32 32l0 32 128 0 0-32c0-17.7 14.3-32 32-32s32 14.3 32 32l0 32 48 0c26.5 0 48 21.5 48 48l0 48L0 160l0-48C0 85.5 21.5 64 48 64l48 0 0-32c0-17.7 14.3-32 32-32zM0 192l448 0 0 272c0 26.5-21.5 48-48 48L48 512c-26.5 0-48-21.5-48-48L0 192z"/>
+                  </svg>
+                </div>
+                <span>Tanggal</span>
               </label>
               <input 
                 type="date" 
                 disabled 
                 v-model="selectedDate" 
-                class="px-4 py-3 border-2 border-gray-200 rounded-xl bg-gray-50 text-gray-700 font-medium focus:outline-none focus:border-[#0071f3] focus:ring-2 focus:ring-[#0071f3]/20 transition"
+                class="px-4 py-3 border-2 border-gray-200 rounded-xl bg-gray-50 text-gray-700 font-medium focus:outline-none focus:border-[#0071f3] focus:ring-2 focus:ring-[#0071f3]/20 transition cursor-not-allowed"
               />
+              <span class="text-xs text-gray-500 mt-2">Tanggal hari ini otomatis</span>
             </div>
 
             <!-- Phase -->
             <div class="flex flex-col">
-              <label class="text-sm font-semibold text-gray-700 mb-2 flex items-center gap-2">
-                <span class="text-lg">🌱</span>
-                Phase
+              <label class="text-sm font-bold text-gray-700 mb-3 flex items-center gap-2">
+                <div class="w-8 h-8 bg-green-100 rounded-lg flex items-center justify-center">
+                  <span class="text-lg leading-none">🌱</span>
+                </div>
+                <span>Phase</span>
               </label>
-              <select
+              <select 
                 v-model="selectedPhase"
-                class="px-4 py-3 border-2 border-gray-200 rounded-xl bg-white text-gray-700 font-medium focus:outline-none focus:border-[#0071f3] focus:ring-2 focus:ring-[#0071f3]/20 transition appearance-none cursor-pointer"
+                :disabled="!selectedBatch"
+                class="px-4 py-3 border-2 border-gray-200 rounded-xl bg-white text-gray-700 font-medium focus:outline-none focus:border-[#0071f3] focus:ring-2 focus:ring-[#0071f3]/20 transition appearance-none cursor-pointer disabled:bg-gray-100 disabled:cursor-not-allowed"
               >
-                <option value="" disabled>Pilih Phase</option>
-                <option>Planlet</option>
-                <option>Planlet Stek</option>
-                <option>G0</option>
-                <option>G1</option>
-                <option>G2</option>
+                <option value="">Pilih Phase</option>
+                <option 
+                  v-for="p in phaseList" 
+                  :key="p.phase_id" 
+                  :value="p.phase_id"
+                >
+                  {{ p.phase_name }}
+                </option>
               </select>
+              <span class="text-xs text-gray-500 mt-2">
+                {{ selectedBatch ? 'Pilih phase untuk batch' : 'Pilih batch terlebih dahulu' }}
+              </span>
             </div>
 
             <!-- Location -->
             <div class="flex flex-col">
-              <label class="text-sm font-semibold text-gray-700 mb-2 flex items-center gap-2">
-                <span class="text-lg">📍</span>
-                Lokasi
+              <label class="text-sm font-bold text-gray-700 mb-3 flex items-center gap-2">
+                <div class="w-8 h-8 bg-red-100 rounded-lg flex items-center justify-center">
+                  <span class="text-lg leading-none">📍</span>
+                </div>
+                <span>Lokasi</span>
               </label>
-              <div class="px-4 py-3 border-2 border-gray-200 rounded-xl bg-gray-50 text-gray-700 font-medium min-h-[48px] flex items-center">
-                {{ selectedLocation ? getLocationName(selectedLocation) : 'Scan QR Code untuk mengisi lokasi' }}
+              <div class="relative">
+                <div class="px-4 py-3 border-2 border-gray-200 rounded-xl bg-gray-50 text-gray-700 font-medium min-h-[48px] flex items-center">
+                  <span v-if="selectedLocation" class="truncate">
+                    {{ getLocationName(selectedLocation) }}
+                  </span>
+                  <span v-else class="text-gray-400 text-sm">
+                    Scan QR Code untuk mengisi
+                  </span>
+                </div>
+                <div v-if="selectedLocation" class="absolute right-3 top-1/2 -translate-y-1/2">
+                  <div class="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
+                </div>
               </div>
+              <span class="text-xs text-gray-500 mt-2">
+                {{ selectedLocation ? '✓ Lokasi terdeteksi' : 'Gunakan tombol Scan QR Code' }}
+              </span>
             </div>
 
             <!-- Batch -->
             <div class="flex flex-col">
-              <label class="text-sm font-semibold text-gray-700 mb-2 flex items-center gap-2">
-                <span class="text-lg">🏷️</span>
-                Batch
+              <label class="text-sm font-bold text-gray-700 mb-3 flex items-center gap-2">
+                <div class="w-8 h-8 bg-yellow-100 rounded-lg flex items-center justify-center">
+                  <span class="text-lg leading-none">🏷️</span>
+                </div>
+                <span>Batch</span>
               </label>
-              <div class="px-4 py-3 border-2 border-gray-200 rounded-xl bg-gray-50 text-gray-700 font-medium min-h-[48px] flex items-center">
-                {{ selectedBatch ? getBatchName(selectedBatch) : 'Scan QR Code untuk mengisi batch' }}
+              <div class="relative">
+                <div class="px-4 py-3 border-2 border-gray-200 rounded-xl bg-gray-50 text-gray-700 font-medium min-h-[48px] flex items-center">
+                  <span v-if="selectedBatch" class="truncate">
+                    {{ getBatchName(selectedBatch) }}
+                  </span>
+                  <span v-else class="text-gray-400 text-sm">
+                    Scan QR Code untuk mengisi
+                  </span>
+                </div>
+                <div v-if="selectedBatch" class="absolute right-3 top-1/2 -translate-y-1/2">
+                  <div class="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
+                </div>
               </div>
+              <span class="text-xs text-gray-500 mt-2">
+                {{ selectedBatch ? '✓ Batch terdeteksi' : 'Gunakan tombol Scan QR Code' }}
+              </span>
             </div>
-          </div>
-
-          <!-- Success notification after scan -->
-          <div v-if="selectedLocation && selectedBatch" class="mt-4 bg-green-50 border-2 border-green-200 rounded-xl p-3">
-            <p class="text-sm text-green-700 font-semibold flex items-center gap-2">
-              <svg class="w-4 h-4" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" fill="currentColor">
-                <path d="M256 512A256 256 0 1 0 256 0a256 256 0 1 0 0 512zM369 209L241 337c-9.4 9.4-24.6 9.4-33.9 0l-64-64c-9.4-9.4-9.4-24.6 0-33.9s24.6-9.4 33.9 0l47 47L335 175c9.4-9.4 24.6-9.4 33.9 0s9.4 24.6 0 33.9z"/>
-              </svg>
-              Lokasi: {{ getLocationName(selectedLocation) }} | Batch: {{ getBatchName(selectedBatch) }}
-            </p>
           </div>
         </div>
       </div>

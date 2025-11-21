@@ -2,11 +2,7 @@
 import html2pdf from 'html2pdf.js'
 import { ref, onMounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
-<<<<<<< HEAD
-import { useAuthStore } from '@/stores/auth'
-=======
 import { useAuthStore } from '../stores/auth'
->>>>>>> 8175f7ff635de1c79113717bf65c6b1c8a4a7f39
 import { useBatchStore } from '../stores/batch'
 import { useLocationStore } from '../stores/location'
 import { supabase } from '../lib/supabase'

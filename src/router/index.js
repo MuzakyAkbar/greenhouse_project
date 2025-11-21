@@ -192,6 +192,12 @@ const router = createRouter({
       component: () => import("../views/location.vue"),
       meta: { requiresAuth: true },
     },
+     {
+      path: "/add-phase",
+      name: "addphase",
+      component: () => import("../views/AddPhase.vue"),
+      meta: { requiresAuth: true },
+    },
   ],
 });
 

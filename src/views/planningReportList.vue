@@ -142,28 +142,12 @@ const planningReports = computed(() => {
   return plannings
 })
 
-<<<<<<< HEAD
-// ===== PERBARUI FUNGSI handlePlanningClick DI planningReportList =====
-=======
->>>>>>> 8175f7ff635de1c79113717bf65c6b1c8a4a7f39
 const handlePlanningClick = (planning) => {
   if (!planning || !planning.planning_id) {
     alert("⚠️ Planning ID tidak ditemukan!")
     return
   }
 
-<<<<<<< HEAD
-  console.log('🖱️ Planning clicked:', planning.planning_id)
-
-  // Navigate langsung dengan planning_id di params DAN query
-  router.push({
-    name: 'planningActivityReview',
-    params: { planning_id: String(planning.planning_id) },
-    query: { 
-      autoload: 'true', // Flag untuk auto-load
-      from: 'list'
-    }
-=======
   console.log('🖱️ Planning clicked:', {
     planning_id: planning.planning_id,
     status: planning.status
@@ -184,7 +168,6 @@ const handlePlanningClick = (planning) => {
   router.push({
     name: routeName,
     params: { planning_id: String(planning.planning_id) }
->>>>>>> 8175f7ff635de1c79113717bf65c6b1c8a4a7f39
   })
 }
 

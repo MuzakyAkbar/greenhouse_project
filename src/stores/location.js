@@ -1,4 +1,3 @@
-
 // /src/stores/location.js
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
@@ -16,11 +15,7 @@ export const useLocationStore = defineStore('location', () => {
     console.log('🔍 Fetching locations...')
     
     const { data, error: err } = await supabase
-<<<<<<< HEAD
-      .from('gh_location') // ✅ Nama tabel benar
-=======
       .from('gh_location') 
->>>>>>> 8175f7ff635de1c79113717bf65c6b1c8a4a7f39
       .select('*')
       .order('location_id', { ascending: true })
 

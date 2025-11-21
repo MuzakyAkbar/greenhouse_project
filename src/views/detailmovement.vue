@@ -345,10 +345,6 @@
                 @click="handleApprove"
                 class="flex items-center gap-2 bg-gradient-to-r from-green-500 to-green-600 hover:from-green-600 hover:to-green-700 text-white font-semibold px-6 py-2.5 rounded-xl transition-all shadow-md hover:shadow-lg"
               >
-<<<<<<< HEAD
-                <svg class="w-4 h-4" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512" fill="currentColor">
-                  <path d="M438.6 105.4c12.5 12.5 12.5 32.8 0 45.3l-256 256c-12.5 12.5-32.8 12.5-45.3 0l-128-128c-12.5-12.5-12.5-32.8 0-45.3s32.8-12.5 45.3 0L160 338.7 393.4 105.4c12.5-12.5 32.8-12.5 45.3 0z"/>
-=======
                 <svg
                   class="w-4 h-4"
                   xmlns="http://www.w3.org/2000/svg"
@@ -358,7 +354,6 @@
                   <path
                     d="M438.6 105.4c12.5 12.5 12.5 32.8 0 45.3l-256 256c-12.5 12.5-32.8 12.5-45.3 0l-128-128c-12.5-12.5-12.5-32.8 0-45.3s32.8-12.5 45.3 0L160 338.7 393.4 105.4c12.5-12.5 32.8-12.5 45.3 0z"
                   />
->>>>>>> 8175f7ff635de1c79113717bf65c6b1c8a4a7f39
                 </svg>
                 Approve
               </button>
@@ -390,74 +385,25 @@
 </template>
 
 <script setup>
-<<<<<<< HEAD
-import { ref, onMounted, computed } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
-import openbravoApi from '@/lib/openbravo'
-import { useAuthStore } from '@/stores/auth'
-
-const route = useRoute()
-const router = useRouter()
-const authStore = useAuthStore()
-=======
 import { ref, onMounted, computed } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import openbravoApi from "@/lib/openbravo";
 import { useAuthStore } from "@/stores/auth";
 
 import axios from "axios";
->>>>>>> 8175f7ff635de1c79113717bf65c6b1c8a4a7f39
 
 const route = useRoute();
 const router = useRouter();
 const authStore = useAuthStore();
 
-<<<<<<< HEAD
-=======
 const loading = ref(true);
 const movement = ref(null);
 
->>>>>>> 8175f7ff635de1c79113717bf65c6b1c8a4a7f39
 // ===== User Role Management - Ambil dari Pinia Store
 const getUserRole = () => {
   try {
     // Method 1: Dari Pinia Store (PRIORITAS UTAMA)
     if (authStore.role) {
-<<<<<<< HEAD
-      console.log('Role from Pinia Store:', authStore.role)
-      return authStore.role
-    }
-
-    // Method 2: Dari localStorage 'user'
-    const userData = localStorage.getItem('user')
-    if (userData) {
-      const parsed = JSON.parse(userData)
-      console.log('User Data from localStorage:', parsed)
-      return parsed.role || 'staff'
-    }
-
-  } catch (e) {
-    console.error('Error getting user role:', e)
-  }
-  return 'staff'
-}
-
-const currentUserRole = ref(getUserRole())
-
-// ===== Helpers
-const fmtDateID = (yyyyMmDd) => {
-  if (!yyyyMmDd) return '-'
-  const [y, m, d] = yyyyMmDd.split('-').map(Number)
-  const dt = new Date(y, (m || 1) - 1, d || 1, 10, 0, 0)
-  return new Intl.DateTimeFormat('id-ID', {
-    day: '2-digit',
-    month: 'short',
-    year: 'numeric',
-  }).format(dt)
-}
-
-const formatNumber = (n) => new Intl.NumberFormat('id-ID').format(n ?? 0)
-=======
       console.log("Role from Pinia Store:", authStore.role);
       return authStore.role;
     }
@@ -490,7 +436,6 @@ const fmtDateID = (yyyyMmDd) => {
 };
 
 const formatNumber = (n) => new Intl.NumberFormat("id-ID").format(n ?? 0);
->>>>>>> 8175f7ff635de1c79113717bf65c6b1c8a4a7f39
 
 const computeStatus = (row) => {
   const posted = (row.posted ?? "").toString().trim().toUpperCase();
@@ -501,25 +446,6 @@ const computeStatus = (row) => {
 
 // ===== Computed Properties
 const isApproved = computed(() => {
-<<<<<<< HEAD
-  if (!movement.value) return false
-  const processed = !!movement.value.processed
-  const posted = (movement.value.posted ?? '').toString().trim().toUpperCase()
-  return processed && (posted === 'Y' || posted === 'D')
-})
-
-const isManager = computed(() => {
-  const role = currentUserRole.value?.toLowerCase()
-  console.log('🔍 Role Check:', {
-    raw: currentUserRole.value,
-    lowercase: role,
-    isManager: role === 'manager',
-    fromStore: authStore.role
-  })
-  // Cek apakah role adalah 'manager'
-  return role === 'manager'
-})
-=======
   if (!movement.value) return false;
   const processed = !!movement.value.processed;
   const posted = (movement.value.posted ?? "").toString().trim().toUpperCase();
@@ -537,7 +463,6 @@ const isManager = computed(() => {
   // Cek apakah role adalah 'manager'
   return role === "manager";
 });
->>>>>>> 8175f7ff635de1c79113717bf65c6b1c8a4a7f39
 
 // ===== API Functions
 const fetchMovementById = async (id) => {
@@ -635,15 +560,6 @@ const fetchMaterialByMovementId = async (movementId) => {
 
 // ===== Lifecycle
 onMounted(async () => {
-<<<<<<< HEAD
-  loading.value = true
-  
-  // Debug: log role saat mounted
-  console.log('=== DETAIL MOVEMENT DEBUG ===')
-  console.log('Current User Role:', currentUserRole.value)
-  console.log('Is Manager:', isManager.value)
-  
-=======
   loading.value = true;
 
   // Debug: log role saat mounted
@@ -651,7 +567,6 @@ onMounted(async () => {
   console.log("Current User Role:", currentUserRole.value);
   console.log("Is Manager:", isManager.value);
 
->>>>>>> 8175f7ff635de1c79113717bf65c6b1c8a4a7f39
   try {
     const movementId = route.params.id;
 
@@ -680,29 +595,13 @@ onMounted(async () => {
     const materials = await fetchMaterialByMovementId(movementId);
     movement.value.materials = materials;
   } catch (e) {
-<<<<<<< HEAD
-    console.error('Error loading movement:', e)
-    movement.value = null
-=======
     console.error("Error loading movement:", e);
     movement.value = null;
->>>>>>> 8175f7ff635de1c79113717bf65c6b1c8a4a7f39
   } finally {
     loading.value = false;
   }
 });
 
-<<<<<<< HEAD
-// ===== Action Handlers
-const handleReject = () => {
-  if (confirm('Apakah Anda yakin ingin reject movement ini?')) {
-    console.log('Reject clicked for', movement.value?.id)
-    // TODO: Implementasi API reject
-    // Contoh:
-    // await openbravoApi.post('/reject-endpoint', { movementId: movement.value.id })
-    alert('Movement telah di-reject (placeholder)')
-    goBack()
-=======
 const handleApprove = async () => {
   const apiUrl = (import.meta.env.VITE_OPENBRAVO_URL || "").trim(); // ex: http://202.59.169.85
   const apiPort = (import.meta.env.VITE_API_PORT || "").trim(); // ex: 8090
@@ -712,25 +611,8 @@ const handleApprove = async () => {
   if (!apiUrl || !apiPort || !username || !password) {
     alert("ENV API belum lengkap (URL/PORT/USER/PASS).");
     return;
->>>>>>> 8175f7ff635de1c79113717bf65c6b1c8a4a7f39
   }
 
-<<<<<<< HEAD
-const handleApprove = async () => {
-  if (confirm('Apakah Anda yakin ingin approve movement ini?')) {
-    console.log('Approve clicked for', movement.value?.id)
-    try {
-      // TODO: Implementasi API approve
-      // Contoh:
-      // await openbravoApi.post('/approve-endpoint', { movementId: movement.value.id })
-      alert('Movement telah di-approve (placeholder)')
-      // Refresh data atau redirect
-      goBack()
-    } catch (error) {
-      console.error('Error approving movement:', error)
-      alert('Gagal approve movement')
-    }
-=======
   console.log(password);
   console.log(username);
   const endpoint = `${apiUrl.replace(/\/+$/, "")}:${apiPort}/api/process`;
@@ -740,7 +622,6 @@ const handleApprove = async () => {
   if (!movement.value?.id) {
     alert("Movement ID tidak ditemukan.");
     return;
->>>>>>> 8175f7ff635de1c79113717bf65c6b1c8a4a7f39
   }
 
   if (!confirm("Apakah Anda yakin ingin approve movement ini?")) return;
