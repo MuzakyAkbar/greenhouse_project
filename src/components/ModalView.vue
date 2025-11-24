@@ -2,6 +2,7 @@
 import { ref, onMounted, watch } from "vue";
 import { supabase } from "@/lib/supabase";
 import { useBatchStore } from "@/stores/batch";
+import { useBatchPhaseStore } from "@/stores/batchPhase";
 
 defineProps({ isOpen: Boolean });
 const emit = defineEmits(["close"]);
@@ -16,7 +17,59 @@ const selectedLocation = ref("");
 const selectedBatch = ref("");
 const productionType = ref("");
 const qty = ref(0);
+const damage = ref(0);
 const isSubmitting = ref(false);
+// --- Data produksi yang diambil dari database ---
+const productionData = ref([]);
+const batchPhaseStore = useBatchPhaseStore();
+const phaseList = ref([]);
+const selectedPhase = ref("");   // untuk dropdown
+
+watch([selectedLocation, selectedBatch], async () => {
+  if (!selectedLocation.value || !selectedBatch.value) {
+    phaseList.value = [];
+    return;
+  }
+
+  phaseList.value = await batchPhaseStore.fetchPhasesForBatch(
+    selectedBatch.value
+  );
+});
+
+watch([selectedLocation, selectedBatch], fetchProductionData);
+
+// --- Fungsi fetch data dari DB berdasarkan lokasi & batch ---
+async function fetchProductionData() {
+  if (!selectedLocation.value || !selectedBatch.value) {
+    productionData.value = [];
+    return;
+  }
+
+  console.log("🔍 Fetching production data...");
+
+  const { data, error } = await supabase
+    .from("gh_data_production")
+    .select("*")
+    .eq("location_id", Number(selectedLocation.value))
+    .eq("batch_id", Number(selectedBatch.value))
+    .order("production_id", { ascending: false })
+
+
+  if (error) {
+    console.error("❌ Error fetching production:", error.message);
+    productionData.value = [];
+    return;
+  }
+
+  productionData.value = data;
+  console.log("📦 Data produksi ditemukan:", data);
+}
+
+// --- Watcher untuk update data otomatis ---
+watch([selectedLocation, selectedBatch], () => {
+  fetchProductionData();
+});
+
 
 // ✅ Ambil data lokasi & semua batch saat awal
 onMounted(async () => {
@@ -70,10 +123,16 @@ async function submitDataProduction() {
   isSubmitting.value = true;
 
   try {
+    // Cari phase_name berdasarkan phase_id yang dipilih
+    const selectedPhaseObj = phaseList.value.find(
+      (p) => p.phase_id === productionType.value
+    );
+    const phaseNameToSave = selectedPhaseObj ? selectedPhaseObj.phase_name : productionType.value;
+
     const payload = {
       location_id: Number(selectedLocation.value),
       batch_id: Number(selectedBatch.value),
-      production_type: productionType.value,
+      production_type: phaseNameToSave, // Simpan phase_name, bukan phase_id
       qty: Number(qty.value),
     };
 
@@ -107,6 +166,7 @@ function resetForm() {
   selectedBatch.value = "";
   productionType.value = "";
   qty.value = 0;
+  damage.value = 0;
 }
 </script>
 
@@ -220,12 +280,14 @@ function resetForm() {
             <select 
             v-model="productionType"
             class="w-full bg-gray-50 border-2 border-gray-200 rounded-xl py-3 px-4 text-gray-900 font-medium focus:outline-none focus:border-[#0071f3] focus:ring-2 focus:ring-[#0071f3] focus:ring-opacity-20 transition appearance-none cursor-pointer hover:border-gray-300">
-              <option selected disabled>Input Total Planlet</option>
-              <option>Planlet</option>
-              <option>Planlet Stek</option>
-              <option>Benih G0</option>
-              <option>Benih G1</option>
-              <option>Buah G2</option>
+              <option value="" disabled>Input Total Planlet</option>
+              <option
+                v-for="p in phaseList"
+                :key="p.phase_id"
+                :value="p.phase_id"
+              >
+                {{ p.phase_name }}
+              </option>
             </select>
             <div class="absolute right-4 top-1/2 -translate-y-1/2 pointer-events-none text-gray-400">
               <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">

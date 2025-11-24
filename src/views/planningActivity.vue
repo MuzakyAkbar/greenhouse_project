@@ -16,6 +16,7 @@ import { usePotatoActivityStore } from "@/stores/potatoActivity";
 import { useActivityReportStore } from "@/stores/activityReport";
 import { useActivityStore } from "@/stores/activity";
 import { useTypeDamageStore } from "@/stores/typeDamage";
+import { useBatchPhaseStore } from "@/stores/batchPhase";
 
 // Initialize stores
 const locationStore = useLocationStore();
@@ -25,14 +26,22 @@ const potatoActivityStore = usePotatoActivityStore();
 const activityReportStore = useActivityReportStore();
 const activityStore = useActivityStore();
 const typeDamageStore = useTypeDamageStore();
+const batchPhaseStore = useBatchPhaseStore();
 
 // ======================
-// STATE
+// STATE - DECLARE ALL VARIABLES FIRST
 // ======================
 const selectedDate = ref("");
 const selectedLocation = ref("");
 const selectedBatch = ref("");
 const selectedPhase = ref("");
+const phaseList = ref([]);
+
+const formData = ref({
+  location_id: "",
+  batch_id: "",
+  phase_id: ""
+});
 
 const typeDamages = ref([
   {
@@ -41,15 +50,15 @@ const typeDamages = ref([
     kutilang: 0,
     busuk: 0
   }
-])
+]);
 
 // ===== MATERIAL STATE (dari Openbravo)
-const availableMaterials = ref([])
-const materialLoading = ref(false)
+const availableMaterials = ref([]);
+const materialLoading = ref(false);
 
 // Warehouse & Bin untuk tracking
-const selectedWarehouse = ref(null)
-const selectedBin = ref(null)
+const selectedWarehouse = ref(null);
+const selectedBin = ref(null);
 
 // QR Scanner
 const showScanner = ref(false);
@@ -68,17 +77,8 @@ const formSections = ref([
   },
 ]);
 
-// Computed properties untuk data dari stores
-const locations = computed(() => locationStore.locations);
-const batches = computed(() => batchStore.batches);
-const materialStocks = computed(() => materialStore.materialStock);
-const potatoActivities = computed(() => potatoActivityStore.activities);
-
 // Loading states
 const isSubmitting = ref(false);
-
-// ===== UTIL: Format Number
-const formatNumber = (n) => new Intl.NumberFormat('id-ID').format(n ?? 0)
 
 // ======================
 // CACHE UNTUK MATERIAL USAGE
@@ -87,16 +87,30 @@ const materialUsageCache = ref(new Map());
 const cacheTimestamp = ref(null);
 const CACHE_DURATION = 30000; // 30 detik
 
+// Computed properties untuk data dari stores
+const locations = computed(() => locationStore.locations);
+const batches = computed(() => batchStore.batches);
+const materialStocks = computed(() => materialStore.materialStock);
+const potatoActivities = computed(() => potatoActivityStore.activities);
+
+const filteredBatches = computed(() => {
+  if (!selectedLocation.value) return [];
+  return batches.value.filter(
+    (b) => Number(b.location_id) === Number(selectedLocation.value)
+  );
+});
+
+// ===== UTIL: Format Number
+const formatNumber = (n) => new Intl.NumberFormat('id-ID').format(n ?? 0);
+
 // ======================
-// FUNGSI UNTUK CEK MATERIAL YANG SUDAH DIGUNAKAN (FIXED LOGIC)
+// FUNGSI UNTUK CEK MATERIAL YANG SUDAH DIGUNAKAN
 // ======================
 const getUsedMaterialsByLocationAndDate = async (locationId, date, materialName) => {
   try {
-    // ✅ Create cache key
     const cacheKey = `${locationId}-${date}-${materialName}`;
     const now = Date.now();
     
-    // ✅ Check cache validity
     if (cacheTimestamp.value && (now - cacheTimestamp.value) < CACHE_DURATION) {
       const cached = materialUsageCache.value.get(cacheKey);
       if (cached !== undefined) {
@@ -107,11 +121,8 @@ const getUsedMaterialsByLocationAndDate = async (locationId, date, materialName)
     
     console.log('🔍 Fetching used materials from DB:', { locationId, date, materialName });
     
-    // ✅ Ambil waktu saat ini (hari ini jam sekarang)
     const currentDateTime = new Date();
     
-    // ✅ Query: Ambil semua material di lokasi ini yang updated_at <= sekarang
-    // Tidak peduli planning_date-nya kapan, yang penting sudah di-input/update sampai sekarang
     const { data, error } = await supabase
       .from('gh_planning_material')
       .select(`
@@ -129,7 +140,7 @@ const getUsedMaterialsByLocationAndDate = async (locationId, date, materialName)
       .eq('material_name', materialName)
       .eq('gh_planning_report.location_id', locationId)
       .neq('gh_planning_report.status', 'cancelled')
-      .lte('updated_at', currentDateTime.toISOString()) // ✅ Yang sudah diinput/update sampai sekarang
+      .lte('updated_at', currentDateTime.toISOString())
       .order('updated_at', { ascending: false });
 
     if (error) {
@@ -137,15 +148,12 @@ const getUsedMaterialsByLocationAndDate = async (locationId, date, materialName)
       return 0;
     }
 
-    // Hitung total qty yang sudah digunakan (untuk lokasi ini, semua tanggal)
     const totalUsed = data.reduce((sum, item) => sum + parseFloat(item.qty || 0), 0);
     
-    // ✅ Log detail dengan breakdown per tanggal
     if (data.length > 0) {
       const latestUpdate = data[0].updated_at;
       const recordCount = data.length;
       
-      // Group by planning_date untuk detail
       const byDate = data.reduce((acc, item) => {
         const planDate = item.gh_planning_report.planning_date;
         if (!acc[planDate]) acc[planDate] = 0;
@@ -163,7 +171,6 @@ const getUsedMaterialsByLocationAndDate = async (locationId, date, materialName)
       console.log(`📊 ${materialName}: No usage found at location ${locationId}`);
     }
     
-    // ✅ Save to cache
     materialUsageCache.value.set(cacheKey, totalUsed);
     cacheTimestamp.value = now;
     
@@ -175,7 +182,7 @@ const getUsedMaterialsByLocationAndDate = async (locationId, date, materialName)
 };
 
 // ======================
-// CLEAR CACHE (dipanggil saat location/date berubah)
+// CLEAR CACHE
 // ======================
 const clearMaterialCache = () => {
   materialUsageCache.value.clear();
@@ -206,16 +213,11 @@ const updateMaterialDisplay = (sectionIndex, matIndex, material, usageMap, curre
   
   const stockFromOpenbravo = parseFloat(selectedMaterial.stock);
   const usedQtyFromDB = usageMap.get(material.material_name) || 0;
-  
-  // ✅ Hitung penggunaan dari activity sebelumnya di form ini
   const usedInPreviousActivities = currentFormUsage.get(material.material_name) || 0;
-  
-  // ✅ Total yang sudah digunakan = dari DB + dari activity sebelumnya
   const totalUsed = usedQtyFromDB + usedInPreviousActivities;
   const availableStock = stockFromOpenbravo - totalUsed;
   const uom = material.uom || selectedMaterial.uom;
   
-  // Update display untuk "Sudah digunakan"
   if (usedInPreviousActivities > 0) {
     usedElement.innerHTML = `
       <div class="space-y-0.5">
@@ -238,7 +240,6 @@ const updateMaterialDisplay = (sectionIndex, matIndex, material, usageMap, curre
     available: availableStock
   });
   
-  // Color coding
   if (material.qty && parseFloat(material.qty) > availableStock) {
     availableElement.classList.add('text-red-600');
     availableElement.classList.remove('text-green-700');
@@ -259,7 +260,6 @@ const updateAllMaterialDisplay = async () => {
   
   console.log('🔄 Updating all material displays...');
   
-  // ✅ Collect all unique materials
   const uniqueMaterials = new Set();
   formSections.value.forEach(section => {
     section.materials.forEach(material => {
@@ -276,7 +276,6 @@ const updateAllMaterialDisplay = async () => {
   
   console.log('📋 Materials to check:', Array.from(uniqueMaterials));
   
-  // ✅ Fetch usage data from DB in parallel
   const usagePromises = Array.from(uniqueMaterials).map(async (materialName) => {
     const usedQty = await getUsedMaterialsByLocationAndDate(
       selectedLocation.value,
@@ -291,10 +290,8 @@ const updateAllMaterialDisplay = async () => {
   
   console.log('📊 Usage map from DB:', Object.fromEntries(usageMap));
   
-  // ✅ Hitung penggunaan material dari form (akumulatif per activity)
   const currentFormUsage = new Map();
   
-  // ✅ Update DOM for each material dengan akumulasi usage
   for (let sectionIndex = 0; sectionIndex < formSections.value.length; sectionIndex++) {
     const section = formSections.value[sectionIndex];
     
@@ -302,10 +299,8 @@ const updateAllMaterialDisplay = async () => {
       const material = section.materials[matIndex];
       
       if (material.material_name) {
-        // Update display dengan data usage yang sudah diakumulasi
         updateMaterialDisplay(sectionIndex, matIndex, material, usageMap, currentFormUsage);
         
-        // ✅ Setelah update display, tambahkan qty material ini ke akumulasi
         if (material.qty && parseFloat(material.qty) > 0) {
           const currentUsage = currentFormUsage.get(material.material_name) || 0;
           currentFormUsage.set(material.material_name, currentUsage + parseFloat(material.qty));
@@ -320,144 +315,19 @@ const updateAllMaterialDisplay = async () => {
 };
 
 // ======================
-// WATCHERS
-// ======================
-
-// Watch selectedPhase untuk auto-sync ke semua sections
-watch(selectedPhase, (newPhase) => {
-  formSections.value.forEach(section => {
-    section.phase_plan = newPhase;
-  });
-});
-
-// Watcher - Auto-fill CoA
-watch(
-  formSections,
-  (sections) => {
-    sections.forEach((s) => {
-      const selected = potatoActivities.value.find(
-        (a) => a.activity_id == s.activity_id
-      );
-      s.coa = selected ? selected.CoA_code : "";
-    });
-  },
-  { deep: true }
-);
-
-// Watcher untuk auto-fill UoM
-watch(
-  formSections,
-  (sections) => {
-    sections.forEach((section) => {
-      section.materials.forEach((material) => {
-        if (material.material_name) {
-          const selectedMaterial = availableMaterials.value.find(
-            (m) => m.material_name === material.material_name
-          );
-          
-          if (selectedMaterial) {
-            material.uom = selectedMaterial.uom || "";
-          }
-        } else {
-          material.uom = "";
-        }
-      });
-    });
-  },
-  { deep: true }
-);
-
-// ======================
-// WATCHER: Trigger saat material name atau qty berubah
-// ======================
-watch(
-  () => formSections.value.flatMap(s => 
-    s.materials.map(m => ({ name: m.material_name, qty: m.qty, uom: m.uom }))
-  ),
-  async () => {
-    // ✅ Debounce
-    if (window.materialUpdateTimeout) {
-      clearTimeout(window.materialUpdateTimeout);
-    }
-    
-    window.materialUpdateTimeout = setTimeout(async () => {
-      await updateAllMaterialDisplay();
-    }, 300);
-  },
-  { deep: true }
-);
-
-watch(selectedLocation, () => {
-  selectedBatch.value = "";
-  clearMaterialCache();
-});
-
-watch(selectedLocation, async (newVal) => {
-  if (!newVal) return;
-
-  const loc = locations.value.find(l => l.location_id == newVal);
-  if (!loc) return;
-
-  await loadWarehouseAndBin(loc.location);
-});
-
-watch(selectedDate, () => {
-  clearMaterialCache();
-  // ✅ Trigger update display setelah date berubah
-  setTimeout(() => updateAllMaterialDisplay(), 500);
-});
-
-// ✅ Trigger saat availableMaterials selesai loading
-watch(availableMaterials, (newMaterials) => {
-  if (newMaterials.length > 0) {
-    console.log('✅ Materials loaded, triggering display update...');
-    clearMaterialCache();
-    // ✅ Trigger update jika sudah ada material terpilih
-    setTimeout(() => updateAllMaterialDisplay(), 500);
-  }
-});
-
-// ======================
-// LIFECYCLE HOOKS
-// ======================
-onMounted(async () => {
-  console.log("🚀 Memuat data awal...");
-  selectedDate.value = new Date().toISOString().split("T")[0];
-
-  try {
-    await Promise.all([
-      locationStore.fetchAll(),
-      batchStore.getBatches(),
-      potatoActivityStore.fetchAll(),
-    ]);
-
-    console.log("✅ Data berhasil dimuat");
-    console.log("Activities:", potatoActivities.value);
-  } catch (error) {
-    console.error("❌ Gagal memuat data:", error);
-    alert("Gagal memuat data. Silakan refresh halaman.");
-  }
-});
-
-onUnmounted(() => {
-  stopScanner();
-});
-
-// ======================
 // LOAD WAREHOUSE & BIN BY LOCATION NAME
 // ======================
 const loadWarehouseAndBin = async (locationName) => {
   if (!locationName) {
-    selectedWarehouse.value = null
-    selectedBin.value = null
-    availableMaterials.value = []
-    return
+    selectedWarehouse.value = null;
+    selectedBin.value = null;
+    availableMaterials.value = [];
+    return;
   }
 
   try {
-    console.log('🏢 Finding warehouse for location:', locationName)
+    console.log('🏢 Finding warehouse for location:', locationName);
 
-    // 1. Get warehouse by location name dari Openbravo
     const warehouseRes = await openbravoApi.get(
       '/org.openbravo.service.json.jsonrest/Warehouse',
       { 
@@ -466,22 +336,21 @@ const loadWarehouseAndBin = async (locationName) => {
           _selectedProperties: 'id,name'
         } 
       }
-    )
+    );
 
-    const warehouses = warehouseRes?.data?.response?.data || []
+    const warehouses = warehouseRes?.data?.response?.data || [];
     if (!warehouses.length) {
-      console.warn('⚠️ Warehouse not found for location:', locationName)
-      selectedWarehouse.value = null
-      selectedBin.value = null
-      availableMaterials.value = []
-      return
+      console.warn('⚠️ Warehouse not found for location:', locationName);
+      selectedWarehouse.value = null;
+      selectedBin.value = null;
+      availableMaterials.value = [];
+      return;
     }
 
-    const warehouse = warehouses[0]
-    selectedWarehouse.value = warehouse
-    console.log('✅ Warehouse found:', warehouse.name, '(ID:', warehouse.id, ')')
+    const warehouse = warehouses[0];
+    selectedWarehouse.value = warehouse;
+    console.log('✅ Warehouse found:', warehouse.name, '(ID:', warehouse.id, ')');
 
-    // 2. Get first bin (locator) untuk warehouse ini
     const binRes = await openbravoApi.get(
       '/org.openbravo.service.json.jsonrest/Locator',
       { 
@@ -490,42 +359,41 @@ const loadWarehouseAndBin = async (locationName) => {
           _selectedProperties: 'id,searchKey'
         } 
       }
-    )
+    );
 
-    const bins = binRes?.data?.response?.data || []
+    const bins = binRes?.data?.response?.data || [];
     if (!bins.length) {
-      console.warn('⚠️ Bin not found for warehouse:', warehouse.name)
-      selectedBin.value = null
-      availableMaterials.value = []
-      return
+      console.warn('⚠️ Bin not found for warehouse:', warehouse.name);
+      selectedBin.value = null;
+      availableMaterials.value = [];
+      return;
     }
 
-    selectedBin.value = bins[0]
-    console.log('✅ Bin found:', bins[0].searchKey, '(ID:', bins[0].id, ')')
+    selectedBin.value = bins[0];
+    console.log('✅ Bin found:', bins[0].searchKey, '(ID:', bins[0].id, ')');
 
-    // 3. Load materials untuk bin ini
-    await loadMaterialsByBin(bins[0].id)
+    await loadMaterialsByBin(bins[0].id);
 
   } catch (err) {
-    console.error('❌ Error loading warehouse/bin:', err.response?.data || err.message)
-    selectedWarehouse.value = null
-    selectedBin.value = null
-    availableMaterials.value = []
+    console.error('❌ Error loading warehouse/bin:', err.response?.data || err.message);
+    selectedWarehouse.value = null;
+    selectedBin.value = null;
+    availableMaterials.value = [];
   }
-}
+};
 
 // ======================
 // LOAD MATERIALS BY BIN
 // ======================
 const loadMaterialsByBin = async (binId) => {
   if (!binId) {
-    availableMaterials.value = []
-    return
+    availableMaterials.value = [];
+    return;
   }
 
-  materialLoading.value = true
+  materialLoading.value = true;
   try {
-    console.log('📦 Loading materials for bin:', binId)
+    console.log('📦 Loading materials for bin:', binId);
 
     const materialsRes = await openbravoApi.get(
       '/org.openbravo.service.json.jsonrest/MaterialMgmtStorageDetail',
@@ -534,14 +402,14 @@ const loadMaterialsByBin = async (binId) => {
           _where: `storageBin.id='${binId}' AND quantityOnHand > 0`
         }
       }
-    )
+    );
 
-    const rows = materialsRes?.data?.response?.data || []
+    const rows = materialsRes?.data?.response?.data || [];
     
     if (rows.length > 0) {
-      console.log('📊 Full raw material data (first item):', JSON.stringify(rows[0], null, 2))
+      console.log('📊 Full raw material data (first item):', JSON.stringify(rows[0], null, 2));
     }
-    console.log('📊 Total materials found:', rows.length)
+    console.log('📊 Total materials found:', rows.length);
 
     availableMaterials.value = rows.map((r) => {
       const productId = 
@@ -549,7 +417,7 @@ const loadMaterialsByBin = async (binId) => {
         r.product || 
         r.m_Product_ID || 
         r['product$id'] ||
-        r.productId
+        r.productId;
 
       const productName = 
         r.product?.name || 
@@ -558,14 +426,14 @@ const loadMaterialsByBin = async (binId) => {
         r['product$name'] ||
         r.productName ||
         r._identifier ||
-        '(Tanpa Nama Produk)'
+        '(Tanpa Nama Produk)';
       
       const uomId = 
         r.uOM?.id || 
         r.uOM || 
         r.c_UOM_ID || 
         r['uOM$id'] ||
-        r.uomId
+        r.uomId;
 
       const uomName = 
         r.uOM?.name || 
@@ -573,7 +441,7 @@ const loadMaterialsByBin = async (binId) => {
         r.uom_name ||
         r['uOM$name'] ||
         r.uomName ||
-        'Unit'
+        'Unit';
       
       const stock = parseFloat(
         r.quantityOnHand || 
@@ -581,7 +449,7 @@ const loadMaterialsByBin = async (binId) => {
         r.stock || 
         r.qty ||
         0
-      )
+      );
 
       console.log('🔍 Mapped material:', {
         productId,
@@ -589,7 +457,7 @@ const loadMaterialsByBin = async (binId) => {
         uomId,
         uomName,
         stock
-      })
+      });
 
       return {
         productId,
@@ -597,23 +465,23 @@ const loadMaterialsByBin = async (binId) => {
         uomId,
         uom: uomName,
         stock
-      }
-    })
+      };
+    });
 
-    console.log(`✅ Loaded ${availableMaterials.value.length} materials:`, availableMaterials.value)
+    console.log(`✅ Loaded ${availableMaterials.value.length} materials:`, availableMaterials.value);
 
     if (availableMaterials.value.length === 0) {
-      console.warn('⚠️ No materials found with stock > 0 for this bin')
+      console.warn('⚠️ No materials found with stock > 0 for this bin');
     }
 
   } catch (err) {
-    console.error('❌ Error loading materials:', err.response?.data || err.message)
-    console.error('❌ Full error object:', err)
-    availableMaterials.value = []
+    console.error('❌ Error loading materials:', err.response?.data || err.message);
+    console.error('❌ Full error object:', err);
+    availableMaterials.value = [];
   } finally {
-    materialLoading.value = false
+    materialLoading.value = false;
   }
-}
+};
 
 // ======================
 // QR SCANNER FUNCTIONS
@@ -693,7 +561,7 @@ const onScanSuccess = async (decodedText) => {
 
     alert(`✅ QR Code berhasil di-scan!\n📍 Lokasi: ${locationName}\n🏷️ Batch: ${batchName}`);
 
-    await loadWarehouseAndBin(locationName)
+    await loadWarehouseAndBin(locationName);
 
     stopScanner();
   } catch (err) {
@@ -761,104 +629,6 @@ function addFormSection() {
   });
 }
 
-// ======================
-// VALIDATION FUNCTIONS (ENHANCED & OPTIMIZED)
-// ======================
-const validateMaterialStock = async () => {
-  if (!selectedLocation.value || !selectedDate.value) {
-    console.warn('⚠️ Location or date not selected');
-    return [];
-  }
-
-  const errors = [];
-  
-  // ✅ Collect all unique materials with their total requested qty
-  const materialRequests = new Map();
-  
-  formSections.value.forEach((section, sectionIndex) => {
-    section.materials.forEach((material, matIndex) => {
-      if (material.material_name && material.qty) {
-        const key = material.material_name;
-        const requestedQty = parseFloat(material.qty);
-        
-        if (!materialRequests.has(key)) {
-          materialRequests.set(key, {
-            materialName: material.material_name,
-            uom: material.uom,
-            totalRequested: 0,
-            sections: []
-          });
-        }
-        
-        const data = materialRequests.get(key);
-        data.totalRequested += requestedQty; // ✅ Tambahkan ke total
-        data.sections.push({
-          sectionIndex: sectionIndex + 1,
-          matIndex,
-          qty: requestedQty
-        });
-      }
-    });
-  });
-  
-  // ✅ Validate each unique material (parallel processing)
-  const validationPromises = Array.from(materialRequests.entries()).map(async ([materialName, data]) => {
-    // 1. Cari material dari Openbravo
-    const selectedMaterial = availableMaterials.value.find(
-      (m) => m.material_name === materialName
-    );
-    
-    if (!selectedMaterial) return null;
-    
-    const stockFromOpenbravo = parseFloat(selectedMaterial.stock);
-    
-    // 2. Hitung material yang sudah digunakan
-    const usedQty = await getUsedMaterialsByLocationAndDate(
-      selectedLocation.value,
-      selectedDate.value,
-      materialName
-    );
-    
-    // 3. Hitung available stock
-    const availableStock = stockFromOpenbravo - usedQty;
-    
-    // ✅ 4. Check TOTAL REQUESTED vs AVAILABLE STOCK
-    console.log(`🔍 Validating ${materialName}:`, {
-      totalRequested: data.totalRequested,
-      availableStock,
-      sections: data.sections.length
-    });
-    
-    if (data.totalRequested > availableStock) {
-      // ❌ Total permintaan melebihi stock tersedia
-      return {
-        materialName: data.materialName,
-        totalRequested: data.totalRequested,
-        stockFromOpenbravo,
-        usedQty,
-        availableStock,
-        uom: data.uom,
-        sections: data.sections // Semua section yang pakai material ini
-      };
-    }
-    
-    return null; // ✅ Stock cukup
-  });
-  
-  const results = await Promise.all(validationPromises);
-  
-  // Flatten results (filter null)
-  results.forEach(result => {
-    if (result) {
-      errors.push(result);
-    }
-  });
-  
-  console.log('✅ Validation completed:', errors.length === 0 ? 'All materials available' : `${errors.length} materials insufficient`);
-  
-  return errors;
-};
-
 function removeFormSection(index) {
   if (formSections.value.length > 1) {
     formSections.value.splice(index, 1);
@@ -886,10 +656,98 @@ function removeWorkerRow(sectionIndex, workerIndex) {
 }
 
 // ======================
-// SUBMIT TO DATABASE (ENHANCED)
+// VALIDATION FUNCTIONS
+// ======================
+const validateMaterialStock = async () => {
+  if (!selectedLocation.value || !selectedDate.value) {
+    console.warn('⚠️ Location or date not selected');
+    return [];
+  }
+
+  const errors = [];
+  const materialRequests = new Map();
+  
+  formSections.value.forEach((section, sectionIndex) => {
+    section.materials.forEach((material, matIndex) => {
+      if (material.material_name && material.qty) {
+        const key = material.material_name;
+        const requestedQty = parseFloat(material.qty);
+        
+        if (!materialRequests.has(key)) {
+          materialRequests.set(key, {
+            materialName: material.material_name,
+            uom: material.uom,
+            totalRequested: 0,
+            sections: []
+          });
+        }
+        
+        const data = materialRequests.get(key);
+        data.totalRequested += requestedQty;
+        data.sections.push({
+          sectionIndex: sectionIndex + 1,
+          matIndex,
+          qty: requestedQty
+        });
+      }
+    });
+  });
+  
+  const validationPromises = Array.from(materialRequests.entries()).map(async ([materialName, data]) => {
+    const selectedMaterial = availableMaterials.value.find(
+      (m) => m.material_name === materialName
+    );
+    
+    if (!selectedMaterial) return null;
+    
+    const stockFromOpenbravo = parseFloat(selectedMaterial.stock);
+    
+    const usedQty = await getUsedMaterialsByLocationAndDate(
+      selectedLocation.value,
+      selectedDate.value,
+      materialName
+    );
+    
+    const availableStock = stockFromOpenbravo - usedQty;
+    
+    console.log(`🔍 Validating ${materialName}:`, {
+      totalRequested: data.totalRequested,
+      availableStock,
+      sections: data.sections.length
+    });
+    
+    if (data.totalRequested > availableStock) {
+      return {
+        materialName: data.materialName,
+        totalRequested: data.totalRequested,
+        stockFromOpenbravo,
+        usedQty,
+        availableStock,
+        uom: data.uom,
+        sections: data.sections
+      };
+    }
+    
+    return null;
+  });
+  
+  const results = await Promise.all(validationPromises);
+  
+  results.forEach(result => {
+    if (result) {
+      errors.push(result);
+    }
+  });
+  
+  console.log('✅ Validation completed:', errors.length === 0 ? 'All materials available' : `${errors.length} materials insufficient`);
+  
+  return errors;
+};
+
+// ======================
+// SUBMIT TO DATABASE
 // ======================
 const submitPlanning = async () => {
-  // ✅ Validasi 1: Cek semua field wajib termasuk tanggal
   if (!selectedDate.value) {
     alert("⚠️ Pilih tanggal terlebih dahulu!");
     return;
@@ -900,7 +758,6 @@ const submitPlanning = async () => {
     return;
   }
 
-  // ✅ VALIDASI STOCK MATERIAL (Enhanced with database check)
   const stockErrors = await validateMaterialStock();
   
   if (stockErrors.length > 0) {
@@ -918,8 +775,6 @@ const submitPlanning = async () => {
     errorMessage += "Anda akan diarahkan ke halaman Good Movement untuk melakukan transfer stock.";
     
     alert(errorMessage);
-    
-    // ✅ Redirect ke halaman /goodmovement
     router.push('/goodmovement');
     return;
   }
@@ -931,20 +786,15 @@ const submitPlanning = async () => {
     console.log("📤 Menyimpan planning...");
 
     const reportDate = selectedDate.value;
-    
     console.log("📅 Tanggal yang dipilih:", reportDate);
 
-    // ==========================================
-    // 1. INSERT ke gh_planning_report
-    // ==========================================
     const reportPayload = {
-      planning_date: reportDate, // ✅ Gunakan planning_date
+      planning_date: reportDate,
       location_id: Number(selectedLocation.value),
       batch_id: Number(selectedBatch.value),
       phase_plan: selectedPhase.value,
       created_by: "manager",
-      status: "onReview" // ✅ Status awal onReview
-      // ✅ JANGAN set updated_at, biarkan database handle dengan trigger
+      status: "onReview"
     };
 
     const { data: reportData, error: reportErr } = await supabase
@@ -959,9 +809,6 @@ const submitPlanning = async () => {
     console.log("🟩 Planning report created:", planning_id);
     console.log("📅 Report date saved:", reportData.planning_date);
 
-    // ==========================================
-    // 2. INSERT ke gh_planning_activity (LOOP)
-    // ==========================================
     for (let i = 0; i < formSections.value.length; i++) {
       const section = formSections.value[i];
 
@@ -978,7 +825,7 @@ const submitPlanning = async () => {
         planning_id,
         act_name: selectedAct?.activity || "",
         coa: section.coa ? Number(section.coa) : null,
-        manpower: manpowerTotal.toString(), // ✅ Convert to string sesuai schema
+        manpower: manpowerTotal.toString(),
         order_index: i + 1,
       };
 
@@ -993,17 +840,14 @@ const submitPlanning = async () => {
       const activity_id = actData.activity_id;
       console.log("🟩 Activity created:", activity_id);
 
-      // ==========================================
-      // 3. INSERT ke gh_planning_material (LOOP)
-      // ==========================================
       const validMaterials = section.materials.filter(
         (m) => m.material_name && m.qty && parseFloat(m.qty) > 0
       );
 
       if (validMaterials.length > 0) {
         const materialPayloads = validMaterials.map((m) => ({
-          planning_id,   // ✅ Tambahkan planning_id
-          activity_id,   // ✅ Tetap simpan untuk referensi
+          planning_id,
+          activity_id,
           material_name: m.material_name,
           qty: parseFloat(m.qty),
           uom: m.uom || null,
@@ -1019,9 +863,6 @@ const submitPlanning = async () => {
       }
     }
 
-    // ==========================================
-    // 4. INSERT ke gh_planning_history
-    // ==========================================
     const historyPayload = {
       planning_id,
       changed_by: "manager",
@@ -1092,11 +933,130 @@ function getBatchName(batchId) {
   return batch ? batch.batch_name : "";
 }
 
-const filteredBatches = computed(() => {
-  if (!selectedLocation.value) return [];
-  return batches.value.filter(
-    (b) => Number(b.location_id) === Number(selectedLocation.value)
-  );
+// ======================
+// WATCHERS - AFTER ALL REFS ARE DECLARED
+// ======================
+watch(selectedLocation, async (loc) => {
+  formData.value.location_id = loc;
+  formData.value.batch_id = ""; 
+  phaseList.value = [];
+  selectedBatch.value = "";
+  clearMaterialCache();
+});
+
+watch(selectedBatch, async (batch) => {
+  formData.value.batch_id = batch;
+
+  if (batch) {
+    phaseList.value = await batchPhaseStore.fetchPhasesForBatch(batch);
+  } else {
+    phaseList.value = [];
+  }
+});
+
+watch(selectedPhase, (newPhase) => {
+  formSections.value.forEach(section => {
+    section.phase_plan = newPhase;
+  });
+});
+
+watch(
+  formSections,
+  (sections) => {
+    sections.forEach((s) => {
+      const selected = potatoActivities.value.find(
+        (a) => a.activity_id == s.activity_id
+      );
+      s.coa = selected ? selected.CoA_code : "";
+    });
+  },
+  { deep: true }
+);
+
+watch(
+  formSections,
+  (sections) => {
+    sections.forEach((section) => {
+      section.materials.forEach((material) => {
+        if (material.material_name) {
+          const selectedMaterial = availableMaterials.value.find(
+            (m) => m.material_name === material.material_name
+          );
+          
+          if (selectedMaterial) {
+            material.uom = selectedMaterial.uom || "";
+          }
+        } else {
+          material.uom = "";
+        }
+      });
+    });
+  },
+  { deep: true }
+);
+
+watch(
+  () => formSections.value.flatMap(s => 
+    s.materials.map(m => ({ name: m.material_name, qty: m.qty, uom: m.uom }))
+  ),
+  async () => {
+    if (window.materialUpdateTimeout) {
+      clearTimeout(window.materialUpdateTimeout);
+    }
+    
+    window.materialUpdateTimeout = setTimeout(async () => {
+      await updateAllMaterialDisplay();
+    }, 300);
+  },
+  { deep: true }
+);
+
+watch(selectedLocation, async (newVal) => {
+  if (!newVal) return;
+
+  const loc = locations.value.find(l => l.location_id == newVal);
+  if (!loc) return;
+
+  await loadWarehouseAndBin(loc.location);
+});
+
+watch(selectedDate, () => {
+  clearMaterialCache();
+  setTimeout(() => updateAllMaterialDisplay(), 500);
+});
+
+watch(availableMaterials, (newMaterials) => {
+  if (newMaterials.length > 0) {
+    console.log('✅ Materials loaded, triggering display update...');
+    clearMaterialCache();
+    setTimeout(() => updateAllMaterialDisplay(), 500);
+  }
+});
+
+// ======================
+// LIFECYCLE HOOKS
+// ======================
+onMounted(async () => {
+  console.log("🚀 Memuat data awal...");
+  selectedDate.value = new Date().toISOString().split("T")[0];
+
+  try {
+    await Promise.all([
+      locationStore.fetchAll(),
+      batchStore.getBatches(),
+      potatoActivityStore.fetchAll(),
+    ]);
+
+    console.log("✅ Data berhasil dimuat");
+    console.log("Activities:", potatoActivities.value);
+  } catch (error) {
+    console.error("❌ Gagal memuat data:", error);
+    alert("Gagal memuat data. Silakan refresh halaman.");
+  }
+});
+
+onUnmounted(() => {
+  stopScanner();
 });
 </script>
 
@@ -1156,16 +1116,11 @@ const filteredBatches = computed(() => {
                 <span class="text-lg leading-none">🌱</span>
                 Phase
               </label>
-              <select
-                v-model="selectedPhase"
-                class="px-4 py-3 border-2 border-gray-200 rounded-xl bg-white text-gray-700 font-medium focus:outline-none focus:border-[#0071f3] focus:ring-2 focus:ring-[#0071f3]/20 transition appearance-none cursor-pointer"
-              >
-                <option value="" disabled>Select Phase</option>
-                <option>Planlet</option>
-                <option>Planlet Stek</option>
-                <option>G0</option>
-                <option>G1</option>
-                <option>G2</option>
+              <select v-model="selectedPhase" class="px-4 py-3 border-2 border-gray-200 rounded-xl bg-white text-gray-700 font-medium focus:outline-none focus:border-[#0071f3] focus:ring-2 focus:ring-[#0071f3]/20 transition appearance-none cursor-pointer">
+                <option value="">Pilih Phase</option>
+                <option v-for="p in phaseList" :key="p.phase_id" :value="p.phase_id">
+                  {{ p.phase_name }}
+                </option>
               </select>
             </div>
 
@@ -1181,7 +1136,6 @@ const filteredBatches = computed(() => {
                       focus:outline-none focus:border-[#0071f3] focus:ring-2 focus:ring-[#0071f3]/20 transition appearance-none"
               >
                 <option disabled value="">Select Location</option>
-
                 <option
                   v-for="loc in locations"
                   :key="loc.location_id"
@@ -1208,7 +1162,6 @@ const filteredBatches = computed(() => {
                 <option disabled value="">
                   {{ filteredBatches.length === 0 ? "Select Location First" : "Select Batch" }}
                 </option>
-
                 <option
                   v-for="b in filteredBatches"
                   :key="b.batch_id"
@@ -1217,7 +1170,6 @@ const filteredBatches = computed(() => {
                   {{ b.batch_name }}
                 </option>
               </select>
-
             </div>
           </div>
         </div>
@@ -1300,7 +1252,7 @@ const filteredBatches = computed(() => {
                   :key="matIndex"
                   class="flex flex-col gap-3 bg-white rounded-lg p-4 border border-gray-200"
                 >
-                  <!-- Material Name - Dropdown dari availableMaterials -->
+                  <!-- Material Name -->
                   <div class="flex flex-col">
                     <label class="text-xs font-semibold text-gray-600 mb-2">Material Name</label>
                     <select
@@ -1343,7 +1295,7 @@ const filteredBatches = computed(() => {
                   </div>
 
                   <div class="flex gap-3 items-end">
-                    <!-- Qty - Input number -->
+                    <!-- Qty -->
                     <div class="flex-1 flex flex-col">
                       <label class="text-xs font-semibold text-gray-600 mb-2">Qty</label>
                       <input
@@ -1355,7 +1307,7 @@ const filteredBatches = computed(() => {
                       />
                     </div>
 
-                    <!-- Unit - Auto-filled dari availableMaterials -->
+                    <!-- Unit -->
                     <div class="flex-1 flex flex-col">
                       <label class="text-xs font-semibold text-gray-600 mb-2">Unit</label>
                       <input
@@ -1378,7 +1330,7 @@ const filteredBatches = computed(() => {
                 </div>
               </div>
 
-              <!-- Add Material Row Button -->
+              <!-- Add Material Button -->
               <button
                 @click="addMaterialRow(index)"
                 class="w-full mt-3 bg-gradient-to-r from-[#0071f3] to-[#0060d1] hover:from-[#0060d1] hover:to-[#0050b1] text-white font-semibold px-4 py-2.5 rounded-lg transition shadow-md hover:shadow-lg text-sm"
@@ -1460,60 +1412,6 @@ const filteredBatches = computed(() => {
       </div>
       <p class="text-gray-400 text-xs">© 2025 All Rights Reserved</p>
     </footer>
-
-    <!-- QR Scanner Modal -->
-    <div
-      v-if="showScanner"
-      class="fixed inset-0 bg-black bg-opacity-90 flex items-center justify-center z-50 p-4"
-    >
-      <div class="bg-white rounded-2xl max-w-md w-full overflow-hidden">
-        <div class="bg-gradient-to-r from-[#0071f3] to-[#0060d1] p-6 text-white">
-          <div class="flex items-center justify-between mb-2">
-            <h2 class="text-xl font-bold">Scan QR Code</h2>
-            <button
-              @click="stopScanner"
-              class="w-8 h-8 bg-white bg-opacity-20 hover:bg-opacity-30 rounded-lg flex items-center justify-center transition"
-            >
-              <svg class="w-5 h-5" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 384 512" fill="currentColor">
-                <path d="M342.6 150.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0L192 210.7 86.6 105.4c-12.5-12.5-32.8-12.5-45.3 0s-12.5 32.8 0 45.3L146.7 256 41.4 361.4c-12.5 12.5-12.5 32.8 0 45.3s32.8 12.5 45.3 0L192 301.3 297.4 406.6c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L237.3 256 342.6 150.6z"/>
-              </svg>
-            </button>
-          </div>
-          <p class="text-sm text-blue-100">Arahkan kamera ke QR Code</p>
-        </div>
-        
-        <div class="p-6">
-          <div class="relative bg-black rounded-xl overflow-hidden mb-4" style="min-height: 350px;">
-            <!-- QR Reader Container -->
-            <div id="qr-reader" style="width: 100%; height: 100%;"></div>
-            
-            <!-- Scanning Indicator -->
-            <div v-if="isScanning" class="absolute top-4 left-4 bg-green-500 text-white px-3 py-1.5 rounded-full text-xs font-semibold flex items-center gap-2 z-10">
-              <div class="w-2 h-2 bg-white rounded-full animate-pulse"></div>
-              Scanning...
-            </div>
-            
-            <!-- Scan Frame Overlay -->
-            <div class="absolute inset-0 flex items-center justify-center pointer-events-none">
-              <div class="w-64 h-64 border-4 border-white rounded-2xl opacity-30"></div>
-            </div>
-          </div>
-          
-          <div class="space-y-2">
-            <button
-              @click="stopScanner"
-              class="w-full bg-gray-100 hover:bg-gray-200 text-gray-700 font-semibold py-3 rounded-xl transition"
-            >
-              ✕ Tutup Scanner
-            </button>
-            
-            <p class="text-xs text-gray-500 text-center">
-              💡 Pastikan QR Code berada dalam frame putih dan pencahayaan cukup
-            </p>
-          </div>
-        </div>
-      </div>
-    </div>
   </div>
 </template>
 
@@ -1534,41 +1432,5 @@ select {
   background-repeat: no-repeat;
   background-size: 1.5em 1.5em;
   padding-right: 2.5rem;
-}
-
-/* QR Scanner styles */
-#qr-reader {
-  border: none;
-}
-
-#qr-reader__dashboard,
-#qr-reader__dashboard_section {
-  display: none !important;
-}
-
-@keyframes pulse {
-  0%, 100% {
-    opacity: 1;
-  }
-  50% {
-    opacity: 0.5;
-  }
-}
-
-@keyframes spin {
-  from {
-    transform: rotate(0deg);
-  }
-  to {
-    transform: rotate(360deg);
-  }
-}
-
-.animate-spin {
-  animation: spin 1s linear infinite;
-}
-
-.animate-pulse {
-  animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
 }
 </style>

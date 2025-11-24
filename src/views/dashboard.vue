@@ -37,6 +37,18 @@ Chart.register(
 import { useAuthStore } from '../stores/auth'
 import { supabase } from '@/lib/supabase'
 
+// Helper function untuk normalize phase name
+const normalizePhase = (phaseName) => {
+  const phase = phaseName?.toLowerCase() || '';
+  
+  if (phase.includes('planlet')) return 'Planlet';
+  if (phase.includes('g0') || phase.includes('g0')) return 'G0';
+  if (phase === 'g1' || phase.includes('g1')) return 'G1';
+  if (phase === 'g2' || phase.includes('g2')) return 'G2';
+  
+  return null; // Abaikan data yang tidak termasuk 4 kategori
+}
+
 const locationBatches = ref({});
 const locationList = ref([]);
 const authStore = useAuthStore()
@@ -104,6 +116,12 @@ const successRate = ref({
     damaged: 0,
     success: 0,
     percentage: 0
+  },
+  g2: {
+    total: 0,
+    damaged: 0,
+    success: 0,
+    percentage: 0
   }
 })
 
@@ -144,119 +162,130 @@ onMounted(async () => {
 
   locationBatches.value = grouped;
 
-  // Ambil data produksi dari database dengan location_id
+  // Reset summary dan success rate
+  summary.value = {
+    totalPlanlet: 0,
+    planletBagus: 0,
+    planletJelek: 0,
+    planletDitanam: 0,
+    g0Terjual: 0,
+    g0Diproduksi: 0,
+    g0Dirawat: 0,
+    g1Hidup: 0,
+    g1Mati: 0,
+    g2Diproduksi: 0,
+    g2Mitra: 0,
+    g2Petani: 0,
+    g2Terjual: 0,
+    pendapatan: 0,
+  };
+
+  successRate.value = {
+    planlet: { total: 0, damaged: 0, success: 0, percentage: 0 },
+    g0: { total: 0, damaged: 0, success: 0, percentage: 0 },
+    g1: { total: 0, damaged: 0, success: 0, percentage: 0 },
+    g2: { total: 0, damaged: 0, success: 0, percentage: 0 }
+  };
+
+  // 1. Ambil data produksi dari gh_data_production
   const { data: productionData } = await supabase
     .from("gh_data_production")
     .select("production_type, qty, location_id");
 
-  // Ambil data kerusakan dari database
-  const { data: damageData } = await supabase
-    .from("gh_type_damage")
-    .select("kuning, kutilang, busuk, report_id")
-    .eq("status", "approved");
-
-  // Ambil data report untuk join dengan type damage (dengan phase dan location_id)
-  const { data: reportData } = await supabase
-    .from("gh_report")
-    .select("report_id, phase, location_id, batch_id")
-    .eq("report_status", "approved");
-
   if (productionData) {
-    // Reset summary
-    summary.value = {
-      totalPlanlet: 0,
-      planletBagus: 0,
-      planletJelek: 0,
-      planletDitanam: 0,
-      g0Terjual: 0,
-      g0Diproduksi: 0,
-      g0Dirawat: 0,
-      g1Hidup: 0,
-      g1Mati: 0,
-      g2Diproduksi: 0,
-      g2Mitra: 0,
-      g2Petani: 0,
-      g2Terjual: 0,
-      pendapatan: 0,
-    };
-
-    // Reset success rate data
-    successRate.value = {
-      planlet: { total: 0, damaged: 0, success: 0, percentage: 0 },
-      g0: { total: 0, damaged: 0, success: 0, percentage: 0 },
-      g1: { total: 0, damaged: 0, success: 0, percentage: 0 }
-    };
-
-    // Aggregate data berdasarkan production_type
     productionData.forEach(item => {
       const qty = parseFloat(item.qty) || 0;
-      const type = item.production_type?.toLowerCase() || '';
+      const normalizedType = normalizePhase(item.production_type);
 
-      if (type.includes('planlet')) {
+      if (normalizedType === 'Planlet') {
         summary.value.totalPlanlet += qty;
         successRate.value.planlet.total += qty;
-      } else if (type.includes('g0')) {
-        if (type.includes('terjual')) {
-          summary.value.g0Terjual += qty;
-        } else if (type.includes('diproduksi') || type.includes('produksi')) {
-          summary.value.g0Diproduksi += qty;
-          successRate.value.g0.total += qty;
-        }
-      } else if (type.includes('g1')) {
+      } else if (normalizedType === 'G0') {
+        summary.value.g0Diproduksi += qty;
+        successRate.value.g0.total += qty;
+      } else if (normalizedType === 'G1') {
         successRate.value.g1.total += qty;
-      } else if (type.includes('g2')) {
-        if (type.includes('diproduksi') || type.includes('produksi')) {
-          summary.value.g2Diproduksi += qty;
-        } else if (type.includes('terjual')) {
-          summary.value.g2Terjual += qty;
-        }
+      } else if (normalizedType === 'G2') {
+        summary.value.g2Diproduksi += qty;
+        successRate.value.g2.total += qty;
+      }
+    });
+  }
+
+  // 2. Ambil HANYA report yang approved
+  const { data: reportData } = await supabase
+    .from("gh_report")
+    .select(`
+      report_id,
+      location_id,
+      batch_id,
+      phase_id,
+      report_status,
+      gh_phase!inner(phase_name)
+    `)
+    .eq("report_status", "approved");
+
+  // 3. Ambil kerusakan yang terkait dengan report approved
+  if (reportData && reportData.length > 0) {
+    const approvedReportIds = reportData.map(r => r.report_id);
+    
+    const { data: damageData } = await supabase
+      .from("gh_type_damage")
+      .select("kuning, kutilang, busuk, report_id, status")
+      .in("report_id", approvedReportIds)
+      .eq("status", "approved");
+
+    // Buat map report_id -> phase_name
+    const reportPhaseMap = {};
+    reportData.forEach(report => {
+      if (report.gh_phase && report.gh_phase.phase_name) {
+        reportPhaseMap[report.report_id] = report.gh_phase.phase_name;
       }
     });
 
-    // Hitung total kerusakan per phase dari gh_report
-    if (damageData && reportData) {
+    // Hitung kerusakan per fase
+    if (damageData) {
       damageData.forEach(damage => {
+        // Jumlahkan kuning + kutilang + busuk
         const totalDamage = (parseInt(damage.kuning) || 0) + 
-                           (parseInt(damage.kutilang) || 0) + 
-                           (parseInt(damage.busuk) || 0);
+                          (parseInt(damage.kutilang) || 0) + 
+                          (parseInt(damage.busuk) || 0);
         
-        // Cari report terkait untuk mengetahui phase
-        const report = reportData.find(r => r.report_id === damage.report_id);
+        // Cari phase dari report_id
+        const phaseName = reportPhaseMap[damage.report_id];
         
-        if (report && report.phase) {
-          const phase = report.phase.toLowerCase();
+        if (phaseName) {
+          const normalizedPhase = normalizePhase(phaseName);
           
-          // Mapping phase dari gh_report ke success rate
-          if (phase.includes('planlet') || phase === 'planlet') {
+          if (normalizedPhase === 'Planlet') {
             successRate.value.planlet.damaged += totalDamage;
-          } else if (phase.includes('g0') || phase === 'g0') {
+          } else if (normalizedPhase === 'G0') {
             successRate.value.g0.damaged += totalDamage;
-          } else if (phase.includes('g1') || phase === 'g1') {
+          } else if (normalizedPhase === 'G1') {
             successRate.value.g1.damaged += totalDamage;
-          } else if (phase.includes('g2') || phase === 'g2') {
-            // Jika ada phase g2, tambahkan ini
-            // successRate.value.g2.damaged += totalDamage;
+          } else if (normalizedPhase === 'G2') {
+            successRate.value.g2.damaged += totalDamage;
           }
         }
       });
     }
-
-    // Hitung success dan percentage untuk setiap fase
-    Object.keys(successRate.value).forEach(key => {
-      const phase = successRate.value[key];
-      phase.success = phase.total - phase.damaged;
-      phase.percentage = phase.total > 0 
-        ? ((phase.success / phase.total) * 100).toFixed(1) 
-        : 0;
-    });
-
-    // Update progres dengan data success rate
-    progres.value.planletToG0 = successRate.value.planlet.percentage;
-    progres.value.G0ToG1 = successRate.value.g0.percentage;
-    progres.value.G1ToG2 = successRate.value.g1.percentage;
   }
 
-  // Ambil data penjualan untuk hitung pendapatan
+  // 4. Hitung success dan percentage untuk setiap fase
+  Object.keys(successRate.value).forEach(key => {
+    const phase = successRate.value[key];
+    phase.success = Math.max(0, phase.total - phase.damaged);
+    phase.percentage = phase.total > 0 
+      ? ((phase.success / phase.total) * 100).toFixed(1) 
+      : 0;
+  });
+
+  // Update progres dengan data success rate
+  progres.value.planletToG0 = successRate.value.planlet.percentage;
+  progres.value.G0ToG1 = successRate.value.g0.percentage;
+  progres.value.G1ToG2 = successRate.value.g1.percentage;
+
+  // 5. Ambil data penjualan untuk hitung pendapatan
   const { data: salesData } = await supabase
     .from("gh_sales")
     .select("qty, price");
@@ -362,12 +391,12 @@ const initKepemilikanChart = async () => {
   const canvas = document.getElementById('kepemilikanChart');
   if (!canvas) return;
 
-  // Ambil semua data produksi kentang
+  // Kembali ke gh_production untuk owner
   const { data: productionData } = await supabase
     .from("gh_production")
     .select("owner, qty, category");
 
-  // Aggregate berdasarkan owner untuk semua kategori kentang
+  // Aggregate berdasarkan owner
   const ownerData = {};
   productionData?.forEach(item => {
     const owner = item.owner || 'Tidak Diketahui';
@@ -601,7 +630,7 @@ const getBatchCount = (locationId) => {
             </span>
           </button>
           <router-link
-            to="/add-location"
+            to="/location"
             class="bg-gradient-to-r from-gray-700 to-gray-800 hover:from-gray-800 hover:to-gray-900 text-white font-medium px-5 py-3 rounded-xl transition-all text-sm shadow-md hover:shadow-lg transform hover:-translate-y-0.5 inline-flex items-center"
           >
             📍 Add Location & Batch
@@ -666,35 +695,45 @@ const getBatchCount = (locationId) => {
       <!-- Progress Stats with Potato -->
       <div class="mb-8">
         <h2 class="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-3">Tingkat Keberhasilan</h2>
-        <div class="grid grid-cols-1 md:grid-cols-3 gap-5">
+        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
           <PotatoProgressBar
-            :percentage="parseFloat(successRate.planlet.percentage)"
+            :percentage="parseFloat(successRate.planlet?.percentage || 0)"
             label="Planlet"
-            :success="successRate.planlet.success"
-            :total="successRate.planlet.total"
-            :damaged="successRate.planlet.damaged"
-            gradient-start="#10b981"
-            gradient-end="#059669"
+            :success="successRate.planlet?.success || 0"
+            :total="successRate.planlet?.total || 0"
+            :damaged="successRate.planlet?.damaged || 0"
+            gradient-start="#d4a574"
+            gradient-end="#b88a5c"
           />
           
           <PotatoProgressBar
-            :percentage="parseFloat(successRate.g0.percentage)"
+            :percentage="parseFloat(successRate.g0?.percentage || 0)"
             label="G0"
-            :success="successRate.g0.success"
-            :total="successRate.g0.total"
-            :damaged="successRate.g0.damaged"
-            gradient-start="#0071f3"
-            gradient-end="#0060d1"
+            :success="successRate.g0?.success || 0"
+            :total="successRate.g0?.total || 0"
+            :damaged="successRate.g0?.damaged || 0"
+            gradient-start="#d4a574"
+            gradient-end="#b88a5c"
           />
           
           <PotatoProgressBar
-            :percentage="parseFloat(successRate.g1.percentage)"
+            :percentage="parseFloat(successRate.g1?.percentage || 0)"
             label="G1"
-            :success="successRate.g1.success"
-            :total="successRate.g1.total"
-            :damaged="successRate.g1.damaged"
-            gradient-start="#f59e0b"
-            gradient-end="#d97706"
+            :success="successRate.g1?.success || 0"
+            :total="successRate.g1?.total || 0"
+            :damaged="successRate.g1?.damaged || 0"
+            gradient-start="#d4a574"
+            gradient-end="#b8965c"
+          />
+          
+          <PotatoProgressBar
+            :percentage="parseFloat(successRate.g2?.percentage || 0)"
+            label="G2"
+            :success="successRate.g2?.success || 0"
+            :total="successRate.g2?.total || 0"
+            :damaged="successRate.g2?.damaged || 0"
+            gradient-start="#d4a574"
+            gradient-end="#b8865c"
           />
         </div>
       </div>
@@ -776,7 +815,7 @@ const getBatchCount = (locationId) => {
           <div class="p-4 pt-0">
             <button
               class="w-full bg-white hover:bg-gray-50 text-[#0071f3] py-3 rounded-xl font-semibold border-2 border-[#0071f3] hover:shadow-md transition-all text-sm"
-              @click="router.push(`/location/${loc.location_id}`)"
+              @click="router.push(`/locationdetail/${loc.location_id}`)"
             >
               📊 Lihat Detail Lokasi
             </button>

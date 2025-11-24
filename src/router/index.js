@@ -187,9 +187,21 @@ const router = createRouter({
       meta: { requiresAuth: true },
     },
     {
-      path: "/location/:location_id",
+      path: "/location",
       name: "location",
       component: () => import("../views/location.vue"),
+      meta: { requiresAuth: true },
+    },
+    {
+      path: "/locationdetail/:location_id",
+      name: "locationdetail",
+      component: () => import("../views/LocationDetail.vue"),
+      meta: { requiresAuth: true },
+    },
+    {
+      path: "/add-phase",
+      name: "addphase",
+      component: () => import("../views/AddPhase.vue"),
       meta: { requiresAuth: true },
     },
   ],

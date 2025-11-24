@@ -44,7 +44,7 @@ const calculateMaterialUsage = () => {
   return usage;
 };
 
-const getMaterialStockInfo = computed(() => (materialName) => {
+const getMaterialStockInfo = (materialName) => {
   if (!materialName) return null;
 
   const materialFromOpenbravo = materialOptions.value.find(
@@ -61,7 +61,8 @@ const getMaterialStockInfo = computed(() => (materialName) => {
     remaining,
     uom: materialFromOpenbravo?.uom || ''
   };
-});
+};
+
 
 
 const getStockColorClass = (remaining) => {
@@ -230,39 +231,24 @@ const checkStockShortage = () => {
 
 // 3. GANTI saveRevision yang lama dengan ini (dengan stock check)
 const saveRevision = async () => {
-  // ✅ Check stock shortage sebelum save
+  // Hitung ulang pemakaian material sebelum cek stok
+  calculateMaterialUsage();
+
+  // Cek apakah ada material yang qty-nya melebihi stok
   const shortages = checkStockShortage();
-  
+
+  // Kalau ada kekurangan stok → langsung ke Good Movement, TIDAK menyimpan revisi
   if (shortages.length > 0) {
-    const shortageMessage = shortages
-      .map(s => `• Activity ${s.activityIndex} (${s.activityName}):\n  ${s.materialName} - Kurang ${s.needed} ${s.uom}`)
-      .join('\n\n');
+    alert("⚠️ Stok material tidak mencukupi. Anda akan diarahkan ke halaman Good Movement untuk menambah stok.");
     
-    const confirmRedirect = confirm(
-      `⚠️ STOK TIDAK MENCUKUPI!\n\n` +
-      `Material berikut kekurangan stok:\n\n${shortageMessage}\n\n` +
-      `━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n` +
-      `Apakah Anda ingin membuat Good Movement untuk menambah stok?\n\n` +
-      `• OK → Ke halaman Good Movement\n` +
-      `• Cancel → Tetap lanjutkan`
-    );
-    
-    if (confirmRedirect) {
-      closeReviseModal();
-      router.push('/goodmovement');
-      return;
-    }
-    
-    const confirmSave = confirm(
-      '⚠️ Anda yakin ingin melanjutkan approval meskipun stok tidak mencukupi?\n\n' +
-      'Planning akan tetap disetujui meskipun material kurang.'
-    );
-    
-    if (!confirmSave) {
-      return;
-    }
+    closeReviseModal();
+    // kalau router kamu pakai nama route:
+    // router.push({ name: 'goodmovement' });
+    router.push('/goodmovement');
+    return; // stop di sini, jangan lanjut update ke Supabase
   }
-  
+
+  // Kalau stok aman → lanjut seperti biasa
   if (!confirm('Simpan revisi dan setujui planning ini?')) return;
 
   try {
@@ -358,6 +344,7 @@ const saveRevision = async () => {
     alert('Gagal menyimpan revisi: ' + err.message);
   }
 };
+
 
 // 4. GANTI onActivitySelected yang lama dengan ini
 const onActivitySelected = (activityObj) => {

@@ -82,7 +82,7 @@ const calculateActivityTotal = (materials) => {
   return materials.reduce((sum, mat) => sum + (Number(mat.total_price) || 0), 0)
 }
 
-// Computed: Calculate total cost untuk seluruh report
+// Calculate total cost untuk seluruh report
 const reportTotalCost = computed(() => {
   if (!currentReport.value?.activities) return 0
   
@@ -117,21 +117,17 @@ const loadData = async () => {
     ])
 
     const { data: report, error: fetchError } = await supabase
-      .from('gh_report')
-      .select(`
-        *,
-        type_damages:gh_type_damage(*),
-        activities:gh_activity(
-          *,
-          materials:gh_material_used(
-            *,
-            unit_price,
-            total_price
-          )
-        )
-      `)
-      .eq('report_id', report_id.value)
-      .single()
+  .from('gh_report')
+  .select(`
+    *,
+    type_damages:gh_type_damage(*),
+    activities:gh_activity(
+      *,
+      materials:gh_material_used(*)
+    )
+  `)
+  .eq('report_id', report_id.value)
+  .single()
         
     if (fetchError) throw fetchError
 
@@ -1200,6 +1196,7 @@ const getStatusBadge = (status) => {
   }
   return badges[status || 'onReview'] || badges['onReview']
 }
+
 </script>
 
 <template>
