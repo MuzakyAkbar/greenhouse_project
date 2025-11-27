@@ -6,7 +6,7 @@ import { useBatchStore } from '../stores/batch'
 import { useLocationStore } from '../stores/location'
 import { supabase } from '../lib/supabase'
 import openbravoApi from '@/lib/openbravo'
-import axios from 'axios'
+// import axios from 'axios' // Dihapus karena tidak digunakan
 
 const router = useRouter()
 const route = useRoute()
@@ -17,10 +17,37 @@ const locationStore = useLocationStore()
 const report_id = ref(route.params.report_id || null)
 
 const sourcePage = ref(route.query.from || '/planningReportList')
+// State untuk approval
+const approvalProgress = ref([])
+// Diubah menjadi objek yang lebih detail
+const currentUserLevel = ref(null) 
+const canApproveCurrentLevel = ref(false)
+// const currentLevelInfo = ref(null) // Dihapus karena tidak digunakan
 
 const loading = ref(true)
 const processing = ref(false)
 const error = ref(null)
+
+const phaseInfo = ref(null);
+
+const loadPhaseInfo = async (phaseId) => {
+  if (!phaseId) return null;
+  
+  try {
+    const { data, error } = await supabase
+      .from('gh_phase')
+      .select('phase_name')
+      .eq('phase_id', phaseId)
+      .single();
+    
+    if (error) throw error;
+    return data?.phase_name || 'Unknown Phase';
+  } catch (err) {
+    console.error('Error loading phase:', err);
+    return 'Unknown Phase';
+  }
+};
+
 
 const currentReport = ref(null)
 const revisionModal = ref({
@@ -36,23 +63,14 @@ const warehouseInfo = ref({
   location_name: null
 })
 
-const phaseNames = {
-  'generative': 'Generatif',
-  'vegetative': 'Vegetatif',
-  'harvest': 'Panen'
-}
-
-
-
-
-
 const getTotalMaterialCost = () => {
   if (!currentReport.value?.activities) return 0
   
   return currentReport.value.activities.reduce((sum, activity) => {
     if (!activity.materials) return sum
     const activityTotal = activity.materials.reduce((matSum, mat) => {
-      return matSum + (Number(mat.total_price) || 0)
+      // Menggunakan mat.total_price (yang harusnya sudah Number dari DB atau di-cast)
+      return matSum + (Number(mat.total_price) || 0) 
     }, 0)
     return sum + activityTotal
   }, 0)
@@ -82,15 +100,14 @@ const calculateActivityTotal = (materials) => {
   return materials.reduce((sum, mat) => sum + (Number(mat.total_price) || 0), 0)
 }
 
-// Calculate total cost untuk seluruh report
-const reportTotalCost = computed(() => {
-  if (!currentReport.value?.activities) return 0
+// const reportTotalCost = computed(() => { // Dihapus karena getTotalMaterialCost sudah cukup
+//   if (!currentReport.value?.activities) return 0
   
-  return currentReport.value.activities.reduce((sum, activity) => {
-    const activityTotal = calculateActivityTotal(activity.materials || [])
-    return sum + activityTotal
-  }, 0)
-})
+//   return currentReport.value.activities.reduce((sum, activity) => {
+//     const activityTotal = calculateActivityTotal(activity.materials || [])
+//     return sum + activityTotal
+//   }, 0)
+// })
 
 onMounted(async () => {
   if (!authStore.isLoggedIn) {
@@ -107,53 +124,59 @@ onMounted(async () => {
   await loadData()
 })
 
+// ✅ UPDATE loadData function
 const loadData = async () => {
   try {
-    loading.value = true
+    loading.value = true;
     
     await Promise.all([
       batchStore.getBatches(),
       locationStore.fetchAll()
-    ])
+    ]);
 
+    // Kita mengambil data report dan items 
+    // Kolom approval seperti approved_by, approved_at, dll. di gh_report 
+    // masih dipertahankan karena mungkin digunakan di UI lain atau untuk fallback/legacy.
     const { data: report, error: fetchError } = await supabase
-  .from('gh_report')
-  .select(`
-    *,
-    type_damages:gh_type_damage(*),
-    activities:gh_activity(
-      *,
-      materials:gh_material_used(*)
-    )
-  `)
-  .eq('report_id', report_id.value)
-  .single()
-        
-    if (fetchError) throw fetchError
+      .from('gh_report')
+      .select(`
+        *,
+        type_damages:gh_type_damage(*),
+        activities:gh_activity(
+          *,
+          materials:gh_material_used(*)
+        )
+      `)
+      .eq('report_id', report_id.value)
+      .single();
+    
+    if (fetchError) throw fetchError;
+    if (!report) throw new Error('Laporan tidak ditemukan');
 
-    if (!report) {
-      throw new Error('Laporan tidak ditemukan')
+    currentReport.value = report;
+    console.log('✅ Loaded report:', report);
+    
+    // ✅ Load phase name
+    if (report.phase_id) {
+      phaseInfo.value = await loadPhaseInfo(report.phase_id);
     }
-
-    currentReport.value = report
-    console.log('✅ Loaded report:', report)
-    console.log('📊 Report Phase:', report.phase)
+    
+    // Load approval progress
+    await loadApprovalProgress();
     
     if (report.location_id) {
-      await loadWarehouseAndBin(report.location_id)
+      await loadWarehouseAndBin(report.location_id);
     }
     
-    await updateReportStatus()
-    
   } catch (err) {
-    console.error('❌ Error loading data:', err)
-    error.value = err.message
-    alert('❌ Gagal memuat data: ' + err.message)
-    router.push(sourcePage.value)
+    console.error('❌ Error loading data:', err);
+    error.value = err.message;
+    alert('❌ Gagal memuat data: ' + err.message);
+    router.push(sourcePage.value);
   } finally {
-    loading.value = false
+    loading.value = false;
   }
-}
+};
 
 const loadWarehouseAndBin = async (locationId) => {
   try {
@@ -202,508 +225,423 @@ const loadWarehouseAndBin = async (locationId) => {
   }
 }
 
-// ✅ FIXED VERSION - Create Internal Consumption menggunakan API yang benar
+
+// ✅ FIXED createAndProcessMovement - Better Response Handling
 const createAndProcessMovement = async (materials, activityName) => {
+  console.log('🚀 Creating Openbravo Movement for activity:', activityName);
+  
+  if (!materials || materials.length === 0) {
+    console.warn('⚠️ No materials to process');
+    return {
+      success: false,
+      movementId: null,
+      successCount: 0,
+      totalMaterials: 0,
+      errors: 'No materials to process'
+    };
+  }
+
+  // Validasi warehouse info
+  if (!warehouseInfo.value.warehouse || !warehouseInfo.value.bin) {
+    console.error('❌ Warehouse or Bin not found');
+    console.error('Warehouse Info:', warehouseInfo.value);
+    return {
+      success: false,
+      movementId: null,
+      successCount: 0,
+      totalMaterials: materials.length,
+      errors: 'Warehouse or Bin not configured. Please check location settings.'
+    };
+  }
+
+  const warehouse = warehouseInfo.value.warehouse;
+  const bin = warehouseInfo.value.bin;
+  
+  // Extract organization ID
+  let orgId;
+  if (warehouse.organization?.id) {
+    orgId = warehouse.organization.id;
+  } else if (typeof warehouse.organization === 'string') {
+    orgId = warehouse.organization;
+  } else {
+    console.error('❌ Cannot extract organization ID from warehouse:', warehouse);
+    return {
+      success: false,
+      movementId: null,
+      successCount: 0,
+      totalMaterials: materials.length,
+      errors: 'Invalid organization configuration'
+    };
+  }
+
+  console.log('📦 Warehouse Info:', {
+    warehouseId: warehouse.id,
+    warehouseName: warehouse.name,
+    binId: bin.id,
+    binName: bin.name,
+    orgId: orgId
+  });
+
   try {
-    if (!warehouseInfo.value.bin || !warehouseInfo.value.warehouse) {
-      throw new Error('Warehouse/Bin tidak ditemukan untuk location ini')
+    // 1. Create Movement Header
+    console.log('📝 Step 1: Creating movement header...');
+    
+    const movementDate = new Date().toISOString();
+    const movementPayload = {
+      organization: orgId,
+      movementType: 'I-',
+      movementDate: movementDate,
+      name: `Material Usage - ${activityName} - ${new Date().toLocaleDateString('id-ID')}`,
+      description: `Auto-generated from Greenhouse Activity: ${activityName}`
+    };
+
+    console.log('📤 Movement payload:', JSON.stringify(movementPayload, null, 2));
+
+    const createMovementRes = await openbravoApi.post(
+      '/org.openbravo.service.json.jsonrest/MaterialMgmtMaterialMovement',
+      { data: movementPayload }
+    );
+
+    console.log('📥 RAW Movement response:', createMovementRes);
+    console.log('📥 Response data:', createMovementRes?.data);
+
+    // ✅ FIX: Better response parsing
+    let movementData = null;
+    let movementId = null;
+
+    // Check multiple possible response structures
+    if (createMovementRes?.data?.response?.data) {
+      movementData = createMovementRes.data.response.data;
+      console.log('✅ Found data in response.data:', movementData);
+    } else if (createMovementRes?.data?.data) {
+      movementData = createMovementRes.data.data;
+      console.log('✅ Found data in data:', movementData);
+    } else if (Array.isArray(createMovementRes?.data)) {
+      movementData = createMovementRes.data;
+      console.log('✅ Response is array:', movementData);
+    } else if (createMovementRes?.data?.id) {
+      // Single object response
+      movementData = [createMovementRes.data];
+      console.log('✅ Response is single object:', movementData);
     }
 
-    const warehouse = warehouseInfo.value.warehouse
-    const bin = warehouseInfo.value.bin
-    
-    const warehouseId = warehouse.id
-    const binId = bin.id // ✅ Ini adalah Locator ID dari gh_location.id_openbravo
-    
-    // Ambil organization & client dari warehouse
-    const orgId = warehouse.organization?.id || warehouse.organization || '96D7D37973EF450383B8ADCFDB666725'
-    const clientId = warehouse.client?.id || warehouse.client || '025F309A89714992995442D9CDE13A15'
-    
-    console.log(`\n${'='.repeat(60)}`)
-    console.log(`🔄 CREATING INTERNAL CONSUMPTION (MATERIAL USAGE)`)
-    console.log(`${'='.repeat(60)}`)
-    console.log('Activity:', activityName)
-    console.log('Warehouse ID:', warehouseId)
-    console.log('Warehouse Name:', warehouse.name)
-    console.log('Bin/Locator ID:', binId) // ✅ Ini harus sama dengan id_openbravo dari Supabase
-    console.log('Bin/Locator Name:', bin.searchKey || bin.name)
-    console.log('Org ID:', orgId)
-    console.log('Client ID:', clientId)
-    console.log(`${'='.repeat(60)}\n`)
-
-    // ✅ STEP 1: Create Internal Consumption header menggunakan endpoint yang benar
-    console.log('🔄 STEP 1: Creating Internal Consumption header...')
-    
-    const now = new Date()
-    const movementDate = now.toISOString().split('T')[0]
-    const consumptionName = `GH-${activityName.replace(/[^a-zA-Z0-9]/g, '').substring(0, 20)}-${Date.now()}`
-    
-    // ✅ Format payload sesuai contoh Postman Anda
-    const headerPayload = {
-      data: [
-        {
-          _entityName: 'MaterialMgmtInternalConsumption',
-          client: clientId,
-          organization: orgId,
-          name: consumptionName,
-          movementDate: movementDate
-        }
-      ]
+    // Extract movement ID
+    if (movementData && Array.isArray(movementData) && movementData.length > 0) {
+      movementId = movementData[0].id;
+    } else if (movementData && movementData.id) {
+      movementId = movementData.id;
     }
 
-    console.log('📤 Header Payload:', JSON.stringify(headerPayload, null, 2))
-
-    // ✅ POST ke endpoint yang benar
-    const headerRes = await openbravoApi.post(
-      '/org.openbravo.service.json.jsonrest/MaterialMgmtInternalConsumption',
-      headerPayload
-    )
-
-    console.log('📥 Header Response:', JSON.stringify(headerRes?.data, null, 2))
-    
-    // Check error
-    if (headerRes?.data?.response?.status === -1) {
-      const obError = headerRes.data.response.error
-      console.error('❌ Openbravo Error:', obError)
-      throw new Error(`Openbravo Error: ${obError?.message || JSON.stringify(obError)}`)
+    if (!movementId) {
+      console.error('❌ Could not extract movement ID');
+      console.error('Full response structure:', JSON.stringify(createMovementRes, null, 2));
+      throw new Error('Failed to create movement header - could not extract ID from response');
     }
 
-    // Get consumption ID dari response
-    let consumptionId = null
-    
-    if (headerRes?.data?.response?.data?.[0]?.id) {
-      consumptionId = headerRes.data.response.data[0].id
-    } else if (headerRes?.data?.data?.[0]?.id) {
-      consumptionId = headerRes.data.data[0].id
-    } else if (headerRes?.data?.id) {
-      consumptionId = headerRes.data.id
-    }
-    
-    if (!consumptionId) {
-      console.error('❌ No consumption ID in response')
-      throw new Error('Gagal mendapatkan Internal Consumption ID')
-    }
+    console.log('✅ Movement header created with ID:', movementId);
 
-    console.log(`✅ Internal Consumption created: ${consumptionId}`)
-
-    // ✅ STEP 2: Create consumption lines
-    console.log('\n🔄 STEP 2: Creating consumption lines...')
+    // 2. Create Movement Lines
+    console.log('📝 Step 2: Creating movement lines...');
     
-    let successCount = 0
-    let errors = []
+    let successCount = 0;
+    let failCount = 0;
+    const errors = [];
 
     for (const material of materials) {
       try {
-        console.log(`\n  📦 Processing: ${material.material_name}`)
+        console.log(`🔍 Processing material: ${material.material_name}`);
         
-        // Get product
+        // Escape single quotes in material name
+        const escapedName = material.material_name.replace(/'/g, "''");
+        
+        // Get product by name
         const productRes = await openbravoApi.get(
           '/org.openbravo.service.json.jsonrest/Product',
           {
             params: {
-              _where: `name='${material.material_name}'`,
-              _selectedProperties: 'id,name,uOM',
-              _startRow: 0,
-              _endRow: 1
+              _where: `name='${escapedName}'`,
+              _selectedProperties: 'id,name,uOM'
             }
           }
-        )
+        );
 
-        const products = productRes?.data?.response?.data || []
-        if (!products.length) {
-          errors.push(`${material.material_name}: Product not found`)
-          console.error(`    ❌ Product not found`)
-          continue
+        const products = productRes?.data?.response?.data || [];
+        
+        if (products.length === 0) {
+          console.warn(`⚠️ Product not found in Openbravo: ${material.material_name}`);
+          errors.push(`Product not found: ${material.material_name}`);
+          failCount++;
+          continue;
         }
 
-        const product = products[0]
-        let uomId = product.uOM
+        const product = products[0];
+        console.log(`✅ Product found: ${product.name} (ID: ${product.id})`);
 
-        // Get UOM if specified
-        if (material.uom) {
-          const uomRes = await openbravoApi.get(
-            '/org.openbravo.service.json.jsonrest/UOM',
-            {
-              params: {
-                _where: `name='${material.uom}'`,
-                _startRow: 0,
-                _endRow: 1
-              }
-            }
-          )
-
-          const uoms = uomRes?.data?.response?.data || []
-          if (uoms.length > 0) {
-            uomId = uoms[0].id
-          }
+        // Extract UOM ID
+        let uomId;
+        if (product.uOM?.id) {
+          uomId = product.uOM.id;
+        } else if (typeof product.uOM === 'string') {
+          uomId = product.uOM;
+        } else {
+          console.error('❌ Cannot extract UOM from product:', product);
+          errors.push(`${material.material_name}: Invalid UOM`);
+          failCount++;
+          continue;
         }
 
-        // Check stock dari bin/locator yang sama dengan id_openbravo
-        const stockRes = await openbravoApi.get(
-          '/org.openbravo.service.json.jsonrest/MaterialMgmtStorageDetail',
-          {
-            params: {
-              _where: `storageBin='${binId}' AND product='${product.id}'`,
-              _selectedProperties: 'quantityOnHand',
-              _startRow: 0,
-              _endRow: 1
-            }
-          }
-        )
-
-        const stockDetails = stockRes?.data?.response?.data || []
-        const currentStock = stockDetails[0]?.quantityOnHand || 0
-
-        console.log(`    📊 Stock di Bin/Locator (${bin.searchKey || bin.name}): ${currentStock}, Need: ${material.qty}`)
-
-        if (currentStock < material.qty) {
-          errors.push(`${material.material_name}: Insufficient stock (${currentStock}/${material.qty})`)
-          console.warn(`    ⚠️ Insufficient stock`)
-          continue
+        // Create movement line
+        const qty = Math.abs(Number(material.qty) || 0);
+        if (qty === 0) {
+          console.warn(`⚠️ Skipping ${material.material_name} - quantity is 0`);
+          continue;
         }
 
-        // ✅ Create line sesuai format Postman Anda
-        // storageBin harus sama dengan id_openbravo dari gh_location
         const linePayload = {
-          data: [
-            {
-              _entityName: 'MaterialMgmtInternalConsumptionLine',
-              client: clientId,
-              organization: orgId,
-              internalConsumption: consumptionId,
-              lineNo: (successCount + 1) * 10,
-              product: product.id,
-              uOM: uomId,
-              movementQuantity: material.qty,
-              storageBin: binId // ✅ Bin/Locator ID dari gh_location.id_openbravo
-            }
-          ]
-        }
+          organization: orgId,
+          materialMgmtMaterialMovement: movementId,
+          product: product.id,
+          movementQuantity: qty,
+          uOM: uomId,
+          storageBin: bin.id,
+          lineNo: (successCount + 1) * 10,
+          description: `${material.material_name} - ${activityName}`
+        };
 
-        console.log('    📤 Line Payload:', JSON.stringify(linePayload, null, 2))
-        console.log('    📍 StorageBin ID:', binId, '(from gh_location.id_openbravo)')
+        console.log('📤 Line payload:', JSON.stringify(linePayload, null, 2));
 
-        // ✅ POST ke endpoint yang benar
         const lineRes = await openbravoApi.post(
-          '/org.openbravo.service.json.jsonrest/MaterialMgmtInternalConsumptionLine',
-          linePayload
-        )
+          '/org.openbravo.service.json.jsonrest/MaterialMgmtMaterialMovementLine',
+          { data: linePayload }
+        );
 
-        if (lineRes?.data?.response?.status === -1) {
-          const lineError = lineRes.data.response.error
-          throw new Error(lineError?.message || 'Failed to create line')
-        }
+        console.log('📥 Line response:', lineRes?.data);
 
-        console.log(`    ✅ Line created`)
-        successCount++
-
-      } catch (err) {
-        console.error(`    ❌ Error:`, err.message)
-        errors.push(`${material.material_name}: ${err.message}`)
-      }
-    }
-
-    if (successCount === 0) {
-      throw new Error('No materials were added to the consumption')
-    }
-
-    console.log(`\n✅ Lines created: ${successCount}/${materials.length}`)
-
-    // ✅ STEP 3: Process Internal Consumption untuk reduce stock
-    // API: POST http://202.59.169.85:8090/api/process
-    // Payload: { ad_process_id: "800131", ad_client_id, ad_org_id, data: [{id: consumptionId}] }
-    console.log('\n🔄 STEP 3: Processing Internal Consumption...')
-    
-    const apiUrl = (import.meta.env.VITE_OPENBRAVO_URL || '').trim()
-    const apiPort = (import.meta.env.VITE_API_PORT || '').trim()
-    const username = (import.meta.env.VITE_API_USER || '').trim()
-    const password = (import.meta.env.VITE_API_PASS || '').trim()
-
-    if (!apiUrl || !apiPort || !username || !password) {
-      console.warn('⚠️ API credentials not fully configured - skipping process step')
-      console.log(`✅ Internal Consumption created but NOT processed: ${consumptionId}`)
-      console.log(`${'='.repeat(60)}\n`)
-      
-      return {
-        success: true,
-        movementId: consumptionId,
-        successCount,
-        totalMaterials: materials.length,
-        errors: errors.length > 0 ? errors : null,
-        warning: 'Internal Consumption created but not processed. Please process manually in Openbravo.'
-      }
-    }
-
-    // ✅ Endpoint: http://202.59.169.85:8090/api/process
-    const endpoint = `${apiUrl.replace(/\/+$/, '')}:${apiPort}/api/process`
-    const token = btoa(unescape(encodeURIComponent(`${username}:${password}`)))
-
-    // ✅ Process ID untuk Internal Consumption yang BENAR
-    // AD_Process_ID: 800131 (sesuai dengan API Openbravo Anda)
-    const processPayload = {
-      ad_process_id: '800131',  // ✅ ID yang benar untuk process Internal Consumption
-      ad_client_id: clientId,   // ✅ Tetap sama: 025F309A89714992995442D9CDE13A15
-      ad_org_id: orgId,          // ✅ Tetap sama: 96D7D37973EF450383B8ADCFDB666725
-      data: [{ id: consumptionId }] // ✅ ID dari Internal Consumption yang baru dibuat
-    }
-
-    console.log('📤 Process Payload:', JSON.stringify(processPayload, null, 2))
-    console.log('📤 Endpoint:', endpoint)
-
-    try {
-      const processRes = await axios.post(endpoint, processPayload, {
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Basic ${token}`,
-          'X-Requested-With': 'XMLHttpRequest'
-        },
-        withCredentials: false,
-        timeout: 30000
-      })
-
-      console.log('📥 Process Response Status:', processRes?.status)
-      console.log('📥 Process Response:', JSON.stringify(processRes?.data, null, 2))
-
-      const resultObj = processRes?.data?.data?.[0]
-      
-      console.log('📊 Result Object:', JSON.stringify(resultObj, null, 2))
-      
-      if (!resultObj) {
-        console.warn('⚠️ No result object in response')
-        console.log(`✅ Internal Consumption created but process status unclear: ${consumptionId}`)
-        console.log(`${'='.repeat(60)}\n`)
+        // Check if line was created
+        const lineData = lineRes?.data?.response?.data || lineRes?.data?.data || lineRes?.data;
         
-        return {
-          success: true,
-          movementId: consumptionId,
-          successCount,
-          totalMaterials: materials.length,
-          errors: errors.length > 0 ? errors : null,
-          warning: 'Internal Consumption created but process response unclear. Please check in Openbravo.'
+        if (!lineData || (Array.isArray(lineData) && lineData.length === 0)) {
+          throw new Error(`No data returned when creating line for ${material.material_name}`);
         }
-      }
-      
-      // ✅ PENTING: Cek apakah result === 1 (sukses) atau 0 (gagal)
-      console.log('🔍 Process Result Code:', resultObj.result)
-      
-      if (resultObj.result !== 1) {
-        const errorMsg = resultObj.errormsg || resultObj.message || 'Process failed with unknown error'
-        console.error('❌ Process error:', errorMsg)
-        console.log('📋 Full error object:', JSON.stringify(resultObj, null, 2))
-        console.log(`⚠️ Internal Consumption created but process failed: ${consumptionId}`)
-        console.log(`${'='.repeat(60)}\n`)
-        
-        return {
-          success: true,
-          movementId: consumptionId,
-          successCount,
-          totalMaterials: materials.length,
-          errors: errors.length > 0 ? errors : null,
-          warning: `Internal Consumption created but process failed: ${errorMsg}. Please process manually in Openbravo.`
-        }
-      }
 
-      console.log(`✅ Internal Consumption processed successfully`)
-      console.log(`📋 Process Message:`, resultObj.message || 'No message')
-      console.log(`${'='.repeat(60)}\n`)
-      
-    } catch (processErr) {
-      console.error('❌ Process API error:', processErr.message)
-      console.error('Error details:', processErr.response?.data || processErr)
-      console.log(`⚠️ Internal Consumption created but process API failed: ${consumptionId}`)
-      
-      // ✅ ALTERNATIF: Coba update status processed & posted langsung via REST API
-      console.log('\n🔄 Trying alternative: Direct status update...')
+        successCount++;
+        console.log(`✅ Line #${successCount} created for: ${material.material_name}`);
+
+      } catch (lineErr) {
+        console.error(`❌ Error creating line for ${material.material_name}:`, lineErr);
+        console.error('Line error response:', lineErr.response?.data);
+        errors.push(`${material.material_name}: ${lineErr.message}`);
+        failCount++;
+      }
+    }
+
+    console.log(`📊 Lines summary: ${successCount} success, ${failCount} failed out of ${materials.length} total`);
+
+    // 3. Process the Movement
+    if (successCount > 0) {
+      console.log('📝 Step 3: Processing (completing) movement...');
       
       try {
-        const updatePayload = {
-          processed: true,
-          posted: 'Y',
-          documentAction: 'CO',
-          documentStatus: 'CO'
-        }
-        
-        console.log('📤 Update Payload:', JSON.stringify(updatePayload, null, 2))
-        
-        const updateRes = await openbravoApi.put(
-          `/org.openbravo.service.json.jsonrest/MaterialMgmtInternalConsumption/${consumptionId}`,
-          updatePayload
-        )
-        
-        console.log('📥 Update Response:', JSON.stringify(updateRes?.data, null, 2))
-        
-        if (updateRes?.data?.response?.status === 0) {
-          console.log('✅ Status updated via direct REST API')
-          console.log(`${'='.repeat(60)}\n`)
-          
-          return {
-            success: true,
-            movementId: consumptionId,
-            successCount,
-            totalMaterials: materials.length,
-            errors: errors.length > 0 ? errors : null,
-            warning: 'Internal Consumption processed via alternative method. Please verify stock in Openbravo.'
+        // Try to complete the movement using document action
+        const processRes = await openbravoApi.post(
+          `/org.openbravo.service.json.jsonrest/MaterialMgmtMaterialMovement/${movementId}`,
+          { 
+            data: {
+              documentAction: 'CO'
+            }
           }
-        }
-      } catch (updateErr) {
-        console.error('❌ Direct update also failed:', updateErr.message)
-      }
-      
-      console.log(`${'='.repeat(60)}\n`)
-      
-      return {
-        success: true,
-        movementId: consumptionId,
-        successCount,
-        totalMaterials: materials.length,
-        errors: errors.length > 0 ? errors : null,
-        warning: `Internal Consumption created but process API failed: ${processErr.message}. Please process manually in Openbravo.`
-      }
-    }
+        );
 
-    return {
-      success: true,
-      movementId: consumptionId,
-      successCount,
-      totalMaterials: materials.length,
-      errors: errors.length > 0 ? errors : null
+        console.log('📥 Process response:', processRes?.data);
+        console.log('✅ Movement completed successfully!');
+
+        return {
+          success: true,
+          movementId: movementId,
+          successCount: successCount,
+          totalMaterials: materials.length,
+          errors: failCount > 0 ? errors.join('; ') : null
+        };
+
+      } catch (processErr) {
+        console.error('❌ Error completing movement:', processErr);
+        console.error('Process error response:', processErr.response?.data);
+        
+        // Movement created but not completed - still return success with warning
+        return {
+          success: true, // Changed to true because movement and lines were created
+          movementId: movementId,
+          successCount: successCount,
+          totalMaterials: materials.length,
+          errors: `Movement created (ID: ${movementId}) but auto-complete failed. Please complete manually in Openbravo. ${failCount > 0 ? 'Also: ' + errors.join('; ') : ''}`
+        };
+      }
+    } else {
+      // No lines created successfully
+      console.warn('⚠️ No lines created successfully, attempting to delete movement header...');
+      
+      try {
+        await openbravoApi.delete(
+          `/org.openbravo.service.json.jsonrest/MaterialMgmtMaterialMovement/${movementId}`
+        );
+        console.log('🗑️ Movement header deleted');
+      } catch (delErr) {
+        console.error('❌ Error deleting movement header:', delErr);
+      }
+
+      return {
+        success: false,
+        movementId: null,
+        successCount: 0,
+        totalMaterials: materials.length,
+        errors: `All material lines failed: ${errors.join('; ')}`
+      };
     }
 
   } catch (err) {
-    console.error('\n❌ FATAL ERROR:', err.message)
-    console.error('Stack:', err.stack)
+    console.error('❌ CRITICAL ERROR in createAndProcessMovement:', err);
+    console.error('Error message:', err.message);
+    console.error('Error response:', err.response?.data);
+    console.error('Error stack:', err.stack);
     
     return {
       success: false,
-      error: err.message,
-      errors: [],
-      fullError: err
-    }
+      movementId: null,
+      successCount: 0,
+      totalMaterials: materials.length,
+      errors: `Critical error: ${err.message}. Check browser console for full details.`
+    };
   }
-}
+};
 
-// ✅ UPDATE REPORT STATUS
-const updateReportStatus = async () => {
-  try {
-    if (!currentReport.value) return
+const loadApprovalProgress = async () => {
+  if (!currentReport.value?.approval_record_id) {
+    console.log('⚠️ No approval record found');
     
-    const report = currentReport.value
-    const username = authStore.user?.username || authStore.user?.email || 'Admin'
+    // Fallback info jika report belum masuk flow
+    canApproveCurrentLevel.value = false;
+    currentUserLevel.value = { level_order: 0, level_name: 'Staff/No Approval Flow', is_final_level: false };
     
-    let hasNeedRevision = false
-    let allApproved = true
-    let totalItems = 0
-    let revisionNotes = []
-    let revisionRequestedBy = null
-    let revisionRequestedAt = null
-    
-    // Check type_damages
-    if (report.type_damages && report.type_damages.length > 0) {
-      totalItems += report.type_damages.length
-      for (const td of report.type_damages) {
-        if (td.status === 'needRevision') {
-          hasNeedRevision = true
-          allApproved = false
-          if (td.revision_notes) {
-            revisionNotes.push(`[Kerusakan: ${td.type_damage}] ${td.revision_notes}`)
-          }
-          if (td.revision_requested_by && !revisionRequestedBy) {
-            revisionRequestedBy = td.revision_requested_by
-            revisionRequestedAt = td.revision_requested_at
-          }
-        }
-        if (td.status !== 'approved') {
-          allApproved = false
-        }
-      }
-    }
-    
-    // Check activities
-    if (report.activities && report.activities.length > 0) {
-      totalItems += report.activities.length
-      for (const act of report.activities) {
-        if (act.status === 'needRevision') {
-          hasNeedRevision = true
-          allApproved = false
-          if (act.revision_notes) {
-            revisionNotes.push(`[Aktivitas: ${act.act_name}] ${act.revision_notes}`)
-          }
-          if (act.revision_requested_by && !revisionRequestedBy) {
-            revisionRequestedBy = act.revision_requested_by
-            revisionRequestedAt = act.revision_requested_at
-          }
-        }
-        if (act.status !== 'approved') {
-          allApproved = false
-        }
-      }
-    }
-    
-    // Determine status
-    let newStatus = 'onReview'
-    const updateData = { report_status: null }
-    
-    if (hasNeedRevision) {
-      newStatus = 'needRevision'
-      updateData.report_status = newStatus
-      updateData.revision_notes = revisionNotes.join('\n\n')
-      updateData.revision_requested_by = revisionRequestedBy
-      updateData.revision_requested_at = revisionRequestedAt
-      updateData.approved_by = null
-      updateData.approved_at = null
-    } else if (allApproved && totalItems > 0) {
-      newStatus = 'approved'
-      updateData.report_status = newStatus
-      updateData.approved_by = username
-      updateData.approved_at = new Date().toISOString()
-      updateData.revision_notes = null
-      updateData.revision_requested_by = null
-      updateData.revision_requested_at = null
-    } else {
-      newStatus = 'onReview'
-      updateData.report_status = newStatus
-      updateData.revision_notes = null
-      updateData.revision_requested_by = null
-      updateData.revision_requested_at = null
-      updateData.approved_by = null
-      updateData.approved_at = null
-    }
-    
-    // Update if changed
-    if (report.report_status !== newStatus) {
-      console.log(`🔄 Updating report ${report.report_id} status: ${report.report_status} → ${newStatus}`)
-      
-      const { error: updateErr } = await supabase
-        .from('gh_report')
-        .update(updateData)
-        .eq('report_id', report.report_id)
-      
-      if (updateErr) {
-        console.error('❌ Error updating report status:', updateErr)
-      } else {
-        console.log(`✅ Report ${report.report_id} status updated to ${newStatus}`)
-        Object.assign(currentReport.value, updateData)
-      }
-    } else {
-      // ✅ EVEN IF STATUS SAME, UPDATE REVISION/APPROVAL INFO
-      console.log(`🔄 Status unchanged (${newStatus}), but updating related fields...`)
-      
-      const { error: updateErr } = await supabase
-        .from('gh_report')
-        .update(updateData)
-        .eq('report_id', report.report_id)
-      
-      if (updateErr) {
-        console.error('❌ Error updating report fields:', updateErr)
-      } else {
-        console.log(`✅ Report ${report.report_id} fields updated`)
-        Object.assign(currentReport.value, updateData)
-      }
-    }
-  } catch (err) {
-    console.error('❌ Error in updateReportStatus:', err)
+    return;
   }
-}
+
+  try {
+    console.log('📊 Loading approval progress for record:', currentReport.value.approval_record_id);
+
+    // 1. Fetch approval record & flow info
+    const { data: recordData, error: recordErr } = await supabase
+      .from('gh_approve_record')
+      .select(`
+        current_level_order, 
+        overall_status, 
+        flow_id,
+        gh_approval_flow!inner(
+          last_level,
+          first_level
+        )
+      `)
+      .eq('record_id', currentReport.value.approval_record_id)
+      .single();
+
+    if (recordErr) throw recordErr;
+
+    const currentLevelOrder = recordData?.current_level_order || 1;
+    const lastLevel = recordData.gh_approval_flow?.last_level;
+    
+    // 2. Fetch level status untuk semua level
+    // Tidak ada perubahan di sini, tetap ambil semua level status
+    const { data: levelStatuses, error: statusErr } = await supabase
+      .from('gh_approval_level_status')
+      .select(`
+        level_status_id,
+        level_order,
+        level_name,
+        status,
+        approved_by,
+        approved_at,
+        revision_notes,
+        revision_requested_by,
+        revision_requested_at
+      `)
+      .eq('record_id', currentReport.value.approval_record_id)
+      .order('level_order', { ascending: true });
+
+    if (statusErr) throw statusErr;
+
+    // 3. Fetch approver names untuk display
+    const approverIds = [
+      ...levelStatuses.map(s => s.approved_by),
+      ...levelStatuses.map(s => s.revision_requested_by)
+    ].filter(Boolean);
+
+    let approverNames = {};
+    if (approverIds.length > 0) {
+      const { data: users } = await supabase
+        .from('user')
+        .select('user_id, username, email')
+        .in('user_id', approverIds);
+      
+      if (users) {
+        approverNames = users.reduce((acc, user) => {
+          acc[user.user_id] = user.username || user.email;
+          return acc;
+        }, {});
+      }
+    }
+
+    // 4. Enhance level statuses dengan approver names
+    approvalProgress.value = levelStatuses.map(level => ({
+      ...level,
+      approver_name: level.approved_by ? approverNames[level.approved_by] : null,
+      revisor_name: level.revision_requested_by ? approverNames[level.revision_requested_by] : null,
+      is_final_level: level.level_order === lastLevel,
+      level_status: level.status // Alias untuk compatibility
+    }));
+
+    console.log('✅ Approval progress loaded:', approvalProgress.value);
+
+    // 5. Check apakah user login punya hak approve di level saat ini
+    const { data: userLevel } = await supabase
+      .from('gh_user_approval_level')
+      .select('level_order, flow_id')
+      .eq('user_id', authStore.user.user_id)
+      .eq('flow_id', recordData.flow_id)
+      .eq('level_order', currentLevelOrder)
+      .eq('is_active', true)
+      .maybeSingle(); 
+
+    // 6. Ambil status level saat ini
+    const currentLevelStatus = levelStatuses.find(s => s.level_order === currentLevelOrder);
+    
+    // 7. User bisa approve jika:
+    // - User memiliki level yang sesuai
+    // - Status level saat ini masih 'pending'
+    // - Overall status masih 'onReview'
+    canApproveCurrentLevel.value = 
+      !!userLevel && 
+      currentLevelStatus?.status === 'pending' &&
+      recordData.overall_status === 'onReview';
+    
+    // 8. Set current user level info
+    currentUserLevel.value = {
+      level_order: currentLevelOrder,
+      level_name: currentLevelStatus?.level_name || `Level ${currentLevelOrder}`,
+      is_final_level: currentLevelOrder === lastLevel,
+    };
+    
+    // 9. Update status report dengan overall_status dari record
+    currentReport.value.report_status = recordData.overall_status;
+    
+    console.log('🔐 Can approve current level:', canApproveCurrentLevel.value);
+    console.log('📍 Current level:', currentUserLevel.value);
+    
+  } catch (err) {
+    console.error('❌ Error loading approval progress:', err);
+    canApproveCurrentLevel.value = false;
+    currentUserLevel.value = { level_order: 1, level_name: 'Error/Unknown', is_final_level: false };
+  }
+};
+
 
 // Helper functions
 const getBatchName = (batchId) => {
@@ -738,31 +676,22 @@ const formatDateTime = (dateStr) => {
   })
 }
 
-// Computed properties
+// ✅ UPDATE Computed reportInfo
 const reportInfo = computed(() => {
-  if (!currentReport.value) return null
+  if (!currentReport.value) return null;
   
-  const report = currentReport.value
-  let totalTypeDamages = 0
-  let approvedTypeDamages = 0
-  let revisionTypeDamages = 0
-  let totalActivities = 0
-  let approvedActivities = 0
-  let revisionActivities = 0
+  const report = currentReport.value;
+  let totalTypeDamages = 0;
+  let totalActivities = 0;
   
   if (report.type_damages) {
-    totalTypeDamages = report.type_damages.length
-    approvedTypeDamages = report.type_damages.filter(td => td.status === 'approved').length
-    revisionTypeDamages = report.type_damages.filter(td => td.status === 'needRevision').length
+    totalTypeDamages = report.type_damages.length;
   }
   if (report.activities) {
-    totalActivities = report.activities.length
-    approvedActivities = report.activities.filter(act => act.status === 'approved').length
-    revisionActivities = report.activities.filter(act => act.status === 'needRevision').length
+    totalActivities = report.activities.length;
   }
   
-  const hasRevision = revisionTypeDamages > 0 || revisionActivities > 0
-  const allApproved = (approvedTypeDamages === totalTypeDamages) && (approvedActivities === totalActivities) && (totalTypeDamages + totalActivities > 0)
+  // Menghapus allItemsApproved, approvedTypeDamages, approvedActivities
   
   return {
     report_id: report.report_id,
@@ -771,356 +700,352 @@ const reportInfo = computed(() => {
     batch_id: report.batch_id,
     batch_name: getBatchName(report.batch_id),
     report_date: report.report_date,
-    report_status: report.report_status,
-    phase: report.phase,
-    phase_name: phaseNames[report.phase] || report.phase || '-',
+    report_status: report.report_status, // Mengambil dari overall_status record
+    phase_id: report.phase_id,
+    phase_name: phaseInfo.value || 'Unknown Phase', 
     totalTypeDamages,
-    approvedTypeDamages,
-    revisionTypeDamages,
     totalActivities,
-    approvedActivities,
-    revisionActivities,
-    allApproved,
-    hasRevision,
+    // Menghapus: approvedTypeDamages, approvedActivities, allItemsApproved
+    current_level_order: currentUserLevel.value?.level_order || 1,
+    current_level_name: currentUserLevel.value?.level_name || 'Level 1',
+    can_approve: canApproveCurrentLevel.value,
+    is_final_level: currentUserLevel.value?.is_final_level || false,
     revision_notes: report.revision_notes,
     revision_requested_by: report.revision_requested_by,
     revision_requested_at: report.revision_requested_at,
     approved_by: report.approved_by,
-    approved_at: report.approved_at
-  }
-})
+    approved_at: report.approved_at,
+  };
+});
 
-// ✅ APPROVE TYPE DAMAGE
-const approveTypeDamage = async (typeDamageId) => {
-  if (!confirm('✅ Approve data kerusakan tanaman ini?')) return
+// ❌ HAPUS approveTypeDamage
+// ❌ HAPUS approveActivity
+
+
+// ✅ APPROVE CURRENT LEVEL (REPORT LEVEL) - WITH OPENBRAVO MOVEMENT
+const approveCurrentLevel = async () => {
+  if (!canApproveCurrentLevel.value) {
+    alert('⚠️ Anda tidak memiliki akses untuk approve di level ini');
+    return;
+  }
+
+  if (!currentUserLevel.value) {
+    alert('⚠️ Level approval tidak ditemukan');
+    return;
+  }
+
+  const levelName = currentUserLevel.value.level_name;
+  
+  if (!confirm(`✅ Approve report ini untuk level "${levelName}"?\n\nReport akan ${currentUserLevel.value.is_final_level ? 'FULLY APPROVED dan stock material akan dikurangi' : 'dilanjutkan ke level berikutnya'}.`)) {
+    return;
+  }
 
   try {
-    processing.value = true
+    processing.value = true;
     
-    const username = authStore.user?.username || authStore.user?.email || 'Admin'
+    const currentLevelOrder = currentUserLevel.value.level_order;
+    const username = authStore.user?.username || authStore.user?.email || 'Admin';
     
-    console.log('📋 Approving type_damage:', typeDamageId)
-    
-    const { error: updateErr } = await supabase
-      .from('gh_type_damage')
+    // 1. Update level status jadi 'approved'
+    const { error: updateLevelErr } = await supabase
+      .from('gh_approval_level_status')
       .update({
         status: 'approved',
-        approved_by: username,
+        approved_by: authStore.user.user_id,
         approved_at: new Date().toISOString()
       })
-      .eq('typedamage_id', typeDamageId)
-    
-    if (updateErr) throw updateErr
-    
-    console.log('✅ Type damage approved')
-    
-    await loadData()
-    alert('✅ Data kerusakan berhasil disetujui!')
-    
-  } catch (err) {
-    console.error('❌ Error:', err)
-    alert('❌ Gagal approve: ' + err.message)
-  } finally {
-    processing.value = false
-  }
-}
+      .eq('record_id', currentReport.value.approval_record_id)
+      .eq('level_order', currentLevelOrder);
 
-// ✅ APPROVE ACTIVITY (FIXED - Create & Process Movement)
-const approveActivity = async (activityId) => {
-  if (!confirm('✅ Approve aktivitas ini?\n\nProses akan membuat dokumen internal dan material akan dikurangi dari stock.')) return
+    if (updateLevelErr) throw updateLevelErr;
 
-  try {
-    processing.value = true
+    // 2. Insert history
+    const { data: recordFlowData, error: flowFetchErr } = await supabase
+          .from('gh_approve_record')
+          .select('flow_id')
+          .eq('record_id', currentReport.value.approval_record_id)
+          .single();
     
-    const username = authStore.user?.username || authStore.user?.email || 'Admin'
-    
-    // ✅ CHECK STATUS
-    const { data: checkActivity, error: checkError } = await supabase
-      .from('gh_activity')
-      .select('status, activity_id')
-      .eq('activity_id', activityId)
-      .single()
-    
-    if (checkError) throw checkError
-    
-    if (checkActivity.status === 'approved') {
-      alert('⚠️ Activity ini sudah di-approve sebelumnya!')
-      await loadData()
-      return
-    }
-    
-    // Get activity with materials
-    const { data: activityData, error: getError } = await supabase
-      .from('gh_activity')
+    if (flowFetchErr) throw flowFetchErr;
+
+    const { error: historyErr } = await supabase
+      .from('gh_approval_history')
+      .insert({
+        record_id: currentReport.value.approval_record_id,
+        flow_id: recordFlowData.flow_id,
+        user_id: authStore.user.user_id,
+        level_order: currentLevelOrder,
+        level_name: levelName,
+        action: 'approved',
+        comment: `Approved by ${username} at level ${levelName}`
+      });
+
+    if (historyErr) throw historyErr;
+
+    // 3. Check apakah ini final level
+    const { data: flowData } = await supabase
+      .from('gh_approve_record')
       .select(`
-        *,
-        materials:gh_material_used(*)
+        flow_id,
+        gh_approval_flow!inner(last_level)
       `)
-      .eq('activity_id', activityId)
-      .single()
-    
-    if (getError) throw getError
-    if (!activityData) throw new Error('Activity tidak ditemukan')
-    
-    // ✅ CREATE & PROCESS INTERNAL MOVEMENT
-    let movementResult = null
-    
-    if (activityData.materials && activityData.materials.length > 0) {
-      console.log('📦 Creating Internal Movement for materials:', activityData.materials.length)
-      
-      movementResult = await createAndProcessMovement(
-        activityData.materials,
-        activityData.act_name
-      )
-      
-      if (!movementResult.success) {
-        const proceed = confirm(
-          `⚠️ Gagal membuat movement:\n${movementResult.error}\n\nTetap approve activity ini?`
-        )
-        if (!proceed) {
-          processing.value = false
-          return
+      .eq('record_id', currentReport.value.approval_record_id)
+      .single();
+
+    const isFinalLevel = currentLevelOrder === flowData.gh_approval_flow.last_level;
+
+    // 4. Update approve_record
+    if (isFinalLevel) {
+      // ✅ FINAL APPROVAL - PROCESS OPENBRAVO MOVEMENT
+      console.log('🎯 Final level approval - Processing Openbravo movements...');
+
+      // Final approval - set overall_status = 'approved'
+      const { error: recordErr } = await supabase
+        .from('gh_approve_record')
+        .update({
+          overall_status: 'approved',
+          completed_at: new Date().toISOString()
+        })
+        .eq('record_id', currentReport.value.approval_record_id);
+
+      if (recordErr) throw recordErr;
+
+      // Update report status
+      const { error: reportErr } = await supabase
+        .from('gh_report')
+        .update({ report_status: 'approved' })
+        .eq('report_id', currentReport.value.report_id);
+
+      if (reportErr) throw reportErr;
+
+      // ✅ PROCESS OPENBRAVO MOVEMENT FOR EACH ACTIVITY
+      let movementSuccessCount = 0;
+      let movementFailCount = 0;
+      const movementErrors = [];
+
+      for (const activity of currentReport.value.activities) {
+        if (!activity.materials || activity.materials.length === 0) {
+          console.log(`⚠️ Activity ${activity.act_name} has no materials, skipping...`);
+          continue;
         }
-      } else if (movementResult.errors && movementResult.errors.length > 0) {
-        const proceed = confirm(
-          `⚠️ Beberapa material gagal:\n\n${movementResult.errors.slice(0, 3).join('\n')}${movementResult.errors.length > 3 ? '\n...' : ''}\n\nTetap approve activity ini?`
-        )
-        if (!proceed) {
-          processing.value = false
-          return
-        }
-      }
-    }
-    
-    // ✅ UPDATE STATUS ACTIVITY
-    const updateData = {
-      status: 'approved',
-      approved_by: username,
-      approved_at: new Date().toISOString()
-    }
-    
-    // Simpan movement ID jika ada
-    if (movementResult?.movementId) {
-      updateData.openbravo_movement_id = movementResult.movementId
-    }
-    
-    const { error: updateErr } = await supabase
-      .from('gh_activity')
-      .update(updateData)
-      .eq('activity_id', activityId)
-    
-    if (updateErr) throw updateErr
-    
-    console.log('✅ Activity approved')
-    
-    await loadData()
-    
-    if (movementResult?.success) {
-      const detailMsg = `
-✅ Aktivitas berhasil disetujui!
 
-Dokumen ID: ${movementResult.movementId}
-Material berhasil diproses: ${movementResult.successCount}/${movementResult.totalMaterials}
+        console.log(`📦 Processing movement for activity: ${activity.act_name}`);
+        
+        try {
+          const movementResult = await createAndProcessMovement(
+            activity.materials, 
+            activity.act_name
+          );
 
-${movementResult.errors ? '\n⚠️ Beberapa material gagal:\n' + movementResult.errors.join('\n') : ''}
-
-Silakan cek perubahan stock untuk memastikan.
-      `.trim()
-      alert(detailMsg)
-    } else {
-      alert('✅ Aktivitas berhasil disetujui!\n\n⚠️ Namun tidak ada material yang diproses.')
-    }
-    
-  } catch (err) {
-    console.error('❌ Error:', err)
-    alert('❌ Gagal approve: ' + err.message)
-  } finally {
-    processing.value = false
-  }
-}
-
-// ✅ APPROVE ALL TYPE DAMAGES
-const approveAllTypeDamages = async () => {
-  if (!reportInfo.value || !currentReport.value) return
-  
-  if (!confirm(`✅ Approve SEMUA (${reportInfo.value.totalTypeDamages}) data kerusakan tanaman?`)) return
-
-  try {
-    processing.value = true
-    
-    const username = authStore.user?.username || authStore.user?.email || 'Admin'
-    const typeDamageIds = []
-    
-    if (currentReport.value.type_damages) {
-      currentReport.value.type_damages.forEach(td => {
-        if (!td.status || td.status === 'onReview') {
-          typeDamageIds.push(td.typedamage_id)
-        }
-      })
-    }
-    
-    if (typeDamageIds.length === 0) {
-      alert('⚠️ Tidak ada data kerusakan yang perlu disetujui')
-      return
-    }
-    
-    const { error: updateErr } = await supabase
-      .from('gh_type_damage')
-      .update({
-        status: 'approved',
-        approved_by: username,
-        approved_at: new Date().toISOString()
-      })
-      .in('typedamage_id', typeDamageIds)
-    
-    if (updateErr) throw updateErr
-    
-    await loadData()
-    alert(`✅ ${typeDamageIds.length} data kerusakan berhasil disetujui!`)
-    
-  } catch (err) {
-    console.error('❌ Error:', err)
-    alert('❌ Gagal approve: ' + err.message)
-  } finally {
-    processing.value = false
-  }
-}
-
-// ✅ APPROVE ALL ACTIVITIES (FIXED)
-const approveAllActivities = async () => {
-  if (!reportInfo.value || !currentReport.value) return
-  
-  if (!confirm(`✅ Approve SEMUA (${reportInfo.value.totalActivities}) aktivitas?\n\nProses akan membuat dokumen internal untuk setiap aktivitas dan material akan dikurangi dari stock.`)) return
-
-  try {
-    processing.value = true
-    
-    const username = authStore.user?.username || authStore.user?.email || 'Admin'
-    
-    const activitiesToApprove = []
-    let allMovementResults = []
-    
-    if (currentReport.value.activities) {
-      for (const act of currentReport.value.activities) {
-        if (!act.status || act.status === 'onReview') {
-          const { data: checkAct } = await supabase
-            .from('gh_activity')
-            .select('status')
-            .eq('activity_id', act.activity_id)
-            .single()
-          
-          if (checkAct && checkAct.status !== 'approved') {
-            activitiesToApprove.push(act)
-            
-            // ✅ CREATE & PROCESS MOVEMENT untuk setiap activity
-            if (act.materials && act.materials.length > 0) {
-              console.log(`📦 Creating movement for activity: ${act.act_name}`)
-              
-              const movementResult = await createAndProcessMovement(
-                act.materials,
-                act.act_name
-              )
-              
-              allMovementResults.push({
-                activityName: act.act_name,
-                result: movementResult
+          if (movementResult.success) {
+            // Update activity dengan openbravo_movement_id
+            const { error: updateActivityErr } = await supabase
+              .from('gh_activity')
+              .update({
+                openbravo_movement_id: movementResult.movementId,
+                status: 'approved'
               })
-              
-              // Simpan movement ID ke activity jika berhasil
-              if (movementResult.success && movementResult.movementId) {
-                await supabase
-                  .from('gh_activity')
-                  .update({ openbravo_movement_id: movementResult.movementId })
-                  .eq('activity_id', act.activity_id)
-              }
+              .eq('activity_id', activity.activity_id);
+
+            if (updateActivityErr) {
+              console.error('❌ Error updating activity:', updateActivityErr);
+              movementErrors.push(`${activity.act_name}: Failed to update activity`);
+              movementFailCount++;
+            } else {
+              movementSuccessCount++;
+              console.log(`✅ Activity ${activity.act_name} updated with movement ID: ${movementResult.movementId}`);
             }
+          } else {
+            movementFailCount++;
+            movementErrors.push(`${activity.act_name}: ${movementResult.errors || 'Movement creation failed'}`);
           }
+        } catch (err) {
+          console.error(`❌ Error processing movement for ${activity.act_name}:`, err);
+          movementFailCount++;
+          movementErrors.push(`${activity.act_name}: ${err.message}`);
         }
       }
-    }
-    
-    if (activitiesToApprove.length === 0) {
-      alert('⚠️ Tidak ada aktivitas yang perlu disetujui')
-      return
-    }
-    
-    // Collect errors
-    const failedMovements = allMovementResults.filter(r => !r.result.success)
-    
-    if (failedMovements.length > 0) {
-      const errorMsg = failedMovements
-        .map(f => `${f.activityName}: ${f.result.error}`)
-        .slice(0, 3)
-        .join('\n')
+
+      // Show result summary
+      let alertMessage = `✅ Report berhasil disetujui di level terakhir!\n\n`;
+      alertMessage += `📊 Summary:\n`;
+      alertMessage += `✅ Movements created: ${movementSuccessCount}\n`;
       
-      const proceed = confirm(
-        `⚠️ Beberapa movement gagal:\n\n${errorMsg}${failedMovements.length > 3 ? '\n...' : ''}\n\nTetap approve semua activity?`
-      )
-      if (!proceed) {
-        processing.value = false
-        return
+      if (movementFailCount > 0) {
+        alertMessage += `❌ Movements failed: ${movementFailCount}\n\n`;
+        alertMessage += `Errors:\n${movementErrors.join('\n')}`;
       }
+
+      alert(alertMessage);
+
+    } else {
+      // Bukan final - increment current_level_order
+      const { error: recordErr } = await supabase
+        .from('gh_approve_record')
+        .update({
+          current_level_order: currentLevelOrder + 1
+        })
+        .eq('record_id', currentReport.value.approval_record_id);
+
+      if (recordErr) throw recordErr;
+
+      alert(`✅ Report berhasil disetujui untuk level "${levelName}"!\n\nReport akan dilanjutkan ke level berikutnya.`);
     }
-    
-    // ✅ BULK UPDATE STATUS
-    const activityIds = activitiesToApprove.map(a => a.activity_id)
-    
-    const { error: updateErr } = await supabase
-      .from('gh_activity')
-      .update({
-        status: 'approved',
-        approved_by: username,
-        approved_at: new Date().toISOString()
-      })
-      .in('activity_id', activityIds)
-    
-    if (updateErr) throw updateErr
-    
-    await loadData()
-    
-    const successCount = allMovementResults.filter(r => r.result.success).length
-    alert(`✅ ${activitiesToApprove.length} aktivitas berhasil disetujui!\n\nDokumen berhasil dibuat: ${successCount}/${allMovementResults.length}`)
+
+    console.log('✅ Level approved');
+
+    await loadData();
+    router.push(sourcePage.value);
     
   } catch (err) {
-    console.error('❌ Error:', err)
-    alert('❌ Gagal approve: ' + err.message)
+    console.error('❌ Error approving level:', err);
+    alert('❌ Gagal approve: ' + err.message);
   } finally {
-    processing.value = false
+    processing.value = false;
   }
-}
+};
 
-// ✅ APPROVE EVERYTHING
-const approveEverything = async () => {
-  if (!reportInfo.value) return
-  
-  if (reportInfo.value.hasRevision) {
-    alert('⚠️ Tidak bisa approve semua!\n\nMasih ada item yang memerlukan revisi.')
-    return
+// ✅ REQUEST REVISION (REPORT LEVEL)
+const requestRevisionForLevel = async () => {
+  if (!canApproveCurrentLevel.value) {
+    alert('⚠️ Anda tidak memiliki akses untuk request revision di level ini');
+    return;
   }
-  
-  const total = reportInfo.value.totalTypeDamages + reportInfo.value.totalActivities
-  
-  if (!confirm(`✅ Approve SEMUA (${total} items)?`)) return
+
+  if (!revisionModal.value.notes || revisionModal.value.notes.trim().length < 10) {
+    alert('⚠️ Catatan revisi minimal 10 karakter');
+    return;
+  }
+
+  if (!confirm('🔄 Kirim permintaan revisi report?\n\nReport akan dikembalikan ke staff untuk diperbaiki.')) {
+    return;
+  }
 
   try {
-    processing.value = true
+    processing.value = true;
     
-    await approveAllTypeDamages()
-    await approveAllActivities()
+    const currentLevel = currentUserLevel.value;
+    if (!currentLevel) throw new Error('Current approval level not found.');
     
-    alert('✅ Semua item berhasil disetujui!')
-    router.push(sourcePage.value)
+    const username = authStore.user?.username || authStore.user?.email || 'Admin';
+    
+    // 1. Update level status jadi 'needRevision'
+    const { error: updateLevelErr } = await supabase
+      .from('gh_approval_level_status')
+      .update({
+        status: 'needRevision',
+        revision_notes: revisionModal.value.notes,
+        revision_requested_by: authStore.user.user_id,
+        revision_requested_at: new Date().toISOString()
+      })
+      .eq('record_id', currentReport.value.approval_record_id)
+      .eq('level_order', currentLevel.level_order);
+
+    if (updateLevelErr) throw updateLevelErr;
+
+    // 2. Insert history
+    const { data: recordFlowData, error: flowFetchErr } = await supabase
+          .from('gh_approve_record')
+          .select('flow_id')
+          .eq('record_id', currentReport.value.approval_record_id)
+          .single();
+    
+    if (flowFetchErr) throw flowFetchErr;
+
+    const { error: historyErr } = await supabase
+      .from('gh_approval_history')
+      .insert({
+        record_id: currentReport.value.approval_record_id,
+        flow_id: recordFlowData.flow_id,
+        user_id: authStore.user.user_id,
+        level_order: currentLevel.level_order,
+        level_name: currentLevel.level_name,
+        action: 'revision_requested',
+        comment: revisionModal.value.notes
+      });
+
+    if (historyErr) throw historyErr;
+
+    // 3. Update approve_record overall_status
+    const { error: recordErr } = await supabase
+      .from('gh_approve_record')
+      .update({
+        overall_status: 'needRevision',
+        current_level_order: 1 // Reset ke level 1
+      })
+      .eq('record_id', currentReport.value.approval_record_id);
+
+    if (recordErr) throw recordErr;
+
+    // 4. Reset semua level status kembali ke pending
+    const { error: resetErr } = await supabase
+      .from('gh_approval_level_status')
+      .update({
+        status: 'pending',
+        approved_by: null,
+        approved_at: null,
+        revision_notes: null,
+        revision_requested_by: null,
+        revision_requested_at: null
+      })
+      .eq('record_id', currentReport.value.approval_record_id)
+      .neq('level_order', currentLevel.level_order); // Kecuali level yang request revision
+
+    if (resetErr) throw resetErr;
+
+    // 5. Update report status
+    const { error: reportErr } = await supabase
+      .from('gh_report')
+      .update({ report_status: 'needRevision' })
+      .eq('report_id', currentReport.value.report_id);
+
+    if (reportErr) throw reportErr;
+
+    // ❌ HAPUS: Reset item status (optional)
+    // if(currentReport.value.type_damages) { ... }
+    // if(currentReport.value.activities) { ... }
+    
+    await loadData();
+    closeRevisionModal();
+    
+    alert('✅ Permintaan revisi berhasil dikirim! Status report dikembalikan ke needRevision.');
+    router.push(sourcePage.value);
     
   } catch (err) {
-    console.error('❌ Error:', err)
-    alert('❌ Gagal approve semua: ' + err.message)
+    console.error('❌ Error requesting revision:', err);
+    alert('❌ Gagal mengirim revisi: ' + err.message);
   } finally {
-    processing.value = false
+    processing.value = false;
+  }
+};
+
+// ✅ UPDATE REQUEST REVISION (ITEM LEVEL)
+const handleRevision = async () => {
+  const { type } = revisionModal.value
+  
+  if (type === 'level') {
+    // Call the report-level revision function
+    await requestRevisionForLevel();
+  } else {
+    // Item revision tidak didukung
+    alert('⚠️ Item revision tidak tersedia. Gunakan revision report saja.');
+    closeRevisionModal();
   }
 }
 
-// ✅ REQUEST REVISION
+// ✅ UTILITY FOR MODAL
 const openRevisionModal = (type, itemId) => {
+  if (!canApproveCurrentLevel.value) {
+    alert('⚠️ Anda tidak memiliki akses untuk melakukan aksi ini di level saat ini.');
+    return;
+  }
+  
+  // ✅ Hanya izinkan type === 'level'
+  if (type !== 'level') {
+    alert('⚠️ Hanya revision report yang didukung. Gunakan tombol "Request Revision Report".');
+    return;
+  }
+
   revisionModal.value = {
     show: true,
     type,
@@ -1135,47 +1060,6 @@ const closeRevisionModal = () => {
     type: null,
     itemId: null,
     notes: ''
-  }
-}
-
-const handleRevision = async () => {
-  const { type, itemId, notes } = revisionModal.value
-  
-  if (!notes.trim() || notes.trim().length < 10) {
-    alert('⚠️ Catatan revisi minimal 10 karakter')
-    return
-  }
-
-  if (!confirm(`🔄 Kirim permintaan revisi?`)) return
-
-  try {
-    processing.value = true
-    
-    const username = authStore.user?.username || authStore.user?.email || 'Admin'
-    const table = type === 'type_damage' ? 'gh_type_damage' : 'gh_activity'
-    const idField = type === 'type_damage' ? 'typedamage_id' : 'activity_id'
-    
-    const { error: updateErr } = await supabase
-      .from(table)
-      .update({
-        status: 'needRevision',
-        revision_notes: notes,
-        revision_requested_by: username,
-        revision_requested_at: new Date().toISOString()
-      })
-      .eq(idField, itemId)
-    
-    if (updateErr) throw updateErr
-    
-    await loadData()
-    closeRevisionModal()
-    alert('✅ Permintaan revisi berhasil dikirim!')
-    
-  } catch (err) {
-    console.error('❌ Error:', err)
-    alert('❌ Gagal mengirim revisi: ' + err.message)
-  } finally {
-    processing.value = false
   }
 }
 
@@ -1201,7 +1085,6 @@ const getStatusBadge = (status) => {
 
 <template>
   <div class="min-h-screen bg-gradient-to-br from-gray-50 to-white">
-    <!-- Header Bar -->
     <div class="bg-white border-b border-gray-200 shadow-sm sticky top-0 z-40">
       <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-5">
         <div class="flex items-center justify-between gap-4">
@@ -1228,10 +1111,8 @@ const getStatusBadge = (status) => {
       </div>
     </div>
 
-    <!-- Main Content -->
     <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
       
-      <!-- Loading State -->
       <div v-if="loading" class="flex items-center justify-center py-20">
         <div class="text-center">
           <div class="inline-block w-12 h-12 border-4 border-[#0071f3] border-t-transparent rounded-full animate-spin"></div>
@@ -1239,7 +1120,6 @@ const getStatusBadge = (status) => {
         </div>
       </div>
 
-      <!-- Error State -->
       <div v-else-if="error" class="bg-red-50 border-2 border-red-200 rounded-2xl p-6 mb-6">
         <div class="flex items-center gap-3">
           <span class="text-3xl">❌</span>
@@ -1250,10 +1130,8 @@ const getStatusBadge = (status) => {
         </div>
       </div>
 
-      <!-- Content -->
       <template v-else-if="reportInfo && currentReport">
         
-        <!-- Report Info -->
         <div class="mb-6">
           <div class="bg-gradient-to-r from-blue-50 to-indigo-50 border-2 border-blue-200 rounded-2xl p-6">
             <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
@@ -1267,7 +1145,7 @@ const getStatusBadge = (status) => {
               </div>
               <div>
                 <p class="text-sm text-gray-600 font-semibold mb-1">🌱 Fase</p>
-                <p class="text-lg font-bold text-gray-900">{{ reportInfo.phase_name }}</p>
+                <p class="text-lg font-bold text-gray-900">{{ reportInfo?.phase_name || '-' }}</p>
               </div>
               <div>
                 <p class="text-sm text-gray-600 font-semibold mb-1">📅 Tanggal</p>
@@ -1288,22 +1166,17 @@ const getStatusBadge = (status) => {
               <div class="bg-white rounded-lg p-4">
                 <p class="text-sm text-gray-600 font-semibold mb-2">🌾 Kerusakan Tanaman</p>
                 <div class="flex items-center gap-3">
-                  <span class="text-2xl font-bold text-gray-900">{{ reportInfo.approvedTypeDamages }}</span>
-                  <span class="text-gray-500">/</span>
-                  <span class="text-xl text-gray-600">{{ reportInfo.totalTypeDamages }}</span>
-                  <span class="text-sm text-gray-500">approved</span>
+                  <span class="text-2xl font-bold text-gray-900">{{ reportInfo.totalTypeDamages }}</span>
+                  <span class="text-sm text-gray-500">items</span>
                 </div>
               </div>
               <div class="bg-white rounded-lg p-4">
                 <p class="text-sm text-gray-600 font-semibold mb-2">⚙️ Aktivitas</p>
                 <div class="flex items-center gap-3">
-                  <span class="text-2xl font-bold text-gray-900">{{ reportInfo.approvedActivities }}</span>
-                  <span class="text-gray-500">/</span>
-                  <span class="text-xl text-gray-600">{{ reportInfo.totalActivities }}</span>
-                  <span class="text-sm text-gray-500">approved</span>
+                  <span class="text-2xl font-bold text-gray-900">{{ reportInfo.totalActivities }}</span>
+                  <span class="text-sm text-gray-500">items</span>
                 </div>
               </div>
-              <!-- TAMBAHAN: Total Material Cost -->
               <div class="bg-gradient-to-br from-green-50 to-emerald-50 rounded-lg p-4 border-2 border-green-200">
                 <p class="text-sm text-green-600 font-semibold mb-2">💰 Total Material Cost</p>
                 <div class="flex items-center gap-2">
@@ -1314,68 +1187,125 @@ const getStatusBadge = (status) => {
               </div>
             </div>
 
-            <!-- Report-level Revision Notes -->
-            <div v-if="reportInfo.revision_notes" class="mt-4 pt-4 border-t-2 border-blue-200">
+            <div v-if="reportInfo.report_status === 'needRevision'" class="mt-4 pt-4 border-t-2 border-blue-200">
               <div class="bg-red-50 border-2 border-red-200 rounded-lg p-4">
                 <p class="text-sm font-bold text-red-900 mb-2 flex items-center gap-2">
                   <span class="text-lg">🔄</span>
                   Catatan Revisi Report
                 </p>
-                <p class="text-sm text-red-900 whitespace-pre-wrap">{{ reportInfo.revision_notes }}</p>
+                <p class="text-sm text-red-900 whitespace-pre-wrap">
+                  {{ approvalProgress.find(p => p.level_status === 'needRevision')?.revision_notes || 'Revisi diminta.' }}
+                </p>
                 <p class="text-xs text-red-600 mt-2">
-                  Requested by: {{ reportInfo.revision_requested_by }} • {{ formatDateTime(reportInfo.revision_requested_at) }}
+                  Requested by: {{ approvalProgress.find(p => p.level_status === 'needRevision')?.revisor_name || 'System' }} 
+                  • {{ formatDateTime(approvalProgress.find(p => p.level_status === 'needRevision')?.revision_requested_at) }}
                 </p>
               </div>
             </div>
 
-            <!-- Report-level Approval Info -->
-            <div v-if="reportInfo.approved_at" class="mt-4 pt-4 border-t-2 border-blue-200">
+            <div v-if="reportInfo.report_status === 'approved'" class="mt-4 pt-4 border-t-2 border-blue-200">
               <div class="bg-green-50 border-2 border-green-200 rounded-lg p-4">
                 <p class="text-sm font-bold text-green-900 mb-2 flex items-center gap-2">
                   <span class="text-lg">✅</span>
-                  Report Approved
+                  Report Fully Approved
                 </p>
                 <p class="text-sm text-green-900">
-                  Approved by: {{ reportInfo.approved_by }} • {{ formatDateTime(reportInfo.approved_at) }}
+                  Approved by: {{ approvalProgress.find(p => p.is_final_level)?.approver_name || 'System' }} 
+                  • {{ formatDateTime(approvalProgress.find(p => p.is_final_level)?.approved_at) }}
                 </p>
               </div>
             </div>
           </div>
         </div>
 
-        <!-- Bulk Actions -->
-        <div class="mb-6">
-          <div class="bg-white rounded-2xl border-2 border-gray-100 shadow-sm p-5">
-            <p class="text-sm font-bold text-gray-700 mb-4">🚀 Bulk Actions</p>
-            <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
-              <button
-                @click="approveAllTypeDamages"
-                :disabled="processing || reportInfo.approvedTypeDamages === reportInfo.totalTypeDamages"
-                class="bg-blue-500 hover:bg-blue-600 text-white font-semibold py-3 rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+        <div v-if="approvalProgress.length > 0" class="mb-6">
+          <h2 class="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-3">
+            📊 Approval Progress
+          </h2>
+          <div class="bg-white rounded-2xl border-2 border-gray-100 shadow-sm p-6">
+            <div class="space-y-3">
+              <div
+                v-for="level in approvalProgress"
+                :key="level.level_status_id"
+                class="flex items-center gap-4 p-4 rounded-lg"
+                :class="{
+                  'bg-green-50 border-2 border-green-200': level.level_status === 'approved',
+                  'bg-yellow-50 border-2 border-yellow-200': level.level_status === 'pending' && level.level_order === currentUserLevel?.level_order,
+                  'bg-red-50 border-2 border-red-200': level.level_status === 'needRevision',
+                  'bg-gray-50 border-2 border-gray-200': level.level_status === 'pending' && level.level_order !== currentUserLevel?.level_order,
+                }"
               >
-                <span>✅ Approve All Damages</span>
-              </button>
-              <button
-                @click="approveAllActivities"
-                :disabled="processing || reportInfo.approvedActivities === reportInfo.totalActivities"
-                class="bg-purple-500 hover:bg-purple-600 text-white font-semibold py-3 rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
-              >
-                <span>✅ Approve All Activities</span>
-              </button>
-              <button
-                @click="approveEverything"
-                :disabled="processing || reportInfo.allApproved"
-                class="bg-green-500 hover:bg-green-600 text-white font-semibold py-3 rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
-              >
-                <span>✅ Approve Everything</span>
-              </button>
+                <div class="w-10 h-10 rounded-full flex items-center justify-center font-bold text-white"
+                    :class="{
+                      'bg-green-500': level.level_status === 'approved',
+                      'bg-blue-500': level.level_status === 'pending' && level.level_order === currentUserLevel?.level_order,
+                      'bg-red-500': level.level_status === 'needRevision',
+                      'bg-gray-400': level.level_status === 'pending' && level.level_order !== currentUserLevel?.level_order
+                    }">
+                  {{ level.level_order }}
+                </div>
+
+                <div class="flex-1">
+                  <p class="font-bold text-gray-900">{{ level.level_name || currentUserLevel?.level_name || `Level ${level.level_order}` }}</p>
+                  <p class="text-sm text-gray-600">
+                    <span v-if="level.level_status === 'approved'">
+                      ✅ Approved by {{ level.approver_name || 'Admin' }}
+                    </span>
+                    <span v-else-if="level.level_status === 'needRevision'">
+                      🔄 Revision requested by {{ level.revisor_name || 'Admin' }}
+                    </span>
+                    <span v-else-if="level.level_order === currentUserLevel?.level_order">
+                      ⏳ Menunggu approval Anda
+                    </span>
+                    <span v-else>
+                      ⏸️ Pending
+                    </span>
+                  </p>
+                  <p v-if="level.approved_at" class="text-xs text-gray-500">
+                    {{ formatDateTime(level.approved_at) }}
+                  </p>
+                   <div v-if="level.revision_notes && level.level_status === 'needRevision'" class="mt-2 bg-red-100 p-2 rounded-lg">
+                    <p class="text-xs font-semibold text-red-700">Catatan Revisi:</p>
+                    <p class="text-xs text-red-800">{{ level.revision_notes }}</p>
+                  </div>
+                </div>
+
+                <span
+                  class="px-3 py-1 rounded-lg font-bold text-xs border-2 whitespace-nowrap"
+                  :class="{
+                    'bg-green-100 text-green-800 border-green-200': level.status === 'approved',
+                    'bg-yellow-100 text-yellow-800 border-yellow-200': level.status === 'pending' && level.level_order === currentUserLevel?.level_order,
+                    'bg-red-100 text-red-800 border-red-200': level.status === 'needRevision',
+                    'bg-gray-100 text-gray-800 border-gray-200': level.status === 'pending' && level.level_order !== currentUserLevel?.level_order,
+                  }">
+                  {{ level.status === 'approved' ? '✅ Approved' : level.status === 'needRevision' ? '🔄 Revision' : '⏳ Pending' }}
+                </span>
+              </div>
+            </div>
+
+            <div v-if="canApproveCurrentLevel && currentUserLevel && reportInfo.report_status !== 'approved'" class="mt-6 pt-6 border-t-2 border-gray-100">
+              <div class="flex flex-col sm:flex-row gap-3">
+                <button
+                  @click="approveCurrentLevel"
+                  :disabled="processing"
+                  class="flex-1 bg-green-500 hover:bg-green-600 text-white font-bold py-3 rounded-xl transition disabled:opacity-50"
+                  
+                >
+                  ✅ Approve Level {{ currentUserLevel.level_order }}
+                </button>
+                <button
+                  @click="openRevisionModal('level', null)"
+                  :disabled="processing"
+                  class="flex-1 bg-red-500 hover:bg-red-600 text-white font-bold py-3 rounded-xl transition disabled:opacity-50"
+                >
+                  🔄 Request Revision Report
+                </button>
+              </div>
             </div>
           </div>
         </div>
 
-        <!-- Report Content -->
         <div class="bg-white rounded-2xl border-2 border-gray-100 shadow-sm overflow-hidden">
-          <!-- Report Header -->
           <div class="bg-gradient-to-r from-gray-50 to-white p-5 border-b-2 border-gray-100">
             <div class="flex items-center gap-3">
               <div class="w-10 h-10 bg-gradient-to-br from-[#0071f3] to-[#8FABD4] rounded-lg flex items-center justify-center text-white font-bold text-lg">
@@ -1388,10 +1318,8 @@ const getStatusBadge = (status) => {
             </div>
           </div>
 
-          <!-- Report Content -->
           <div class="p-6 space-y-6">
             
-            <!-- Type Damages Section -->
             <div v-if="currentReport.type_damages && currentReport.type_damages.length > 0">
               <h4 class="text-lg font-bold text-gray-900 mb-4 flex items-center gap-2">
                 <span class="text-2xl">🌾</span>
@@ -1405,7 +1333,7 @@ const getStatusBadge = (status) => {
                 >
                   <div class="flex items-start justify-between gap-4 mb-4">
                     <div class="flex-1">
-                      <p class="font-bold text-gray-900 text-lg mb-3">{{ damage.type_damage || 'Kerusakan' }}</p>
+                      <p class="font-bold text-gray-900 text-lg mb-3">{{ damage.type_damage || 'Kerusakan' }}</p> 
                       <div class="grid grid-cols-3 gap-3">
                         <div class="bg-white rounded-lg p-3">
                           <p class="text-xs text-gray-500 font-semibold mb-1">🟡 Kuning</p>
@@ -1421,43 +1349,26 @@ const getStatusBadge = (status) => {
                         </div>
                       </div>
                     </div>
+                    
                     <div class="flex flex-col items-end gap-2">
-                      <span 
+                       <span 
                         :class="getStatusBadge(damage.status).class"
                         class="px-3 py-1 rounded-lg font-bold text-xs border-2 whitespace-nowrap"
                       >
                         {{ getStatusBadge(damage.status).text }}
                       </span>
-                      <button
-                        v-if="!damage.status || damage.status === 'onReview'"
-                        @click="approveTypeDamage(damage.typedamage_id)"
-                        :disabled="processing"
-                        class="bg-green-500 hover:bg-green-600 text-white font-semibold px-4 py-2 rounded-lg transition disabled:opacity-50 text-sm"
-                      >
-                        ✅ Approve
-                      </button>
-                      <button
-                        v-if="!damage.status || damage.status === 'onReview'"
-                        @click="openRevisionModal('type_damage', damage.typedamage_id)"
-                        :disabled="processing"
-                        class="bg-red-500 hover:bg-red-600 text-white font-semibold px-4 py-2 rounded-lg transition disabled:opacity-50 text-sm"
-                      >
-                        🔄 Revise
-                      </button>
-                    </div>
+                      
+                      </div>
                   </div>
                   
-                  <!-- Revision Info -->
-                  <div v-if="damage.revision_notes" class="mt-3 bg-red-50 border-2 border-red-200 rounded-lg p-3">
+                  <div v-if="damage.revision_notes && damage.status === 'needRevision'" class="mt-3 bg-red-50 border-2 border-red-200 rounded-lg p-3">
                     <p class="text-xs text-red-600 font-semibold mb-1">Revision Notes:</p>
                     <p class="text-sm text-red-900">{{ damage.revision_notes }}</p>
-                    <p class="text-xs text-red-600 mt-2">By: {{ damage.revision_requested_by }} • {{ formatDateTime(damage.revision_requested_at) }}</p>
                   </div>
                 </div>
               </div>
             </div>
 
-            <!-- Activities Section -->
             <div v-if="currentReport.activities && currentReport.activities.length > 0">
               <h4 class="text-lg font-bold text-gray-900 mb-4 flex items-center gap-2">
                 <span class="text-2xl">⚙️</span>
@@ -1481,7 +1392,6 @@ const getStatusBadge = (status) => {
                           <p class="text-xs text-gray-500 font-semibold mb-1">👷 Manpower</p>
                           <p class="text-sm font-medium text-gray-900">{{ activity.manpower || 0 }} pekerja</p>
                         </div>
-                        <!-- TAMBAHAN: Total Cost -->
                         <div class="bg-gradient-to-br from-green-50 to-emerald-50 rounded-lg p-3 border-2 border-green-200">
                           <p class="text-xs text-green-600 font-semibold mb-1">💰 Material Cost</p>
                           <p class="text-base font-bold text-green-700">
@@ -1490,14 +1400,12 @@ const getStatusBadge = (status) => {
   </div>
                       </div>
 
-                      <!-- Materials -->
                       <div v-if="activity.materials && activity.materials.length > 0" class="bg-white rounded-lg p-4">
                         <p class="text-sm font-bold text-gray-700 mb-3 flex items-center gap-2">
                           <span class="text-base">📦</span>
                           Materials ({{ activity.materials.length }})
                         </p>
                         
-                        <!-- Materials Table -->
                         <div class="overflow-x-auto">
                           <table class="w-full text-sm">
                             <thead>
@@ -1548,43 +1456,24 @@ const getStatusBadge = (status) => {
                     </div>
                     
                     <div class="flex flex-col items-end gap-2">
-                      <span 
+                       <span 
                         :class="getStatusBadge(activity.status).class"
                         class="px-3 py-1 rounded-lg font-bold text-xs border-2 whitespace-nowrap"
                       >
                         {{ getStatusBadge(activity.status).text }}
                       </span>
-                      <button
-                        v-if="!activity.status || activity.status === 'onReview'"
-                        @click="approveActivity(activity.activity_id)"
-                        :disabled="processing"
-                        class="bg-green-500 hover:bg-green-600 text-white font-semibold px-4 py-2 rounded-lg transition disabled:opacity-50 text-sm whitespace-nowrap"
-                      >
-                        ✅ Approve
-                      </button>
-                      <button
-                        v-if="!activity.status || activity.status === 'onReview'"
-                        @click="openRevisionModal('activity', activity.activity_id)"
-                        :disabled="processing"
-                        class="bg-red-500 hover:bg-red-600 text-white font-semibold px-4 py-2 rounded-lg transition disabled:opacity-50 text-sm whitespace-nowrap"
-                      >
-                        🔄 Revise
-                      </button>
-                    </div>
+                      
+                      </div>
                   </div>
 
-                  <!-- Approval Info -->
-                  <div v-if="activity.approved_at" class="mt-3 bg-green-50 border-2 border-green-200 rounded-lg p-3">
+                  <div v-if="activity.openbravo_movement_id && activity.status === 'approved'" class="mt-3 bg-green-50 border-2 border-green-200 rounded-lg p-3">
                     <p class="text-xs text-green-600 font-semibold mb-1">✅ Approved</p>
-                    <p class="text-sm text-green-900">By: {{ activity.approved_by }} • {{ formatDateTime(activity.approved_at) }}</p>
-                    <p v-if="activity.openbravo_movement_id" class="text-xs text-green-700 mt-1">Document ID: {{ activity.openbravo_movement_id }}</p>
+                    <p class="text-sm text-green-900">Openbravo Document ID: {{ activity.openbravo_movement_id }}</p>
                   </div>
                   
-                  <!-- Revision Info -->
-                  <div v-if="activity.revision_notes" class="mt-3 bg-red-50 border-2 border-red-200 rounded-lg p-3">
+                  <div v-if="activity.revision_notes && activity.status === 'needRevision'" class="mt-3 bg-red-50 border-2 border-red-200 rounded-lg p-3">
                     <p class="text-xs text-red-600 font-semibold mb-1">Revision Notes:</p>
                     <p class="text-sm text-red-900">{{ activity.revision_notes }}</p>
-                    <p class="text-xs text-red-600 mt-2">By: {{ activity.revision_requested_by }} • {{ formatDateTime(activity.revision_requested_at) }}</p>
                   </div>
                 </div>
               </div>
@@ -1592,18 +1481,16 @@ const getStatusBadge = (status) => {
           </div>
         </div>
 
-        <!-- Info Box -->
         <div class="bg-blue-50 border-2 border-blue-200 rounded-2xl p-5 mt-6">
           <div class="flex items-start gap-3">
             <span class="text-2xl">💡</span>
             <div class="flex-1">
               <p class="font-bold text-blue-900 mb-2">Cara Review</p>
               <ul class="text-sm text-blue-800 space-y-1">
-                <li>• <strong>Per Item:</strong> Klik "Approve" atau "Revise" pada setiap kerusakan tanaman atau aktivitas</li>
-                <li>• <strong>Bulk Actions:</strong> Gunakan tombol di atas untuk approve semua sekaligus</li>
-                <li>• <strong>Material Stock:</strong> Saat approve aktivitas, sistem akan otomatis memproses pengurangan stock material</li>
-                <li>• <strong>Status Report:</strong> Report akan berstatus "Approved" hanya jika SEMUA item sudah approved</li>
-                <li>• <strong>Revision:</strong> Item yang direquest revision akan dikembalikan ke staff untuk diperbaiki</li>
+                <li>• **Review Items:** Periksa semua kerusakan tanaman dan aktivitas yang dilaporkan di bawah ini.</li>
+                <li>• **Level Approval:** Klik tombol "**Approve Level**" untuk menyetujui seluruh report di level Anda dan melanjutkannya ke level berikutnya.</li>
+                <li>• **Request Revision:** Jika ada yang tidak sesuai, gunakan tombol "**Request Revision Report**" untuk mengembalikan report ke staff dan mereset status approval.</li>
+                <li>• **Material Stock:** Pengurangan stock material (Openbravo Movement) akan diproses oleh sistem setelah report disetujui di level terakhir.</li>
               </ul>
             </div>
           </div>
@@ -1611,7 +1498,6 @@ const getStatusBadge = (status) => {
 
       </template>
 
-      <!-- Footer -->
       <footer class="text-center py-10 mt-8 border-t border-gray-200">
         <div class="flex items-center justify-center gap-2 mb-2">
           <span class="text-2xl">🌱</span>
@@ -1621,7 +1507,6 @@ const getStatusBadge = (status) => {
       </footer>
     </div>
 
-    <!-- Revision Modal -->
     <div v-if="revisionModal.show" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
       <div class="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl animate-fade-in">
         <div class="flex items-center justify-between mb-4">
@@ -1645,7 +1530,7 @@ const getStatusBadge = (status) => {
             Item Type
           </label>
           <div class="px-4 py-3 border-2 border-gray-200 rounded-xl bg-gray-50 text-gray-700 font-medium">
-            {{ revisionModal.type === 'type_damage' ? '🌾 Kerusakan Tanaman' : '⚙️ Aktivitas' }}
+            📋 Seluruh Report (Level {{ currentUserLevel?.level_order }})
           </div>
         </div>
 
@@ -1656,7 +1541,7 @@ const getStatusBadge = (status) => {
           <textarea
             v-model="revisionModal.notes"
             rows="6"
-            placeholder="Tuliskan dengan jelas apa yang perlu diperbaiki...&#10;&#10;Contoh untuk kerusakan:&#10;- Data kuning perlu diverifikasi ulang&#10;- Jumlah busuk tidak sesuai dengan kondisi aktual&#10;&#10;Contoh untuk aktivitas:&#10;- Material yang digunakan belum sesuai&#10;- Jumlah qty perlu diperbaiki&#10;- CoA salah"
+            placeholder="Tuliskan dengan jelas apa yang perlu diperbaiki...&#10;&#10;Contoh:&#10;- Data kuning di Type Damage 1 perlu diverifikasi ulang&#10;- Quantity material A di Aktivitas 'Penyemprotan' terlalu banyak. Cek kembali"
             class="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:border-[#0071f3] focus:outline-none transition resize-none"
             :disabled="processing"
           ></textarea>

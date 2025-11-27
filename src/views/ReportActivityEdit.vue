@@ -1,4 +1,4 @@
-
+// ReportActivityEdit.vue
 <script setup>
 import { ref, onMounted, computed, watch } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
@@ -26,6 +26,28 @@ console.log('  - route.params:', route.params)
 console.log('  - route.path:', route.path)
 console.log('  - route.name:', route.name)
 console.log('  - report_id extracted:', report_id.value)
+
+// ✅ ADD state
+const phaseInfo = ref(null);
+
+// ✅ ADD function
+const loadPhaseInfo = async (phaseId) => {
+  if (!phaseId) return null;
+  
+  try {
+    const { data, error } = await supabase
+      .from('gh_phase')
+      .select('phase_name')
+      .eq('phase_id', phaseId)
+      .single();
+    
+    if (error) throw error;
+    return data?.phase_name || 'Unknown Phase';
+  } catch (err) {
+    console.error('Error loading phase:', err);
+    return 'Unknown Phase';
+  }
+};
 
 const loading = ref(true)
 const saving = ref(false)
@@ -99,26 +121,27 @@ const loadData = async () => {
   try {
     loading.value = true
     
-    // ✅ Load master data terlebih dahulu
+    // ✅ Load master data - TANPA materialStore.fetchStock()
     await Promise.all([
       batchStore.getBatches(),
       locationStore.fetchAll(),
-      potatoActivityStore.fetchAll(),
-      materialStore.fetchStock()
+      potatoActivityStore.fetchAll()
+      // ❌ HAPUS: materialStore.fetchStock() 
     ])
     
     console.log('📋 Master Data Loaded:')
+    console.log('  - Batches:', batchStore.batches.length)
+    console.log('  - Locations:', locationStore.locations.length)
     console.log('  - Activities:', potatoActivityStore.activities.length)
-    console.log('  - Materials:', materialStore.materialStock.length)
 
     // ✅ FETCH REPORT BY report_id
     const { data: report, error: fetchError } = await supabase
       .from('gh_report')
       .select(`
         *,
-        type_damages:gh_type_damage(*),
+        type_damages:gh_type_damage(typedamage_id, type_damage, kuning, kutilang, busuk),
         activities:gh_activity(
-          *,
+          activity_id, act_name, CoA, manpower,
           materials:gh_material_used(*)
         )
       `)
@@ -128,20 +151,44 @@ const loadData = async () => {
     if (fetchError) throw fetchError
     if (!report) throw new Error('Laporan tidak ditemukan')
 
-    // ✅ Check if report has items that need revision
-    const hasRevisionItems = 
-      (report.type_damages && report.type_damages.some(td => td.status === 'needRevision')) ||
-      (report.activities && report.activities.some(act => act.status === 'needRevision'))
+    console.log('✅ Report fetched:', report)
 
-    if (!hasRevisionItems) {
-      alert('⚠️ Laporan ini tidak memiliki item yang memerlukan revisi.')
-      console.log('🔄 No revision items - Redirecting to /planningReportList')
+    // ✅ CHECK: Apakah report ini punya approval_record_id?
+    if (!report.approval_record_id) {
+      alert('⚠️ Laporan ini belum masuk ke flow approval.')
+      console.log('🔄 No approval record - Redirecting to /planningReportList')
+      router.replace('/planningReportList')
+      return
+    }
+
+    // ✅ CHECK: Apakah overall_status = needRevision?
+    const { data: approvalRecord, error: approvalErr } = await supabase
+      .from('gh_approve_record')
+      .select('overall_status, current_level_order')
+      .eq('record_id', report.approval_record_id)
+      .single()
+
+    if (approvalErr) {
+      console.error('❌ Error fetching approval record:', approvalErr)
+      throw new Error('Gagal mengambil status approval')
+    }
+
+    console.log('📊 Approval Record:', approvalRecord)
+
+    if (approvalRecord?.overall_status !== 'needRevision') {
+      alert(`⚠️ Laporan ini tidak dalam status Need Revision.\n\nStatus saat ini: ${approvalRecord?.overall_status || 'Unknown'}`)
+      console.log(`🔄 Status is ${approvalRecord?.overall_status} - Redirecting to /planningReportList`)
       router.replace('/planningReportList')
       return
     }
 
     currentReport.value = report
-    console.log('✅ Loaded report:', report)
+    console.log('✅ Report is in needRevision status, proceeding...')
+
+    // Load phase name
+    if (report.phase_id) {
+      phaseInfo.value = await loadPhaseInfo(report.phase_id)
+    }
 
     // Set basic form data
     form.value = {
@@ -150,118 +197,70 @@ const loadData = async () => {
       report_date: report.report_date
     }
 
-    // ✅ Load ALL type damages
-    if (report.type_damages) {
+    // ✅ Load ALL type damages (semua editable karena report needRevision)
+    if (report.type_damages && report.type_damages.length > 0) {
       typeDamages.value = report.type_damages.map(td => ({
         typedamage_id: td.typedamage_id,
-        type_damage: td.type_damage,
+        type_damage: td.type_damage || '',
         kuning: td.kuning || 0,
         kutilang: td.kutilang || 0,
         busuk: td.busuk || 0,
-        status: td.status,
-        revision_notes: td.revision_notes,
-        approved_by: td.approved_by,
-        approved_at: td.approved_at,
-        editable: td.status === 'needRevision'
+        editable: true // Semua editable
       }))
-      
-      // Collect revision notes from type damages
-      report.type_damages.forEach(td => {
-        if (td.revision_notes) {
-          revisionNotes.value.push({
-            type: 'Type Damage',
-            item: td.type_damage,
-            notes: td.revision_notes,
-            by: td.revision_requested_by,
-            at: td.revision_requested_at
-          })
-        }
-      })
+      console.log(`✅ Loaded ${typeDamages.value.length} type damages`)
+    } else {
+      typeDamages.value = []
+      console.log('ℹ️ No type damages in report')
     }
 
-    // ✅ Load ALL activities dengan mapping ke master data
-    if (report.activities) {
+    // ✅ Load ALL activities (semua editable karena report needRevision)
+    if (report.activities && report.activities.length > 0) {
       activities.value = report.activities.map(act => {
-        // ✅ Cari master activity yang cocok berdasarkan nama
+        // Auto-link ke master activity
         const masterActivity = potatoActivityStore.activities.find(a => 
           a.activity?.toLowerCase().trim() === act.act_name?.toLowerCase().trim() ||
           a.act_name?.toLowerCase().trim() === act.act_name?.toLowerCase().trim()
         )
         
-        console.log(`📌 Mapping activity from gh_activity table:`, {
+        console.log(`📌 Mapping activity "${act.act_name}":`, {
           gh_activity_id: act.activity_id,
-          act_name: act.act_name,
           master_match: masterActivity?.activity_id,
-          status: act.status,
-          CoA: act.CoA,
-          editable: act.status === 'needRevision'
+          CoA: act.CoA
         })
         
         return {
-          gh_activity_id: act.activity_id,  // ✅ ID dari tabel gh_activity (untuk delete)
-          master_activity_id: masterActivity?.activity_id || null,  // ✅ Auto-link ke master
-          act_name: act.act_name,           // ✅ Use original name from DB
+          gh_activity_id: act.activity_id,
+          master_activity_id: masterActivity?.activity_id || null,
+          act_name: act.act_name,
           CoA: act.CoA || masterActivity?.CoA_code,
-          qty: act.qty || 1,              
-          unit: act.unit || 'unit',
           manpower: act.manpower || 0,
-          status: act.status,
           materials: act.materials && act.materials.length > 0
-            ? act.materials.map(mat => {
-                // ✅ Cari material di stock berdasarkan nama
-                const stockMaterial = materialStore.materialStock.find(
-                  m => m.material_name.toLowerCase().trim() === mat.material_name.toLowerCase().trim()
-                )
-                
-                console.log(`📦 Mapping material "${mat.material_name}":`, {
-                  found: !!stockMaterial,
-                  material_id: stockMaterial?.material_id,
-                  current_uom: mat.uom,
-                  stock_uom: stockMaterial?.uom
-                })
-                
-                return {
-                  material_used_id: mat.material_used_id,  // ✅ Keep for tracking
-                  material_id: stockMaterial?.material_id || null,  // ✅ Link ke master material
-                  material_name: mat.material_name,
-                  qty: mat.qty || 0,
-                  uom: mat.uom || stockMaterial?.uom || ''
-                }
-              })
-            : [{ material_used_id: null, material_id: null, material_name: '', qty: 0, uom: '' }],
-          revision_notes: act.revision_notes,
-          approved_by: act.approved_by,
-          approved_at: act.approved_at,
-          editable: act.status === 'needRevision'
+            ? act.materials.map(mat => ({
+                material_used_id: mat.material_used_id,
+                material_id: null, // Will be set by user via dropdown
+                material_name: mat.material_name,
+                qty: mat.qty || 0,
+                uom: mat.uom || ''
+              }))
+            : [{ 
+                material_used_id: null, 
+                material_id: null, 
+                material_name: '', 
+                qty: 0, 
+                uom: '' 
+              }],
+          editable: true // Semua editable
         }
       })
       
-      // Collect revision notes from activities
-      report.activities.forEach(act => {
-        if (act.revision_notes) {
-          revisionNotes.value.push({
-            type: 'Activity',
-            item: act.act_name,
-            notes: act.revision_notes,
-            by: act.revision_requested_by,
-            at: act.revision_requested_at
-          })
-        }
-      })
-      
-      console.log('✅ Loaded activities with materials:', activities.value)
-      console.log('📊 Activities status summary:', activities.value.map(a => ({
-        gh_activity_id: a.gh_activity_id,
-        act_name: a.act_name,
-        status: a.status,
-        editable: a.editable
-      })))
+      console.log(`✅ Loaded ${activities.value.length} activities`)
+    } else {
+      activities.value = []
+      console.log('ℹ️ No activities in report')
     }
 
-    // Load material stock for this location
-    if (report.location_id) {
-      await materialStore.fetchStock({ location_id: report.location_id })
-    }
+    // ✅ SKIP: Material loading karena langsung dari Openbravo via dropdown
+    console.log('ℹ️ Materials will be loaded from Openbravo via dropdown on-demand')
     
   } catch (err) {
     console.error('❌ Error loading data:', err)
@@ -461,211 +460,123 @@ const removeMaterialRow = (activityIndex, materialIndex) => {
   }
 }
 
-// ✅ FIXED FORM SUBMISSION
 const handleSubmit = async () => {
   try {
-    saving.value = true
-    error.value = null
+    saving.value = true;
+    error.value = null;
 
     // Validate
     if (!form.value.location_id || !form.value.batch_id || !form.value.report_date) {
-      throw new Error('Lokasi, Batch, dan Tanggal wajib diisi')
+      throw new Error('Lokasi, Batch, dan Tanggal wajib diisi');
     }
 
-    // ✅ Log materials for debugging (no blocking)
-    const editableActs = activities.value.filter(act => act.editable && act.status === 'needRevision')
-    editableActs.forEach((act, idx) => {
-      console.log(`Activity ${idx} - "${act.act_name}":`)
-      if (act.materials && act.materials.length > 0) {
-        act.materials.forEach((mat, matIdx) => {
-          const valid = !!(mat.material_id && mat.qty > 0)
-          console.log(`  Material [${matIdx}]: ${valid ? '✅' : '⚠️'}`, {
-            material_id: mat.material_id,
-            material_name: mat.material_name,
-            qty: mat.qty
-          })
-        })
-      }
-    })
+    const username = authStore.user?.username || authStore.user?.email || 'Staff';
+    const now = new Date().toISOString();
 
-    const username = authStore.user?.username || authStore.user?.email || 'Staff'
-    const now = new Date().toISOString()
+    console.log('🔄 Starting submit process...');
 
-    console.log('🔄 Starting submit process...')
-    console.log('📊 Current state before filtering:')
-    console.log('  - Total type damages:', typeDamages.value.length)
-    typeDamages.value.forEach((td, idx) => {
-      console.log(`    [${idx}] ID: ${td.typedamage_id}, Status: ${td.status}, Editable: ${td.editable}`)
-    })
-    console.log('  - Total activities:', activities.value.length)
-    activities.value.forEach((act, idx) => {
-      console.log(`    [${idx}] gh_activity_id: ${act.gh_activity_id}, Status: ${act.status}, Editable: ${act.editable}`)
-    })
+    // ✅ HAPUS LOGIKA FILTER - Karena tidak ada kolom status di item
+    // Kita langsung update/delete semua items
 
-    // ✅ UPDATE ONLY TYPE DAMAGES WITH needRevision STATUS
-    const editableTypeDamages = typeDamages.value.filter(td => {
-      const result = td.editable && td.status === 'needRevision'
-      console.log(`  Filtering TD ${td.typedamage_id}: editable=${td.editable}, status=${td.status}, result=${result}`)
-      return result
-    })
-    if (editableTypeDamages.length > 0) {
-      console.log(`📝 Updating ${editableTypeDamages.length} type damages with needRevision status`)
+    // ===================================
+    // 1. UPDATE TYPE DAMAGES (jika ada)
+    // ===================================
+    if (typeDamages.value && typeDamages.value.length > 0) {
+      console.log(`📝 Updating ${typeDamages.value.length} type damages`);
       
-      for (const td of editableTypeDamages) {
-        console.log(`  - Updating type damage ID ${td.typedamage_id}: "${td.type_damage}"`)
-        console.log(`    Current status: ${td.status} → Target status: onReview`)
-        
-        // ✅ Update type damage
-        const { data: updatedData, error: updateErr } = await supabase
+      for (const td of typeDamages.value) {
+        const { error: updateErr } = await supabase
           .from('gh_type_damage')
           .update({
             type_damage: td.type_damage,
             kuning: parseInt(td.kuning) || 0,
             kutilang: parseInt(td.kutilang) || 0,
-            busuk: parseInt(td.busuk) || 0,
-            status: 'onReview',  // ✅ Change from needRevision to onReview
-            revision_notes: null,
-            revision_requested_by: null,
-            revision_requested_at: null
+            busuk: parseInt(td.busuk) || 0
           })
-          .eq('typedamage_id', td.typedamage_id)
-          .select()
+          .eq('typedamage_id', td.typedamage_id);
         
         if (updateErr) {
-          console.error('❌ Error updating type damage:', updateErr)
-          throw new Error(`Gagal update kerusakan: ${updateErr.message}`)
+          console.error('❌ Error updating type damage:', updateErr);
+          throw new Error(`Gagal update kerusakan: ${updateErr.message}`);
         }
-        
-        console.log(`  ✅ Type damage ${td.typedamage_id} updated:`, updatedData)
       }
-      console.log(`✅ Successfully updated ${editableTypeDamages.length} type damages`)
-    } else {
-      console.log('ℹ️ No type damages need updating')
+      
+      console.log(`✅ Successfully updated ${typeDamages.value.length} type damages`);
     }
 
-    // ✅ UPDATE ONLY ACTIVITIES WITH needRevision STATUS
-    const editableActivities = activities.value.filter(act => {
-      const result = act.editable && act.status === 'needRevision'
-      console.log(`  Filtering Activity gh_activity_id=${act.gh_activity_id}: editable=${act.editable}, status=${act.status}, result=${result}`)
-      return result
-    })
-    
-    if (editableActivities.length > 0) {
-      console.log(`📝 Updating ${editableActivities.length} activities with needRevision status`)
-      console.log(`📝 Activities to update:`, editableActivities.map(a => ({
-        gh_activity_id: a.gh_activity_id,
-        act_name: a.act_name,
-        status: a.status
-      })))
+    // ===================================
+    // 2. DELETE & INSERT ACTIVITIES (jika ada)
+    // ===================================
+    if (activities.value && activities.value.length > 0) {
+      console.log(`📝 Processing ${activities.value.length} activities`);
       
-      for (const act of editableActivities) {
-        // Validate activity - hanya perlu gh_activity_id
+      for (const act of activities.value) {
         if (!act.gh_activity_id) {
-          throw new Error('ID aktivitas tidak valid (gh_activity_id tidak ditemukan)')
+          throw new Error('ID aktivitas tidak valid');
         }
 
-        // Pastikan ada nama aktivitas
         if (!act.act_name || act.act_name.trim() === '') {
-          throw new Error('Nama aktivitas wajib diisi')
+          throw new Error('Nama aktivitas wajib diisi');
         }
 
-        console.log(`  - Updating gh_activity ID ${act.gh_activity_id}: "${act.act_name}"`)
-        console.log(`    Current status: ${act.status} → Target status: onReview`)
-        console.log(`    CoA: ${act.CoA}, Manpower: ${act.manpower}`)
+        console.log(`  - Processing activity ${act.gh_activity_id}: "${act.act_name}"`);
 
-        // ✅ STEP 1: DELETE existing activity (akan cascade delete materials juga jika ada FK constraint)
-        console.log(`  🗑️ Deleting existing activity ${act.gh_activity_id} and its materials...`)
-        
-        // Delete materials first
+        // DELETE old materials
         const { error: deleteMatErr } = await supabase
           .from('gh_material_used')
           .delete()
-          .eq('activity_id', act.gh_activity_id)
+          .eq('activity_id', act.gh_activity_id);
         
         if (deleteMatErr) {
-          console.error('❌ Error deleting old materials:', deleteMatErr)
-          throw new Error(`Gagal hapus material lama: ${deleteMatErr.message}`)
+          console.error('❌ Error deleting old materials:', deleteMatErr);
+          throw new Error(`Gagal hapus material lama: ${deleteMatErr.message}`);
         }
-        console.log(`  ✅ Old materials deleted`)
 
-        // Delete the activity itself
+        // DELETE old activity
         const { error: deleteActErr } = await supabase
           .from('gh_activity')
           .delete()
-          .eq('activity_id', act.gh_activity_id)
+          .eq('activity_id', act.gh_activity_id);
         
         if (deleteActErr) {
-          console.error('❌ Error deleting old activity:', deleteActErr)
-          throw new Error(`Gagal hapus aktivitas lama: ${deleteActErr.message}`)
+          console.error('❌ Error deleting old activity:', deleteActErr);
+          throw new Error(`Gagal hapus aktivitas lama: ${deleteActErr.message}`);
         }
-        console.log(`  ✅ Old activity deleted`)
 
-        // ✅ STEP 2: INSERT new activity with status onReview
-        console.log(`  📝 Inserting new activity with status onReview...`)
+        // INSERT new activity
         const { data: newActivity, error: insertActErr } = await supabase
           .from('gh_activity')
           .insert({
             report_id: report_id.value,
             act_name: act.act_name,
             CoA: act.CoA ? parseFloat(act.CoA) : null,
-            manpower: parseInt(act.manpower) || 0,
-            status: 'onReview',  // ✅ New activity with onReview status
-            revision_notes: null,
-            revision_requested_by: null,
-            revision_requested_at: null,
-            approved_by: null,
-            approved_at: null
+            manpower: parseInt(act.manpower) || 0
           })
           .select()
-          .single()
+          .single();
         
         if (insertActErr) {
-          console.error('❌ Error inserting new activity:', insertActErr)
-          throw new Error(`Gagal insert aktivitas baru "${act.act_name}": ${insertActErr.message}`)
+          console.error('❌ Error inserting new activity:', insertActErr);
+          throw new Error(`Gagal insert aktivitas: ${insertActErr.message}`);
         }
 
-        console.log(`  ✅ New activity inserted:`, newActivity)
-        const newActivityId = newActivity.activity_id
+        const newActivityId = newActivity.activity_id;
+        console.log(`  ✅ New activity inserted with ID: ${newActivityId}`);
 
-        if (!newActivityId) {
-          console.error('❌ CRITICAL: newActivityId is null/undefined!')
-          throw new Error('Failed to get activity_id after insert')
-        }
-        
-        console.log(`  ✅ Confirmed newActivityId: ${newActivityId}`)
+        // INSERT new materials (dengan price dari Openbravo)
+        if (act.materials && act.materials.length > 0) {
+          const validMaterials = act.materials.filter(mat => 
+            mat.material_name && mat.qty && parseFloat(mat.qty) > 0
+          );
 
-        // ✅ STEP 3: INSERT MATERIALS WITH PRICE FROM OPENBRAVO
-        console.log(`  📦 Processing materials for activity ${newActivityId}`)
-
-        if (!act.materials || act.materials.length === 0) {
-          console.log(`  ℹ️ No materials array`)
-        } else {
-          console.log(`  Total materials in array: ${act.materials.length}`)
-          console.log(`  Materials data:`, JSON.stringify(act.materials, null, 2))
-          
-          // ✅ FILTER valid materials
-          const validMaterials = act.materials.filter(mat => {
-            const isValid = mat.material_name && mat.qty && parseFloat(mat.qty) > 0
-            console.log(`  Material: ${mat.material_name}, Qty: ${mat.qty}, Valid: ${isValid}`)
-            return isValid
-          })
-
-          console.log(`  Valid materials: ${validMaterials.length}/${act.materials.length}`)
-          
           if (validMaterials.length > 0) {
-            console.log(`  💰 Fetching prices from Openbravo for ${validMaterials.length} materials...`)
-            
-            // ✅ FETCH PRICE untuk setiap material dari Openbravo
             const materialPayloads = await Promise.all(
               validMaterials.map(async (mat) => {
                 const qty = parseFloat(mat.qty);
-                
-                // Ambil harga dari Openbravo berdasarkan material_name
-                console.log(`  🔍 Fetching price for: ${mat.material_name}`)
                 const unitPrice = await getMaterialPrice(mat.material_name);
                 const totalPrice = qty * unitPrice;
 
-                const payload = {
+                return {
                   activity_id: newActivityId,
                   material_name: mat.material_name,
                   qty: qty,
@@ -673,116 +584,123 @@ const handleSubmit = async () => {
                   unit_price: unitPrice,
                   total_price: totalPrice
                 };
-                
-                console.log(`  💵 Material payload:`, {
-                  material_name: payload.material_name,
-                  qty: payload.qty,
-                  uom: payload.uom,
-                  unit_price: payload.unit_price,
-                  total_price: payload.total_price
-                });
-                
-                return payload;
               })
             );
-
-            console.log(`  📦 INSERTING ${materialPayloads.length} materials WITH PRICES:`)
-            console.log(JSON.stringify(materialPayloads, null, 2))
 
             const { data: matData, error: matErr } = await supabase
               .from('gh_material_used')
               .insert(materialPayloads)
-              .select()
+              .select();
 
             if (matErr) {
-              console.error(`  ❌ INSERT ERROR:`, matErr)
-              console.error(`  Failed payloads:`, materialPayloads)
-              throw new Error(`Gagal insert material: ${matErr.message}`)
+              console.error('❌ Error inserting materials:', matErr);
+              throw new Error(`Gagal insert material: ${matErr.message}`);
             }
 
-            console.log(`  ✅ SUCCESS! Inserted ${matData.length} materials WITH PRICES`)
-            matData.forEach((m, idx) => {
-              console.log(`    [${idx}] Material: ${m.material_name}`)
-              console.log(`         Qty: ${m.qty} ${m.uom}`)
-              console.log(`         Unit Price: Rp ${new Intl.NumberFormat('id-ID').format(m.unit_price || 0)}`)
-              console.log(`         Total Price: Rp ${new Intl.NumberFormat('id-ID').format(m.total_price || 0)}`)
-            })
-          } else {
-            console.log(`  ⚠️ No valid materials (all filtered out)`)
+            console.log(`  ✅ Inserted ${matData.length} materials`);
           }
         }
       }
-      console.log(`✅ Successfully processed ${editableActivities.length} activities`)
-    } else {
-      console.log('ℹ️ No activities need updating')
+      
+      console.log(`✅ Successfully processed ${activities.value.length} activities`);
     }
 
+    // ===================================
+    // 3. UPDATE REPORT STATUS & RESET APPROVAL
+    // ===================================
+    console.log('🔄 Updating report status to onReview...');
     
-
-    // ✅ CHECK IF ALL ITEMS ARE NOW APPROVED OR ONREVIEW
-    console.log('🔍 Verifying final status from database...')
-    
-    const { data: currentTypeDamages } = await supabase
-      .from('gh_type_damage')
-      .select('typedamage_id, status')
-      .eq('report_id', report_id.value)
-
-    const { data: currentActivities } = await supabase
-      .from('gh_activity')
-      .select('activity_id, act_name, status')
-      .eq('report_id', report_id.value)
-
-    console.log('📋 Current Type Damages in DB:', currentTypeDamages)
-    console.log('📋 Current Activities in DB:', currentActivities)
-
-    const stillHasRevision = 
-      (currentTypeDamages && currentTypeDamages.some(td => td.status === 'needRevision')) ||
-      (currentActivities && currentActivities.some(act => act.status === 'needRevision'))
-    
-    const newReportStatus = stillHasRevision ? 'needRevision' : 'onReview'
-    
-    console.log(`📊 Status check:`)
-    console.log(`  - Type damages with needRevision: ${currentTypeDamages?.filter(td => td.status === 'needRevision').length || 0}`)
-    console.log(`  - Activities with needRevision: ${currentActivities?.filter(act => act.status === 'needRevision').length || 0}`)
-    console.log(`  - Still has revision: ${stillHasRevision}`)
-    console.log(`  - New report status: ${newReportStatus}`)
-    
-    // ✅ UPDATE REPORT STATUS
-    console.log(`🔄 Updating report ${report_id.value} status to: ${newReportStatus}`)
-    
-    const { data: updatedReport, error: updateReportErr } = await supabase
+    const { error: updateReportErr } = await supabase
       .from('gh_report')
       .update({
-        report_status: newReportStatus,
+        report_status: 'onReview',
         updated_at: now
       })
-      .eq('report_id', report_id.value)
-      .select()
-    
+      .eq('report_id', report_id.value);
+
     if (updateReportErr) {
-      console.error('❌ Error updating report:', updateReportErr)
-      throw new Error(`Gagal update status report: ${updateReportErr.message}`)
+      console.error('❌ Error updating report:', updateReportErr);
+      throw updateReportErr;
     }
 
-    console.log(`✅ Report status updated:`, updatedReport)
-    console.log(`✅ Final report status: ${newReportStatus}`)
+    // ===================================
+    // 4. RESET APPROVAL RECORD
+    // ===================================
+    if (currentReport.value.approval_record_id) {
+      console.log('🔄 Resetting approval to level 1...');
+      
+      // 4.1 Reset current_level_order ke 1
+      const { error: recordErr } = await supabase
+        .from('gh_approve_record')
+        .update({
+          current_level_order: 1,
+          overall_status: 'onReview',
+          updated_at: now
+        })
+        .eq('record_id', currentReport.value.approval_record_id);
 
-    alert('✅ Laporan berhasil diperbarui dan dikirim untuk review ulang!')
-    
-    // ✅ Force redirect dengan replace untuk mencegah back
-    console.log('🔄 Success - Redirecting to /planningReportList')
-    setTimeout(() => {
-      router.replace('/planningReportList')  // ✅ Use replace instead of push
-    }, 100)
+      if (recordErr) {
+        console.error('❌ Error updating approve_record:', recordErr);
+        throw recordErr;
+      }
+
+      // 4.2 Reset all level status to pending
+      const { error: resetErr } = await supabase
+        .from('gh_approval_level_status')
+        .update({
+          status: 'pending',
+          approved_by: null,
+          approved_at: null,
+          revision_notes: null,
+          revision_requested_by: null,
+          revision_requested_at: null,
+          updated_at: now
+        })
+        .eq('record_id', currentReport.value.approval_record_id);
+
+      if (resetErr) {
+        console.error('❌ Error resetting level status:', resetErr);
+        throw resetErr;
+      }
+
+      // 4.3 Insert history: revision completed
+      const { data: flowData } = await supabase
+        .from('gh_approve_record')
+        .select('flow_id')
+        .eq('record_id', currentReport.value.approval_record_id)
+        .single();
+
+      const { error: historyErr } = await supabase
+        .from('gh_approval_history')
+        .insert({
+          record_id: currentReport.value.approval_record_id,
+          flow_id: flowData.flow_id,
+          user_id: authStore.user.user_id,
+          level_order: 0,
+          level_name: 'Staff',
+          action: 'submitted',
+          comment: `Report revised and resubmitted by ${username}`
+        });
+
+      if (historyErr) {
+        console.error('❌ Error inserting history:', historyErr);
+        // Non-blocking error
+      }
+      
+      console.log('✅ Approval reset to level 1');
+    }
+
+    alert('✅ Laporan berhasil diperbarui dan dikirim untuk review ulang!');
+    router.replace('/planningReportList');
     
   } catch (err) {
-    console.error('❌ Error saving:', err)
-    error.value = err.message
-    alert('❌ Gagal menyimpan: ' + err.message)
+    console.error('❌ Error saving:', err);
+    error.value = err.message;
+    alert('❌ Gagal menyimpan: ' + err.message);
   } finally {
-    saving.value = false
+    saving.value = false;
   }
-}
+};
 
 const handleCancel = () => {
   if (confirm('❓ Batalkan perubahan?\n\nData yang belum disimpan akan hilang.')) {
@@ -818,11 +736,26 @@ const filteredMaterials = computed(() => {
   })))
   return materials
 })
+
+// ✅ HAPUS: Reset approval setelah edit berhasil (sekitar line 850)
+// if (currentReport.value.approval_record_id) {
+//   console.log('🔄 Resetting approval to level 1...');
+  
+//   const { error: resetErr } = await supabase.rpc('reset_approval_after_revision', {
+//     p_record_id: currentReport.value.approval_record_id
+//   });
+
+//   if (resetErr) {
+//     console.error('❌ Error resetting approval:', resetErr);
+//   } else {
+//     console.log('✅ Approval reset to level 1');
+//   }
+// }
+
 </script>
 
 <template>
   <div class="min-h-screen bg-gradient-to-br from-gray-50 to-white">
-    <!-- Header Bar -->
     <div class="bg-white border-b border-gray-200 shadow-sm sticky top-0 z-40">
       <div class="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-5">
         <div class="flex items-center gap-4">
@@ -847,10 +780,8 @@ const filteredMaterials = computed(() => {
       </div>
     </div>
 
-    <!-- Main Content -->
     <div class="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
       
-      <!-- Loading State -->
       <div v-if="loading" class="flex items-center justify-center py-20">
         <div class="text-center">
           <div class="inline-block w-12 h-12 border-4 border-[#0071f3] border-t-transparent rounded-full animate-spin"></div>
@@ -858,7 +789,6 @@ const filteredMaterials = computed(() => {
         </div>
       </div>
 
-      <!-- Error State -->
       <div v-else-if="error && !saving" class="bg-red-50 border-2 border-red-200 rounded-2xl p-6 mb-6">
         <div class="flex items-center gap-3">
           <span class="text-3xl">❌</span>
@@ -869,10 +799,8 @@ const filteredMaterials = computed(() => {
         </div>
       </div>
 
-      <!-- Content -->
       <template v-else-if="!loading">
         
-        <!-- Revision Notices -->
         <div v-if="revisionNotes.length > 0" class="mb-6 space-y-3">
           <div
             v-for="(note, idx) in revisionNotes"
@@ -899,39 +827,38 @@ const filteredMaterials = computed(() => {
           </div>
         </div>
 
-        <!-- Form -->
         <form @submit.prevent="handleSubmit" class="space-y-6">
           
-          <!-- Basic Information (Read Only) -->
           <div class="bg-white rounded-2xl border-2 border-gray-100 shadow-sm p-6">
             <h2 class="text-lg font-bold text-gray-900 mb-4 flex items-center gap-2">
               <span class="text-xl">📋</span>
               Informasi Dasar (Read Only)
             </h2>
             
-            <div class="grid grid-cols-1 md:grid-cols-3 gap-5">
+            <div class="grid grid-cols-1 md:grid-cols-4 gap-5">
               <div>
-                <label class="block text-sm font-semibold text-gray-700 mb-2">
-                  Lokasi
-                </label>
+                <label class="block text-sm font-semibold text-gray-700 mb-2">Lokasi</label>
                 <div class="px-4 py-3 border-2 border-gray-200 rounded-lg bg-gray-50 text-gray-700 font-medium">
                   {{ getLocationName(form.location_id) }}
                 </div>
               </div>
 
               <div>
-                <label class="block text-sm font-semibold text-gray-700 mb-2">
-                  Batch
-                </label>
+                <label class="block text-sm font-semibold text-gray-700 mb-2">Batch</label>
                 <div class="px-4 py-3 border-2 border-gray-200 rounded-lg bg-gray-50 text-gray-700 font-medium">
                   {{ getBatchName(form.batch_id) }}
                 </div>
               </div>
 
               <div>
-                <label class="block text-sm font-semibold text-gray-700 mb-2">
-                  Tanggal
-                </label>
+                <label class="block text-sm font-semibold text-gray-700 mb-2">Phase</label>
+                <div class="px-4 py-3 border-2 border-gray-200 rounded-lg bg-gray-50 text-gray-700 font-medium">
+                  {{ phaseInfo || '-' }}
+                </div>
+              </div>
+
+              <div>
+                <label class="block text-sm font-semibold text-gray-700 mb-2">Tanggal</label>
                 <div class="px-4 py-3 border-2 border-gray-200 rounded-lg bg-gray-50 text-gray-700 font-medium">
                   {{ form.report_date }}
                 </div>
@@ -939,7 +866,6 @@ const filteredMaterials = computed(() => {
             </div>
           </div>
 
-          <!-- Type Damages Section -->
           <div v-if="typeDamages.length > 0" class="bg-white rounded-2xl border-2 border-gray-100 shadow-sm p-6">
             <h2 class="text-lg font-bold text-gray-900 mb-4 flex items-center gap-2">
               <span class="text-xl">🌾</span>
@@ -955,7 +881,6 @@ const filteredMaterials = computed(() => {
                   td.editable ? 'bg-red-50 border-red-200' : 'bg-gray-50 border-gray-200'
                 ]"
               >
-                <!-- Status Badge -->
                 <div class="flex items-center justify-between mb-3">
                   <span class="text-sm font-bold text-gray-600">Kerusakan #{{ index + 1 }}</span>
                   <span 
@@ -972,13 +897,11 @@ const filteredMaterials = computed(() => {
                   </span>
                 </div>
 
-                <!-- Revision Note (if any) -->
                 <div v-if="td.revision_notes && td.editable" class="mb-4 bg-red-100 border-2 border-red-300 rounded-lg p-3">
                   <p class="text-xs text-red-600 font-semibold mb-1">📝 Catatan Revisi:</p>
                   <p class="text-sm text-red-900">{{ td.revision_notes }}</p>
                 </div>
 
-                <!-- Approved Info (if approved) -->
                 <div v-if="td.status === 'approved' && td.approved_at" class="mb-4 bg-green-50 border-2 border-green-200 rounded-lg p-3">
                   <p class="text-xs text-green-600 font-semibold mb-1">✅ Sudah Disetujui</p>
                   <p class="text-sm text-green-900">By: {{ td.approved_by }} • {{ formatDateTime(td.approved_at) }}</p>
@@ -1065,7 +988,6 @@ const filteredMaterials = computed(() => {
             </div>
           </div>
 
-          <!-- Activities Section -->
           <div v-if="activities.length > 0" class="space-y-6">
             <div class="bg-white rounded-2xl border-2 border-gray-100 shadow-sm p-6">
               <h2 class="text-lg font-bold text-gray-900 mb-1 flex items-center gap-2">
@@ -1083,7 +1005,6 @@ const filteredMaterials = computed(() => {
                 activity.editable ? 'bg-white border-red-200' : 'bg-gray-50 border-gray-200'
               ]"
             >
-              <!-- Status Badge -->
               <div class="flex items-center justify-between mb-4">
                 <div class="flex items-center gap-3">
                   <div class="w-10 h-10 bg-gradient-to-br from-[#0071f3] to-[#8FABD4] rounded-lg flex items-center justify-center text-white font-bold">
@@ -1107,19 +1028,16 @@ const filteredMaterials = computed(() => {
                 </span>
               </div>
 
-              <!-- Revision Note (if any) -->
               <div v-if="activity.revision_notes && activity.editable" class="mb-4 bg-red-50 border-2 border-red-300 rounded-lg p-3">
                 <p class="text-xs text-red-600 font-semibold mb-1">📝 Catatan Revisi:</p>
                 <p class="text-sm text-red-900">{{ activity.revision_notes }}</p>
               </div>
 
-              <!-- Approved Info (if approved) -->
               <div v-if="activity.status === 'approved' && activity.approved_at" class="mb-4 bg-green-50 border-2 border-green-200 rounded-lg p-3">
                 <p class="text-xs text-green-600 font-semibold mb-1">✅ Sudah Disetujui</p>
                 <p class="text-sm text-green-900">By: {{ activity.approved_by }} • {{ formatDateTime(activity.approved_at) }}</p>
               </div>
 
-              <!-- Activity & CoA -->
               <div class="grid grid-cols-1 md:grid-cols-2 gap-5 mb-6">
                 <div>
                   <label class="block text-sm font-semibold text-gray-700 mb-2">
@@ -1161,7 +1079,6 @@ const filteredMaterials = computed(() => {
                 </div>
               </div>
 
-              <!-- Materials -->
               <div class="mb-6 bg-gray-50 rounded-xl p-5">
                 <h4 class="text-base font-bold text-gray-900 flex items-center gap-2 mb-4">
                   <span class="text-lg">📦</span>
@@ -1187,7 +1104,6 @@ const filteredMaterials = computed(() => {
                             : 'border-gray-200 bg-gray-100 cursor-not-allowed text-gray-600'
                         ]"
                       >
-                        <!-- Show current selection if exists -->
                         <option 
                           v-if="!material.material_id" 
                           :value="null" 
@@ -1195,7 +1111,6 @@ const filteredMaterials = computed(() => {
                         >
                           {{ material.material_name || 'Pilih Material' }}
                         </option>
-                        <!-- List all available materials -->
                         <option
                           v-for="mat in filteredMaterials"
                           :key="mat.material_id"
@@ -1264,7 +1179,6 @@ const filteredMaterials = computed(() => {
                 </button>
               </div>
 
-              <!-- Manpower -->
               <div class="bg-gray-50 rounded-xl p-5">
                 <h4 class="text-base font-bold text-gray-900 flex items-center gap-2 mb-4">
                   <span class="text-lg">👷</span>
@@ -1293,7 +1207,6 @@ const filteredMaterials = computed(() => {
             </div>
           </div>
 
-          <!-- No Revision Items -->
           <div v-if="typeDamages.length === 0 && activities.length === 0" class="bg-blue-50 border-2 border-blue-200 rounded-2xl p-6">
             <div class="flex items-center gap-3">
               <span class="text-3xl">ℹ️</span>
@@ -1304,7 +1217,6 @@ const filteredMaterials = computed(() => {
             </div>
           </div>
 
-          <!-- Action Buttons -->
           <div class="flex flex-col sm:flex-row gap-4" v-if="typeDamages.some(td => td.editable) || activities.some(act => act.editable)">
             <button
               type="button"
@@ -1327,7 +1239,6 @@ const filteredMaterials = computed(() => {
             </button>
           </div>
 
-          <!-- Info if no editable items -->
           <div v-else class="bg-yellow-50 border-2 border-yellow-200 rounded-2xl p-6">
             <div class="flex items-center gap-3">
               <span class="text-3xl">⚠️</span>
@@ -1346,7 +1257,6 @@ const filteredMaterials = computed(() => {
           </div>
         </form>
 
-        <!-- Info Box -->
         <div class="bg-blue-50 border-2 border-blue-200 rounded-2xl p-5 mt-6">
           <div class="flex items-start gap-3">
             <span class="text-2xl">💡</span>
@@ -1365,7 +1275,6 @@ const filteredMaterials = computed(() => {
 
       </template>
 
-      <!-- Footer -->
       <footer class="text-center py-10 mt-8 border-t border-gray-200">
         <div class="flex items-center justify-center gap-2 mb-2">
           <span class="text-2xl">🌱</span>

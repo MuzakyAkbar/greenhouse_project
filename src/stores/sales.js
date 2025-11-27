@@ -11,23 +11,23 @@ export const useSalesStore = defineStore('sales', () => {
   async function fetchAll(batch_id = null) {
     loading.value = true
     error.value = null
-    // ✅ FIXED: Hapus 'public.'
     let q = supabase.from('gh_sales').select('*')
     if (batch_id) q = q.eq('batch_id', batch_id)
+
     const { data, error: err } = await q.order('sales_id', { ascending: false })
     if (err) error.value = err
     else sales.value = data || []
+
     loading.value = false
     return { data, error: err }
   }
 
   async function fetchById(id) {
-    const { data, error: err } = await supabase
+    return await supabase
       .from('gh_sales')
       .select('*')
       .eq('sales_id', id)
       .single()
-    return { data, error: err }
   }
 
   async function create(payload) {
@@ -35,6 +35,7 @@ export const useSalesStore = defineStore('sales', () => {
       .from('gh_sales')
       .insert([payload])
       .select()
+
     if (!err) await fetchAll(payload.batch_id)
     return { data, error: err }
   }
@@ -45,6 +46,7 @@ export const useSalesStore = defineStore('sales', () => {
       .update(payload)
       .eq('sales_id', id)
       .select()
+
     if (!err) await fetchAll(payload.batch_id)
     return { data, error: err }
   }
@@ -54,9 +56,34 @@ export const useSalesStore = defineStore('sales', () => {
       .from('gh_sales')
       .delete()
       .eq('sales_id', id)
+
     if (!err) await fetchAll()
     return { data, error: err }
   }
 
-  return { sales, loading, error, fetchAll, fetchById, create, update, remove }
+  // 🎯 FUNCTION PENTING — WAJIB ADA!
+  async function updateStatus(batch_id, location_id, date, status) {
+  const { error: err } = await supabase
+    .from('gh_sales')
+    .update({ status })
+    .eq('batch_id', batch_id)
+    .eq('location_id', location_id)
+    .eq('date', date)
+
+  if (err) throw err
+
+  await fetchAll()
+}
+
+  return {
+    sales,
+    loading,
+    error,
+    fetchAll,
+    fetchById,
+    create,
+    update,
+    remove,
+    updateStatus   // <-- WAJIB DIRETURN
+  }
 })

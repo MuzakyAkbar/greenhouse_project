@@ -51,7 +51,7 @@ onMounted(async () => {
       .from('gh_report')
       .select(`
         report_id,
-        phase,
+        phase_id,,
         report_date,
         report_status,
         created_at,

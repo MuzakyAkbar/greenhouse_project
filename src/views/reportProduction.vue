@@ -1,5 +1,5 @@
 <script setup>
-import { ref, onMounted, computed } from "vue"; 
+import { ref, onMounted, computed, watch } from "vue";
 import { useProductionStore } from "@/stores/production.js";
 import { useSalesStore } from "@/stores/sales.js";
 import { supabase } from "@/lib/supabase.js";
@@ -7,178 +7,261 @@ import { supabase } from "@/lib/supabase.js";
 const productionStore = useProductionStore();
 const salesStore = useSalesStore();
 
-// state
+/* -----------------------------------------------------
+   STATE
+----------------------------------------------------- */
 const locations = ref([]);
 const batches = ref([]);
 const message = ref("");
 
-// ambil semua lokasi
-const fetchLocations = async () => {
+const report = ref({
+  location: null,
+  batch: null,
+  date: "",
+});
+
+/* -----------------------------------------------------
+   DINAMIS CATEGORY DARI PHASE
+----------------------------------------------------- */
+const productionCategories = ref([]);   // <-- sudah dinamis
+
+async function fetchCategoriesByBatch(batchId) {
+  if (!batchId) {
+    productionCategories.value = [];
+    return;
+  }
+
+  try {
+    const { data, error } = await supabase
+      .from("gh_batch_phase")
+      .select(`
+        phase_id,
+        gh_phase ( phase_name )
+      `)
+      .eq("batch_id", batchId);
+
+    if (error) throw error;
+
+    // Ambil category sesuai phase_name
+    productionCategories.value = data.map(p => p.gh_phase?.phase_name);
+    console.log("📌 CATEGORY LOADED:", productionCategories.value);
+  } catch (err) {
+    console.error("❌ Error Fetch Category:", err);
+    productionCategories.value = [];
+  }
+}
+
+// Watch batch → load category
+watch(() => report.value.batch, async (batchId) => {
+  await fetchCategoriesByBatch(batchId);
+});
+
+/* -----------------------------------------------------
+   LIMIT G0
+----------------------------------------------------- */
+const g0TotalProduction = ref(0);
+const g0TotalSales = ref(0);
+const g0MaxSales = ref(0);
+
+/* -----------------------------------------------------
+   LIST DATA
+----------------------------------------------------- */
+const productionList = ref([{ category: "", owner: "", quantity: 0 }]);
+const salesList = ref([{ category: "", quantity: 0, unit: "", price: 0 }]);
+
+const isSubmitting = ref(false);
+
+/* -----------------------------------------------------
+   FETCH BASIC DATA
+----------------------------------------------------- */
+async function fetchLocations() {
   try {
     const { data, error } = await supabase
       .from("gh_location")
       .select("location_id, location")
-      .order("location_id", { ascending: true });
+      .order("location_id");
 
     if (error) throw error;
     locations.value = data;
-    console.log("✅ Lokasi dimuat:", data);
   } catch (err) {
-    console.error("❌ Error ambil lokasi:", err);
+    console.error("❌ Error lokasi:", err);
   }
-};
+}
 
-// ambil semua batch
-const fetchBatches = async () => {
+async function fetchBatches() {
   try {
     const { data, error } = await supabase
       .from("gh_batch")
-      .select("batch_id, batch_name, location_id, tanggal_mulai, tanggal_selesai")
-      .order("batch_id", { ascending: true });
+      .select("batch_id, batch_name, location_id")
+      .order("batch_id");
 
     if (error) throw error;
     batches.value = data;
-    console.log("✅ Batch dimuat:", data);
   } catch (err) {
-    console.error("❌ Error ambil batch:", err);
+    console.error("❌ Error batch:", err);
   }
-};
+}
 
-// Jalankan fungsi ambil data saat komponen dimuat
 onMounted(async () => {
   await Promise.all([fetchLocations(), fetchBatches()]);
 });
 
-// data laporan
-const report = ref({
-  location: null,
-  batch: null,
-  date: ""
-});
-
-// computed untuk batch sesuai lokasi yang dipilih
+/* -----------------------------------------------------
+   FILTER BATCH BERDASARKAN LOCATION
+----------------------------------------------------- */
 const filteredBatches = computed(() => {
   if (!report.value.location) return [];
   return batches.value.filter(
-    (batch) => Number(batch.location_id) === Number(report.value.location)
+    (b) => Number(b.location_id) === Number(report.value.location)
   );
 });
 
-const productionCategories = ["Planlet", "G0", "G1", "G2"];
+/* -----------------------------------------------------
+   G0 LIMIT
+----------------------------------------------------- */
+async function loadG0Limits(batchId, locationId) {
+  if (!batchId || !locationId) return;
 
-const productionList = ref([{ category: "Planlet", owner: "", quantity: 0 }]);
-const salesList = ref([{ category: "Planlet", quantity: 0, unit: "", price: 0 }]);
+  try {
+    const { data: prodData } = await supabase
+      .from("gh_production")
+      .select("qty")
+      .eq("category", "G0")
+      .eq("batch_id", batchId)
+      .eq("location_id", locationId);
 
-const isSubmitting = ref(false);
+    g0TotalProduction.value = prodData?.reduce((s, x) => s + x.qty, 0) || 0;
 
+    const { data: salesData } = await supabase
+      .from("gh_sales")
+      .select("qty")
+      .eq("category", "G0")
+      .eq("batch_id", batchId)
+      .eq("location_id", locationId);
+
+    g0TotalSales.value = salesData?.reduce((s, x) => s + x.qty, 0) || 0;
+
+    const sisa = g0TotalProduction.value - g0TotalSales.value;
+    g0MaxSales.value = Math.floor(sisa * 0.9);
+  } catch (err) {
+    console.error("❌ Error G0 limit:", err);
+  }
+}
+
+watch(
+  () => [report.value.batch, report.value.location],
+  async ([batch, location]) => {
+    if (batch && location) await loadG0Limits(batch, location);
+  }
+);
+
+/* -----------------------------------------------------
+   VALIDASI SAAT INPUT G0
+----------------------------------------------------- */
+function validateG0Sale(index) {
+  const sale = salesList.value[index];
+  if (sale.category !== "G0") return;
+
+  if (sale.quantity > g0MaxSales.value) {
+    alert(`❌ Maksimal penjualan G0 hanya ${g0MaxSales.value}`);
+    sale.quantity = g0MaxSales.value;
+  }
+}
+
+/* -----------------------------------------------------
+   ADD / REMOVE ITEMS
+----------------------------------------------------- */
 function addProduction() {
   productionList.value.push({ category: "", owner: "", quantity: 0 });
 }
-
-function removeProduction(index) {
-  if (productionList.value.length > 1) {
-    productionList.value.splice(index, 1);
-  }
+function removeProduction(i) {
+  if (productionList.value.length > 1) productionList.value.splice(i, 1);
 }
 
 function addSale() {
   salesList.value.push({ category: "", quantity: 0, unit: "", price: 0 });
 }
-
-function removeSale(index) {
-  if (salesList.value.length > 1) {
-    salesList.value.splice(index, 1);
-  }
+function removeSale(i) {
+  if (salesList.value.length > 1) salesList.value.splice(i, 1);
 }
 
+/* -----------------------------------------------------
+   SUBMIT LAPORAN
+----------------------------------------------------- */
 async function submitReport() {
+  if (isSubmitting.value) return;
+
   if (!report.value.date || !report.value.location || !report.value.batch) {
-    alert("⚠️ Harap isi tanggal, lokasi, dan batch terlebih dahulu!");
-    return;
+    return alert("⚠️ Lengkapi semua data laporan!");
   }
 
-  // cari batch yang sesuai
-  const selectedBatch = batches.value.find(
-    (b) => Number(b.batch_id) === Number(report.value.batch)
-  );
-
-  if (!selectedBatch) {
-    alert("⚠️ Batch tidak ditemukan!");
-    console.error("selectedBatch undefined:", report.value);
-    return;
-  }
-
-  const locationId = selectedBatch.location_id;
-  const batchId = selectedBatch.batch_id;
-
-  console.log("✅ Lokasi ditemukan:", locationId);
-  console.log("✅ Batch ditemukan:", batchId);
+  const batchId = report.value.batch;
+  const locationId = report.value.location;
 
   isSubmitting.value = true;
 
   try {
-    // SIMPAN DATA PRODUKSI
-    for (let item of productionList.value) {
-      if (!item.category || !item.owner || item.quantity <= 0) continue;
-
-      const payload = {
-        location_id: locationId,
+    const prodPayload = productionList.value
+      .filter((x) => x.category && x.owner && x.quantity > 0)
+      .map((x) => ({
         batch_id: batchId,
-        category: item.category,
-        owner: item.owner,
-        qty: parseInt(item.quantity),
+        location_id: locationId,
+        category: x.category,
+        owner: x.owner,
+        qty: x.quantity,
         date: report.value.date,
-      };
+        status: "Waiting",
+      }));
 
-      console.log("📦 Menyimpan produksi:", payload);
-
-      const { error } = await supabase
-        .from("gh_production")
-        .insert([payload]);
-
-      if (error) throw error;
+    if (prodPayload.length > 0) {
+      await supabase.from("gh_production").insert(prodPayload);
     }
 
-    // SIMPAN DATA PENJUALAN
-    for (let sale of salesList.value) {
-      if (!sale.category || !sale.unit || sale.quantity <= 0 || sale.price <= 0) continue;
-
-      const payload = {
-        location_id: locationId,
+    const salesPayload = salesList.value
+      .filter((x) => x.category && x.unit && x.quantity > 0 && x.price > 0)
+      .map((x) => ({
         batch_id: batchId,
-        category: sale.category,
-        qty: parseInt(sale.quantity),
-        material_id: null,
-        price: parseFloat(sale.price),
+        location_id: locationId,
+        category: x.category,
+        qty: x.quantity,
+        price: x.price,
         date: report.value.date,
-      };
+        status: "Waiting",
+      }));
 
-      console.log("💰 Menyimpan penjualan:", payload);
-
-      const { error } = await supabase
-        .from("gh_sales")
-        .insert([payload]);
-
-      if (error) throw error;
+    // VALIDASI G0
+    for (const sale of salesPayload) {
+      if (sale.category === "G0" && sale.qty > g0MaxSales.value) {
+        alert(
+          `❌ Penjualan G0 melewati batas! Max: ${g0MaxSales.value}, Input: ${sale.qty}`
+        );
+        isSubmitting.value = false;
+        return;
+      }
     }
 
-    alert("✅ Laporan berhasil disimpan ke database!");
+    if (salesPayload.length > 0) {
+      await supabase.from("gh_sales").insert(salesPayload);
+    }
+
+    alert("✅ Data laporan berhasil disimpan!");
   } catch (err) {
-    console.error("❌ Error saat menyimpan:", err);
-    alert(`❌ Gagal menyimpan laporan: ${err.message}`);
+    console.error(err);
+    alert(`❌ Error: ${err.message}`);
   } finally {
     isSubmitting.value = false;
   }
 }
 
+/* -----------------------------------------------------
+   RESET FORM
+----------------------------------------------------- */
 function resetForm() {
   report.value = { date: "", location: null, batch: null };
   productionList.value = [{ category: "", owner: "", quantity: 0 }];
   salesList.value = [{ category: "", quantity: 0, unit: "", price: 0 }];
-  message.value = "";
 }
 </script>
-
 
 <template>
   <div class="min-h-screen bg-gradient-to-br from-gray-50 to-white">
@@ -479,6 +562,7 @@ function resetForm() {
                   <input
                     type="number"
                     v-model.number="sale.quantity"
+                    @input="validateG0Sale(index)"
                     min="0"
                     placeholder="0"
                     class="px-4 py-2.5 rounded-lg border-2 border-gray-200 bg-white text-gray-800 focus:outline-none focus:ring-2 focus:ring-gray-700 focus:border-transparent transition-all"

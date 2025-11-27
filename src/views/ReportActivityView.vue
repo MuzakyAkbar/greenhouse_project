@@ -1,3 +1,4 @@
+// ReportActivityView.vue
 <script setup>
 import html2pdf from 'html2pdf.js'
 import { ref, onMounted } from 'vue'
@@ -21,6 +22,27 @@ const error = ref(null)
 const currentReport = ref(null)
 
 
+// ✅ ADD state
+const phaseInfo = ref(null);
+
+// ✅ ADD function
+const loadPhaseInfo = async (phaseId) => {
+  if (!phaseId) return null;
+  
+  try {
+    const { data, error } = await supabase
+      .from('gh_phase')
+      .select('phase_name')
+      .eq('phase_id', phaseId)
+      .single();
+    
+    if (error) throw error;
+    return data?.phase_name || 'Unknown Phase';
+  } catch (err) {
+    console.error('Error loading phase:', err);
+    return 'Unknown Phase';
+  }
+};
 
 onMounted(async () => {
   if (!authStore.isLoggedIn) {
@@ -39,12 +61,12 @@ onMounted(async () => {
 
 const loadData = async () => {
   try {
-    loading.value = true
+    loading.value = true;
     
     await Promise.all([
       batchStore.getBatches(),
       locationStore.fetchAll()
-    ])
+    ]);
 
     const { data: report, error: fetchError } = await supabase
       .from('gh_report')
@@ -58,24 +80,41 @@ const loadData = async () => {
       `)
       .eq('report_id', report_id.value)
       .eq('report_status', 'approved')
-      .single()
+      .single();
     
-    if (fetchError) throw fetchError
+    if (fetchError) throw fetchError;
+    if (!report) throw new Error('Laporan tidak ditemukan atau belum disetujui');
 
-    if (!report) {
-      throw new Error('Laporan tidak ditemukan atau belum disetujui')
+    currentReport.value = report;
+    console.log('✅ Loaded approved report:', report);
+    
+    // ✅ Load phase name
+    if (report.phase_id) {
+      phaseInfo.value = await loadPhaseInfo(report.phase_id);
     }
-
-    currentReport.value = report
-    console.log('✅ Loaded approved report:', report)
+    
+    // Load approval history
+    if (report.approval_record_id) {
+      const { data: approvalHistory, error: historyErr } = await supabase
+        .from('vw_approval_progress')
+        .select('*')
+        .eq('record_id', report.approval_record_id)
+        .eq('level_status', 'approved')
+        .order('level_order', { ascending: true });
+      
+      if (!historyErr) {
+        currentReport.value.approval_history = approvalHistory || [];
+        console.log('✅ Approval history loaded:', approvalHistory);
+      }
+    }
     
   } catch (err) {
-    console.error('❌ Error loading data:', err)
-    error.value = err.message
-    alert('❌ Gagal memuat data: ' + err.message)
-    router.push(sourcePage.value)
+    console.error('❌ Error loading data:', err);
+    error.value = err.message;
+    alert('❌ Gagal memuat data: ' + err.message);
+    router.push(sourcePage.value);
   } finally {
-    loading.value = false
+    loading.value = false;
   }
 }
 
@@ -335,14 +374,14 @@ const printReport = async () => {
                 </div>
               </div>
 
-              <!-- ✅ Tambahkan kolom baru: Fase Tumbuhan -->
+              <!-- ✅ Phase -->
               <div class="flex flex-col">
                 <label class="text-sm font-semibold text-gray-700 mb-2 flex items-center gap-2">
                   <span class="text-lg">🌿</span>
                   Fase Tumbuhan
                 </label>
                 <div class="px-4 py-3 border-2 border-gray-200 rounded-xl bg-gray-50 text-gray-700 font-medium">
-                  {{ currentReport.phase || 'Belum ditentukan' }}
+                  {{ phaseInfo || 'Belum ditentukan' }}
                 </div>
               </div>
 

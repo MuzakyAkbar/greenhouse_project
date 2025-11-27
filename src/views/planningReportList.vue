@@ -1,3 +1,4 @@
+// planningReportList.vue
 <script setup>
 import { RouterLink, useRouter } from 'vue-router'
 import { useAuthStore } from '../stores/auth'
@@ -8,6 +9,8 @@ import { useLocationStore } from '../stores/location'
 import { useProductionStore } from '../stores/production'
 import { useSalesStore } from '../stores/sales'
 import { onMounted, ref, computed, watch } from 'vue'
+import { supabase } from '../lib/supabase'
+import openbravoApi from '../lib/openbravo'
 
 const authStore = useAuthStore()
 const activityReportStore = useActivityReportStore()
@@ -23,6 +26,28 @@ const filterDate = ref('')
 const filterDatePlanning = ref('')
 const filterDateProduction = ref('')
 const isRefreshing = ref(false)
+
+
+const getPhaseNames = async (reports) => {
+  const phaseIds = [...new Set(reports.map(r => r.phase_id).filter(Boolean))];
+  
+  if (phaseIds.length === 0) return {};
+  
+  const { data, error } = await supabase
+    .from('gh_phase')
+    .select('phase_id, phase_name')
+    .in('phase_id', phaseIds);
+  
+  if (error) {
+    console.error('Error loading phases:', error);
+    return {};
+  }
+  
+  return data.reduce((acc, p) => {
+    acc[p.phase_id] = p.phase_name;
+    return acc;
+  }, {});
+};
 
 // 🔁 Refresh semua data
 const refreshData = async () => {
@@ -48,6 +73,8 @@ const refreshData = async () => {
   }
 }
 
+
+
 // 🧭 Saat halaman pertama kali dibuka
 onMounted(async () => {
   if (!authStore.isLoggedIn) {
@@ -57,11 +84,10 @@ onMounted(async () => {
   await refreshData()
 })
 
-// 🔙 Refresh otomatis ketika kembali dari halaman lain
 watch(
-  () => router.currentRoute.value,
-  (newRoute, oldRoute) => {
-    if (newRoute.name === 'planningReportList') {
+  () => router.currentRoute.value.name,
+  (newName, oldName) => {
+    if (newName === 'planningReportList') {
       const fromPages = [
         'reportActivityReview',
         'reportActivityEdit',
@@ -70,14 +96,35 @@ watch(
         'planningActivityView',
         'reportProductionReview',
         'reportProductionView'
-      ]
-      if (oldRoute && fromPages.includes(oldRoute.name)) {
-        console.log('🔄 Auto-refreshing from:', oldRoute.name)
-        setTimeout(refreshData, 300)
+      ];
+
+      if (fromPages.includes(oldName)) {
+        console.log(`🔄 Auto-refresh triggered from: ${oldName}`);
+
+        // Pastikan update tidak mengganggu render cycle
+        nextTick(() => refreshData());
       }
     }
   }
-)
+);
+
+
+const loadCurrentLevel = async (approvalRecordId) => {
+  if (!approvalRecordId) return 1;
+
+  const { data, error } = await supabase
+    .from('gh_approve_record')
+    .select('current_level_order')
+    .eq('record_id', approvalRecordId)
+    .single();
+
+  if (error) {
+    console.error('Error loading current level:', error);
+    return 1;
+  }
+
+  return data?.current_level_order || 1;
+};
 
 // Helper untuk nama batch & lokasi
 const getBatchName = (batchId) => {
@@ -90,7 +137,24 @@ const getLocationName = (locationId) => {
   return location?.location || `Location ${locationId}`
 }
 
-// 📋 Activity Reports
+// Di bagian methods, tambahkan:
+const getApprovalStatus = async (approvalRecordId) => {
+  if (!approvalRecordId) return null;
+  
+  const { data, error } = await supabase
+    .from('vw_approval_progress')
+    .select('*')
+    .eq('record_id', approvalRecordId)
+    .order('level_order', { ascending: true });
+  
+  if (error) {
+    console.error('Error loading approval:', error);
+    return null;
+  }
+  
+  return data;
+};
+
 const activityReports = computed(() => {
   let reports = activityReportStore.reports.map(report => ({
     report_id: String(report.report_id),
@@ -100,22 +164,28 @@ const activityReports = computed(() => {
     batch_name: getBatchName(report.batch_id),
     report_date: report.report_date,
     report_status: report.report_status,
+    phase_id: report.phase_id,
+    approval_record_id: report.approval_record_id,
+    // ✅ TAMBAHKAN: Load approval progress
+    approval_progress: null, // Will be loaded async
+    current_level: null,
     created_at: report.created_at,
     updated_at: report.updated_at
-}))
+  }));
 
+  // Filter dan sort
   if (filterDate.value) {
-    reports = reports.filter(r => r.report_date === filterDate.value)
+    reports = reports.filter(r => r.report_date === filterDate.value);
   }
 
   reports.sort((a, b) => {
-    const dateCompare = new Date(b.report_date) - new Date(a.report_date)
-    if (dateCompare !== 0) return dateCompare
-    return Number(b.report_id) - Number(a.report_id)
-  })
+    const dateCompare = new Date(b.report_date) - new Date(a.report_date);
+    if (dateCompare !== 0) return dateCompare;
+    return Number(b.report_id) - Number(a.report_id);
+  });
 
-  return reports
-})
+  return reports;
+});
 
 const handleReportClick = (report) => {
   if (!report || !report.report_id) {
@@ -581,8 +651,17 @@ const getCurrentTime = () => {
                         <p class="text-xs text-blue-600 font-semibold mb-1">🆔 Report ID</p>
                         <p class="text-sm font-bold text-blue-900">#{{ report.report_id }}</p>
                       </div>
+                      <div class="flex items-center justify-between text-xs">
+                        <span class="text-gray-500">Approval Progress</span>
+                        <!-- ✅ TAMPILKAN current level dari gh_approve_record -->
+                        <span class="font-bold text-blue-600">
+                          Level {{ report.current_level || 1 }}
+                        </span>
+                      </div>
                     </div>
                   </div>
+
+                  
 
                   <div class="flex flex-col items-end gap-3">
                     <span

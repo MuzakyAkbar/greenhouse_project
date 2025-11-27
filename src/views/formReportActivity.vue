@@ -13,6 +13,8 @@ import { useActivityReportStore } from "@/stores/activityReport";
 import { useActivityStore } from "@/stores/activity";
 import { useTypeDamageStore } from "@/stores/typeDamage";
 import { useBatchPhaseStore } from "@/stores/batchPhase";
+// ✅ IMPORT AUTH STORE
+import { useAuthStore } from "@/stores/auth"; 
 
 // Initialize stores
 const locationStore = useLocationStore();
@@ -23,6 +25,64 @@ const activityReportStore = useActivityReportStore();
 const activityStore = useActivityStore();
 const typeDamageStore = useTypeDamageStore();
 const batchPhaseStore = useBatchPhaseStore();
+// ✅ Initialize Auth Store
+const authStore = useAuthStore(); 
+
+
+// ======================
+// STATE - APPROVAL SYSTEM
+// ======================
+const APPROVAL_FLOW_CODE = ref('activity_report'); // Code name di gh_approval_flow
+const flowId = ref(null);
+const flowLastLevel = ref(null);
+
+const fetchProductPrice = async (materialName, priceListId = 'YOUR_DEFAULT_PRICELIST_ID') => {
+    try {
+        if (!materialName) return 0;
+
+        // STEP 1: Cari Product ID berdasarkan Nama Material
+        const productRes = await openbravoApi.get(
+            '/org.openbravo.service.json.jsonrest/Product',
+            {
+                params: {
+                    _where: `name='${materialName}'`,
+                    _selectedProperties: 'id',
+                    _startRow: 0,
+                    _endRow: 1
+                }
+            }
+        );
+
+        const productId = productRes?.data?.response?.data?.[0]?.id;
+        if (!productId) {
+            console.warn(`⚠️ Product ID not found for: ${materialName}`);
+            return 0;
+        }
+
+        // STEP 2: Cari Harga (PriceListLine) berdasarkan Product ID
+        const priceRes = await openbravoApi.get(
+            '/org.openbravo.service.json.jsonrest/PricingProductPriceList',
+            {
+                params: {
+                    _where: `product='${productId}' AND priceList='${priceListId}'`, 
+                    // Ganti 'YOUR_DEFAULT_PRICELIST_ID'
+                    _selectedProperties: 'listPrice',
+                    _startRow: 0,
+                    _endRow: 1
+                }
+            }
+        );
+
+        const price = priceRes?.data?.response?.data?.[0]?.listPrice || 0;
+        
+        console.log(`✅ Price found for ${materialName}: ${price}`);
+        return Number(price);
+
+    } catch (err) {
+        console.error('❌ Error fetching material price from Openbravo:', err);
+        return 0;
+    }
+};
 
 // ======================
 // STATE - DECLARE ALL REF VARIABLES FIRST
@@ -69,15 +129,15 @@ let html5QrCode = null;
 const formSections = ref([
   {
     id: Date.now(),
-    phase: "",
+    phase_id: "",
     activity_id: "",
     coa: "",
     materials: [{ 
       material_name: "", 
       qty: "", 
       uom: "",
-      unit_price: 0,      // ✅ TAMBAHAN
-      total_price: 0      // ✅ TAMBAHAN
+      unit_price: 0,      
+      total_price: 0      
     }],
     workers: [{ qty: "" }],
   },
@@ -94,6 +154,31 @@ const isSubmitting = ref(false);
 
 // ===== UTIL: Format Number
 const formatNumber = (n) => new Intl.NumberFormat('id-ID').format(n ?? 0)
+
+
+// ======================
+// LOAD APPROVAL FLOW INFO
+// ======================
+const loadApprovalFlowInfo = async () => {
+    try {
+        const { data, error } = await supabase
+            .from('gh_approval_flow')
+            .select('flow_id, last_level')
+            .eq('code_name', APPROVAL_FLOW_CODE.value)
+            .single();
+
+        if (error) throw error;
+
+        flowId.value = data.flow_id;
+        flowLastLevel.value = data.last_level;
+        console.log(`✅ Approval Flow Info loaded: ID=${flowId.value}, LastLevel=${flowLastLevel.value}`);
+
+    } catch (err) {
+        console.error('❌ Error loading approval flow info:', err);
+        alert('Gagal memuat konfigurasi Approval Flow. Harap hubungi Admin.');
+    }
+};
+
 
 // ======================
 // FETCH PLANNING DATA
@@ -255,7 +340,8 @@ const loadMaterialsByBin = async (binId) => {
     // ✅ TAMBAHAN: Fetch price untuk setiap material
     const materialsWithPrice = await Promise.all(
       rows.map(async (r) => {
-        const price = await getMaterialPrice(r.product)
+        // Asumsi r.product adalah Product ID (Openbravo)
+        const price = await getMaterialPrice(r['product$_identifier'], r.product)
         return {
           productId: r.product,
           material_name: r['product$_identifier'] || '(Tanpa Nama Produk)',
@@ -404,7 +490,8 @@ const onScanSuccess = async (decodedText) => {
         console.error("❌ Gagal ambil batch dari Supabase:", error.message);
       } else if (batchData) {
         console.log("✅ Batch ditemukan di DB:", batchData);
-        batches.value.push(batchData);
+        // Tambahkan ke store untuk konsistensi
+        batchStore.batches.push(batchData); 
         batchItem = batchData;
       }
     }
@@ -473,7 +560,7 @@ function removeTypeDamageRow(index) {
 function addFormSection() {
   formSections.value.push({
     id: Date.now(),
-    phase: selectedPhase.value,
+    phase_id: selectedPhase.value,
     activity_id: "",
     coa: "",
     materials: [{ material_name: "", qty: "", uom: "" }],
@@ -492,8 +579,8 @@ function addMaterialRow(i) {
     material_name: "", 
     qty: "", 
     uom: "",
-    unit_price: 0,    // ✅ TAMBAHAN
-    total_price: 0    // ✅ TAMBAHAN
+    unit_price: 0,    
+    total_price: 0    
   });
 }
 
@@ -579,13 +666,13 @@ const submitActivityReport = async () => {
   try {
     console.log("📤 Menyimpan laporan aktivitas...");
 
-    // 1. Create gh_report
+    // 1. Create gh_report (sementara tanpa approval_record_id)
     const reportPayload = {
       batch_id: Number(selectedBatch.value),
       location_id: Number(selectedLocation.value),
       report_date: selectedDate.value,
       report_status: 'onReview',
-      phase: selectedPhase.value || null
+      phase_id: selectedPhase.value || null // Sesuaikan dengan skema
     };
 
     console.log("📋 Creating report:", reportPayload);
@@ -600,6 +687,39 @@ const submitActivityReport = async () => {
 
     const report_id = reportData.report_id;
     console.log("✅ Report created with ID:", report_id);
+    
+    // ===============================================
+    // 1.1. Inisialisasi Approval Record
+    // ===============================================
+    const currentUser = authStore.user.user_id; // Asumsi authStore.user memiliki user_id
+    
+    console.log("🔄 Initializing approval flow...");
+    
+    // ✅ PERBAIKAN RPC: Sesuaikan parameter agar match dengan fungsi DB: 
+    // public.initialize_approval_record(p_flow_code_name, p_reference_id, p_reference_type, p_submitted_by)
+    const { data: recordId, error: initErr } = await supabase.rpc('initialize_approval_record', {
+        p_flow_code_name: APPROVAL_FLOW_CODE.value, // Flow code name
+        p_reference_id: report_id,                 // ID dari gh_report (referensi)
+        p_reference_type: 'gh_report',             // Nama tabel referensi
+        p_submitted_by: currentUser                // User yang submit
+    });
+
+    if (initErr) {
+        console.error("❌ ERROR Initializing approval record:", initErr);
+        // Lanjutkan, tapi beri peringatan
+        alert(`⚠️ Peringatan: Gagal membuat Approval Flow. Report ID ${report_id} dibuat, tapi tidak bisa di-approve. Detail: ${initErr.message}`);
+    } else {
+        console.log("✅ Approval Record created with ID:", recordId);
+        
+        // Update gh_report dengan approval_record_id
+        const { error: updateErr } = await supabase
+            .from('gh_report')
+            .update({ approval_record_id: recordId })
+            .eq('report_id', report_id);
+            
+        if(updateErr) throw updateErr;
+    }
+
 
     // 2. Create type_damages
     const validDamages = typeDamages.value.filter(damage => {
@@ -650,7 +770,8 @@ const submitActivityReport = async () => {
         act_name: selectedActivity?.activity || "",
         CoA: section.coa ? parseFloat(section.coa) : null,
         manpower: manpowerTotal.toString(),
-        status: 'onReview'
+        // ✅ PERBAIKAN COLUMN ERROR: Hapus 'status' jika tidak ada di tabel gh_activity
+        // status: 'onReview' 
       };
 
       console.log("📝 Creating activity:", activityPayload);
@@ -687,7 +808,7 @@ const submitActivityReport = async () => {
         if (validMaterials.length > 0) {
           const materialPayloads = await Promise.all(
             validMaterials.map(async (mat) => {
-              const qty = parseFloat(mat.qty);
+               const qty = parseFloat(mat.qty);
               const unitPrice = await getMaterialPrice(mat.material_name);
               const totalPrice = qty * unitPrice;
 
@@ -725,13 +846,7 @@ const submitActivityReport = async () => {
       }
     }
 
-    alert("✅ Data berhasil disimpan ke database!");
-    console.log("📊 SUMMARY:");
-    console.log(`   - Report ID: ${report_id}`);
-    console.log(`   - Phase: ${selectedPhase.value}`);
-    console.log(`   - Damages: ${validDamages.length}`);
-    console.log(`   - Activities: ${formSections.value.length}`);
-    console.log("   - Status: onReview (menunggu approval)");
+    alert(`✅ Data berhasil disimpan ke database!\nReport ID: ${report_id}`);
     
     resetForm();
 
@@ -769,7 +884,7 @@ function resetForm() {
   formSections.value = [
     {
       id: Date.now(),
-      phase: "",
+      phase_id: "",
       activity_id: "",
       coa: "",
       materials: [{ material_name: "", qty: "", uom: "" }],
@@ -815,6 +930,11 @@ watch([selectedLocation, selectedBatch, selectedDate], () => {
 watch(selectedBatch, async (batch) => {
   formData.value.batch_id = batch;
 
+  const locationName = selectedLocation.value ? getLocationName(selectedLocation.value) : null;
+  if(locationName) {
+    await loadWarehouseAndBin(locationName);
+  }
+  
   if (batch) {
     phaseList.value = await batchPhaseStore.fetchPhasesForBatch(batch);
   } else {
@@ -825,7 +945,7 @@ watch(selectedBatch, async (batch) => {
 // Watch selectedPhase untuk auto-sync ke semua sections
 watch(selectedPhase, (newPhase) => {
   formSections.value.forEach(section => {
-    section.phase = newPhase;
+    section.phase_id = newPhase; // ✅ Perbaiki field name ke phase_id
   });
 });
 
@@ -843,7 +963,7 @@ watch(
   { deep: true }
 );
 
-// Watcher untuk auto-fill UoM
+// Watcher untuk auto-fill UoM & Price/Total Price
 watch(
   formSections,
   (sections) => {
@@ -854,49 +974,16 @@ watch(
             (m) => m.material_name === material.material_name
           );
           
+          // Di dalam watcher formSections/materials (sekitar line 737)
           if (selectedMaterial) {
-            material.uom = selectedMaterial.uom || "";
+              material.uom = selectedMaterial.uom || "";
+              // ✅ Pastikan unit_price dari availableMaterials (yang sudah diisi di loadMaterialsByBin) tidak 0
+              material.unit_price = selectedMaterial.unit_price || 0; 
+              
+              // Hitung total price
+              const qty = parseFloat(material.qty) || 0;
+              material.total_price = qty * material.unit_price;
           }
-          
-          console.log("🔍 Auto-fill UoM:", {
-            material_name: material.material_name,
-            uom: material.uom
-          });
-        } else {
-          material.uom = "";
-        }
-      });
-    });
-  },
-  { deep: true }
-);
-
-// ✅ TAMBAHAN: Watcher untuk auto-fill price
-watch(
-  formSections,
-  (sections) => {
-    sections.forEach((section) => {
-      section.materials.forEach((material) => {
-        if (material.material_name) {
-          const selectedMaterial = availableMaterials.value.find(
-            (m) => m.material_name === material.material_name
-          );
-          
-          if (selectedMaterial) {
-            material.uom = selectedMaterial.uom || "";
-            material.unit_price = selectedMaterial.unit_price || 0; // ✅ Auto-fill harga
-            
-            // ✅ Calculate total price
-            const qty = parseFloat(material.qty) || 0;
-            material.total_price = qty * material.unit_price;
-          }
-          
-          console.log("🔍 Auto-fill Price:", {
-            material_name: material.material_name,
-            unit_price: material.unit_price,
-            qty: material.qty,
-            total_price: material.total_price
-          });
         } else {
           material.uom = "";
           material.unit_price = 0;
@@ -920,6 +1007,7 @@ onMounted(async () => {
       locationStore.fetchAll(),
       batchStore.getBatches(),
       potatoActivityStore.fetchAll(),
+      loadApprovalFlowInfo(), // ✅ Muat flow info saat mount
     ]);
 
     console.log("✅ Data berhasil dimuat");
@@ -937,7 +1025,6 @@ onUnmounted(() => {
 
 <template>
   <div class="min-h-screen bg-gradient-to-br from-gray-50 to-white">
-    <!-- Header Bar -->
     <div class="bg-white border-b border-gray-200 shadow-sm sticky top-0 z-40">
       <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-5">
         <div class="flex items-center gap-4">
@@ -962,10 +1049,8 @@ onUnmounted(() => {
       </div>
     </div>
 
-    <!-- Main Content -->
     <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
       
-      <!-- Date, Phase, Location & Batch Section -->
       <div class="mb-8">
         <div class="flex justify-between items-center mb-4">
           <h2 class="text-sm font-semibold text-gray-500 uppercase tracking-wide">Informasi Dasar</h2>
@@ -983,7 +1068,6 @@ onUnmounted(() => {
         <div class="bg-white rounded-2xl border-2 border-gray-100 shadow-sm hover:shadow-lg transition-all p-6">
           <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
             
-            <!-- Date Picker -->
             <div class="flex flex-col">
               <label class="text-sm font-bold text-gray-700 mb-3 flex items-center gap-2">
                 <div class="w-8 h-8 bg-blue-100 rounded-lg flex items-center justify-center">
@@ -1002,7 +1086,6 @@ onUnmounted(() => {
               <span class="text-xs text-gray-500 mt-2">Tanggal hari ini otomatis</span>
             </div>
 
-            <!-- Phase -->
             <div class="flex flex-col">
               <label class="text-sm font-bold text-gray-700 mb-3 flex items-center gap-2">
                 <div class="w-8 h-8 bg-green-100 rounded-lg flex items-center justify-center">
@@ -1029,7 +1112,6 @@ onUnmounted(() => {
               </span>
             </div>
 
-            <!-- Location -->
             <div class="flex flex-col">
               <label class="text-sm font-bold text-gray-700 mb-3 flex items-center gap-2">
                 <div class="w-8 h-8 bg-red-100 rounded-lg flex items-center justify-center">
@@ -1055,7 +1137,6 @@ onUnmounted(() => {
               </span>
             </div>
 
-            <!-- Batch -->
             <div class="flex flex-col">
               <label class="text-sm font-bold text-gray-700 mb-3 flex items-center gap-2">
                 <div class="w-8 h-8 bg-yellow-100 rounded-lg flex items-center justify-center">
@@ -1084,14 +1165,12 @@ onUnmounted(() => {
         </div>
       </div>
 
-      <!-- Planning Data Section -->
       <div v-if="showPlanningSection && planningData" class="mb-8">
         <h2 class="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-3 flex items-center gap-2">
           <span class="text-lg">📋</span>
           Planning Hari Ini
         </h2>
         <div class="bg-gradient-to-br from-blue-50 to-indigo-50 rounded-2xl border-2 border-blue-200 shadow-lg p-6">
-          <!-- Planning Header -->
           <div class="flex items-center justify-between mb-6 pb-4 border-b-2 border-blue-200">
             <div class="flex items-center gap-3">
               <div class="w-12 h-12 bg-gradient-to-br from-blue-500 to-indigo-600 rounded-xl flex items-center justify-center text-white">
@@ -1114,14 +1193,12 @@ onUnmounted(() => {
             </div>
           </div>
 
-          <!-- Activities List -->
           <div class="space-y-4">
             <div 
               v-for="(activity, idx) in planningData.gh_planning_activity" 
               :key="activity.activity_id"
               class="bg-white rounded-xl border-2 border-blue-100 p-5 hover:shadow-md transition-all"
             >
-              <!-- Activity Header -->
               <div class="flex items-start justify-between mb-4">
                 <div class="flex items-start gap-3">
                   <div class="w-8 h-8 bg-blue-500 rounded-lg flex items-center justify-center text-white font-bold text-sm">
@@ -1144,7 +1221,6 @@ onUnmounted(() => {
                 </div>
               </div>
 
-              <!-- Materials Table -->
               <div v-if="activity.gh_planning_material && activity.gh_planning_material.length > 0" class="mt-4">
                 <h5 class="text-sm font-bold text-gray-700 mb-3 flex items-center gap-2">
                   <svg class="w-4 h-4 text-blue-600" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" fill="currentColor">
@@ -1172,7 +1248,6 @@ onUnmounted(() => {
                 </div>
               </div>
 
-              <!-- No Materials Message -->
               <div v-else class="mt-4 bg-gray-50 border border-gray-200 rounded-lg p-3">
                 <p class="text-sm text-gray-500 text-center">Tidak ada material untuk aktivitas ini</p>
               </div>
@@ -1181,7 +1256,6 @@ onUnmounted(() => {
         </div>
       </div>
 
-      <!-- Loading Planning -->
       <div v-if="loadingPlanning" class="mb-8">
         <div class="bg-white rounded-2xl border-2 border-gray-200 shadow-sm p-8">
           <div class="flex items-center justify-center gap-3">
@@ -1193,7 +1267,6 @@ onUnmounted(() => {
         </div>
       </div>
 
-      <!-- No Planning Message -->
       <div v-if="!loadingPlanning && selectedLocation && selectedBatch && !planningData" class="mb-8">
         <div class="bg-yellow-50 border-2 border-yellow-200 rounded-2xl p-6">
           <div class="flex items-start gap-3">
@@ -1212,7 +1285,6 @@ onUnmounted(() => {
         </div>
       </div>
 
-      <!-- Jenis Kerusakan Tanaman -->
       <div class="mb-8">
         <div class="flex justify-between items-center mb-3">
           <h2 class="text-sm font-semibold text-gray-500 uppercase tracking-wide">Jenis Kerusakan Tanaman</h2>
@@ -1223,7 +1295,6 @@ onUnmounted(() => {
             :key="damage.id"
             class="bg-white rounded-2xl border-2 border-gray-100 shadow-sm hover:shadow-lg transition-all p-6 relative"
           >
-            <!-- Delete Button -->
             <button
               @click="removeTypeDamageRow(index)"
               v-if="typeDamages.length > 1"
@@ -1236,7 +1307,6 @@ onUnmounted(() => {
             </button>
 
             <div class="grid grid-cols-1 md:grid-cols-4 gap-5">
-              <!-- Type Damage (Optional Description) -->
               <div class="flex flex-col md:col-span-1">
                 <label class="text-sm font-semibold text-gray-700 mb-2">
                   Jenis/Catatan (Opsional)
@@ -1249,7 +1319,6 @@ onUnmounted(() => {
                 />
               </div>
 
-              <!-- Kuning -->
               <div class="flex flex-col">
                 <label class="text-sm font-semibold text-gray-700 mb-2 flex items-center gap-2">
                   <span class="w-6 h-6 bg-yellow-100 rounded-full flex items-center justify-center text-xs">🟡</span>
@@ -1263,7 +1332,6 @@ onUnmounted(() => {
                 />
               </div>
 
-              <!-- Kutilang -->
               <div class="flex flex-col">
                 <label class="text-sm font-semibold text-gray-700 mb-2 flex items-center gap-2">
                   <span class="w-6 h-6 bg-orange-100 rounded-full flex items-center justify-center text-xs">🟠</span>
@@ -1277,7 +1345,6 @@ onUnmounted(() => {
                 />
               </div>
 
-              <!-- Busuk -->
               <div class="flex flex-col">
                 <label class="text-sm font-semibold text-gray-700 mb-2 flex items-center gap-2">
                   <span class="w-6 h-6 bg-red-100 rounded-full flex items-center justify-center text-xs">🔴</span>
@@ -1295,16 +1362,14 @@ onUnmounted(() => {
         </div>
       </div>
 
-      <!-- Form Sections -->
       <div class="mb-8">
-        <h2 class="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-3">Detail Aktivitas</h2>
+        <h2 class="text-sm font-semibold text-gray-500 uppercase tracking-wide">Detail Aktivitas</h2>
         <div class="space-y-6">
           <div
             v-for="(section, index) in formSections"
             :key="section.id"
             class="group relative bg-white rounded-2xl border-2 border-gray-100 hover:border-[#0071f3] shadow-sm hover:shadow-xl transition-all p-6"
           >
-            <!-- Delete Button -->
             <button
               @click="removeFormSection(index)"
               v-if="formSections.length > 1"
@@ -1316,7 +1381,6 @@ onUnmounted(() => {
               </svg>
             </button>
 
-            <!-- Activity Header -->
             <div class="flex items-center gap-3 mb-6 pb-4 border-b-2 border-gray-100">
               <div class="w-10 h-10 bg-gradient-to-br from-[#0071f3] to-[#8FABD4] rounded-lg flex items-center justify-center text-white font-bold">
                 {{ index + 1 }}
@@ -1327,7 +1391,6 @@ onUnmounted(() => {
               </span>
             </div>
 
-            <!-- Activity & CoA -->
             <div class="grid grid-cols-1 md:grid-cols-2 gap-5 mb-6">
               <div class="flex flex-col">
                 <label class="text-sm font-semibold text-gray-700 mb-2">Pilih Activity</label>
@@ -1358,7 +1421,6 @@ onUnmounted(() => {
               </div>
             </div>
 
-            <!-- Materials Section -->
             <div class="mb-6 bg-gray-50 rounded-xl p-5">
               <div class="flex justify-between items-center mb-4">
                 <h4 class="text-base font-bold text-gray-900 flex items-center gap-2">
@@ -1372,9 +1434,7 @@ onUnmounted(() => {
                   :key="matIndex"
                   class="flex flex-col gap-3 bg-white rounded-lg p-4 border border-gray-200"
                 >
-                  <!-- Row 1: Material Name & Qty -->
                   <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
-                    <!-- Material Name -->
                     <div class="flex flex-col">
                       <label class="text-xs font-semibold text-gray-600 mb-2">Nama Material</label>
                       <select
@@ -1395,7 +1455,6 @@ onUnmounted(() => {
                       </select>
                     </div>
 
-                    <!-- Qty -->
                     <div class="flex flex-col">
                       <label class="text-xs font-semibold text-gray-600 mb-2">Qty</label>
                       <input
@@ -1408,9 +1467,39 @@ onUnmounted(() => {
                     </div>
                   </div>
 
-                  
+                  <div class="grid grid-cols-2 md:grid-cols-3 gap-3">
+                    <div class="flex flex-col">
+                      <label class="text-xs font-semibold text-gray-600 mb-2">UoM</label>
+                      <input
+                        v-model="material.uom"
+                        type="text"
+                        readonly
+                        placeholder="UoM"
+                        class="px-4 py-2.5 border-2 border-gray-200 rounded-lg bg-gray-100 text-gray-700 text-sm font-medium focus:outline-none cursor-not-allowed"
+                      />
+                    </div>
+                    <div class="flex flex-col">
+                      <label class="text-xs font-semibold text-gray-600 mb-2">Unit Price</label>
+                      <input
+                        :value="formatNumber(material.unit_price)"
+                        type="text"
+                        readonly
+                        placeholder="0"
+                        class="px-4 py-2.5 border-2 border-gray-200 rounded-lg bg-gray-100 text-gray-700 text-sm font-medium focus:outline-none cursor-not-allowed"
+                      />
+                    </div>
+                    <div class="flex flex-col">
+                      <label class="text-xs font-semibold text-gray-600 mb-2">Total Price</label>
+                      <input
+                        :value="formatNumber(material.total_price)"
+                        type="text"
+                        readonly
+                        placeholder="0"
+                        class="px-4 py-2.5 border-2 border-gray-200 rounded-lg bg-green-100 text-green-700 text-sm font-bold focus:outline-none cursor-not-allowed"
+                      />
+                    </div>
+                  </div>
 
-                  <!-- Delete Button -->
                   <button
                     @click="removeMaterialRow(index, matIndex)"
                     v-if="section.materials.length > 1"
@@ -1421,7 +1510,6 @@ onUnmounted(() => {
                 </div>
               </div>
 
-              <!-- Add Material Row Button -->
               <button
                 @click="addMaterialRow(index)"
                 class="w-full mt-3 bg-gradient-to-r from-[#0071f3] to-[#0060d1] hover:from-[#0060d1] hover:to-[#0050b1] text-white font-semibold px-4 py-2.5 rounded-lg transition shadow-md hover:shadow-lg text-sm"
@@ -1430,7 +1518,6 @@ onUnmounted(() => {
               </button>
             </div>
 
-            <!-- Workers Section -->
             <div class="bg-gray-50 rounded-xl p-5">
               <div class="flex justify-between items-center mb-4">
                 <h4 class="text-base font-bold text-gray-900 flex items-center gap-2">
@@ -1468,7 +1555,6 @@ onUnmounted(() => {
         </div>
       </div>
 
-      <!-- Add Activity Button -->
       <div class="flex justify-center mb-8">
         <button
           @click="addFormSection"
@@ -1481,7 +1567,6 @@ onUnmounted(() => {
         </button>
       </div>
 
-      <!-- Submit Button -->
       <div class="flex justify-center mb-8">
         <button
           @click.prevent="submitActivityReport"
@@ -1495,7 +1580,6 @@ onUnmounted(() => {
       </div>
     </div>
 
-    <!-- Footer -->
     <footer class="text-center py-10 mt-8 border-t border-gray-200">
       <div class="flex items-center justify-center gap-2 mb-2">
         <span class="text-2xl">🌱</span>
@@ -1504,7 +1588,6 @@ onUnmounted(() => {
       <p class="text-gray-400 text-xs">© 2025 All Rights Reserved</p>
     </footer>
 
-    <!-- QR Scanner Modal -->
     <div
       v-if="showScanner"
       class="fixed inset-0 bg-black bg-opacity-90 flex items-center justify-center z-50 p-4"
@@ -1527,16 +1610,13 @@ onUnmounted(() => {
         
         <div class="p-6">
           <div class="relative bg-black rounded-xl overflow-hidden mb-4" style="min-height: 350px;">
-            <!-- QR Reader Container -->
             <div id="qr-reader" style="width: 100%; height: 100%;"></div>
             
-            <!-- Scanning Indicator -->
             <div v-if="isScanning" class="absolute top-4 left-4 bg-green-500 text-white px-3 py-1.5 rounded-full text-xs font-semibold flex items-center gap-2 z-10">
               <div class="w-2 h-2 bg-white rounded-full animate-pulse"></div>
               Scanning...
             </div>
             
-            <!-- Scan Frame Overlay -->
             <div class="absolute inset-0 flex items-center justify-center pointer-events-none">
               <div class="w-64 h-64 border-4 border-white rounded-2xl opacity-30"></div>
             </div>

@@ -13,20 +13,21 @@ export const useProductionStore = defineStore('production', () => {
     error.value = null
     let q = supabase.from('gh_production').select('*')
     if (batch_id) q = q.eq('batch_id', batch_id)
+
     const { data, error: err } = await q.order('production_id', { ascending: false })
     if (err) error.value = err
     else productions.value = data || []
+
     loading.value = false
     return { data, error: err }
   }
 
   async function fetchById(id) {
-    const { data, error: err } = await supabase
+    return await supabase
       .from('gh_production')
       .select('*')
       .eq('production_id', id)
       .single()
-    return { data, error: err }
   }
 
   async function create(payload) {
@@ -34,6 +35,7 @@ export const useProductionStore = defineStore('production', () => {
       .from('gh_production')
       .insert([payload])
       .select()
+
     if (!err) await fetchAll(payload.batch_id)
     return { data, error: err }
   }
@@ -44,6 +46,7 @@ export const useProductionStore = defineStore('production', () => {
       .update(payload)
       .eq('production_id', id)
       .select()
+
     if (!err) await fetchAll(payload.batch_id)
     return { data, error: err }
   }
@@ -53,9 +56,34 @@ export const useProductionStore = defineStore('production', () => {
       .from('gh_production')
       .delete()
       .eq('production_id', id)
+
     if (!err) await fetchAll()
     return { data, error: err }
   }
 
-  return { productions, loading, error, fetchAll, fetchById, create, update, remove }
+  // ✅ FUNCTION BARU → update status by batch+location+date
+  async function updateStatus(batch_id, location_id, date, status) {
+    const { error: err } = await supabase
+      .from('gh_production')
+      .update({ status })
+      .eq('batch_id', batch_id)
+      .eq('location_id', location_id)
+      .eq('date', date)
+
+    if (err) throw err
+
+    await fetchAll()
+  }
+
+  return {
+    productions,
+    loading,
+    error,
+    fetchAll,
+    fetchById,
+    create,
+    update,
+    remove,
+    updateStatus     // <-- PENTING!
+  }
 })

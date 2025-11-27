@@ -630,6 +630,12 @@ const getBatchCount = (locationId) => {
             </span>
           </button>
           <router-link
+            to="/report-production"
+            class="bg-white hover:bg-gray-50 text-gray-700 font-medium px-5 py-3 rounded-xl transition-all text-sm border-2 border-gray-200 hover:border-[#0071f3] shadow-sm hover:shadow inline-flex items-center"
+          >
+            📈 Laporan Produksi
+          </router-link>
+          <router-link
             to="/location"
             class="bg-gradient-to-r from-gray-700 to-gray-800 hover:from-gray-800 hover:to-gray-900 text-white font-medium px-5 py-3 rounded-xl transition-all text-sm shadow-md hover:shadow-lg transform hover:-translate-y-0.5 inline-flex items-center"
           >
