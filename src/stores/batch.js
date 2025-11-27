@@ -42,7 +42,6 @@ export const useBatchStore = defineStore('batch', {
           .insert([{
             batch_name: batch.batch_name,
             location_id: batch.location_id,
-            phase_id: batch.phase_id || null,
             tanggal_mulai: batch.tanggal_mulai || null,
             tanggal_selesai: batch.tanggal_selesai || null
           }])
@@ -67,7 +66,6 @@ export const useBatchStore = defineStore('batch', {
           .update({
             batch_name: updatedData.batch_name,
             location_id: updatedData.location_id,
-            phase_id: updatedData.phase_id || null,
             tanggal_mulai: updatedData.tanggal_mulai || null,
             tanggal_selesai: updatedData.tanggal_selesai || null
           })

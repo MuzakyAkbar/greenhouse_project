@@ -1,35 +1,69 @@
 <script setup>
+// ===========================================
+// 1. IMPORTS
+// ===========================================
 import { ref, onMounted, computed } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useAuthStore } from '../stores/auth'
 import { useBatchStore } from '../stores/batch'
 import { useLocationStore } from '../stores/location'
 import { supabase } from '../lib/supabase'
-import openbravoApi from '@/lib/openbravo'
-// import axios from 'axios' // Dihapus karena tidak digunakan
+import axios from 'axios'
 
+// ===========================================
+// 2. OPENBRAVO API CONFIGURATION (Internal)
+// ===========================================
+const openbravoApi = axios.create({
+  baseURL: '/api-ob',
+  auth: {
+    username: localStorage.getItem('OB_USER'),
+    password: localStorage.getItem('OB_KEY'),
+  },
+  headers: {
+    'Content-Type': 'application/json',
+  },
+})
+// ===========================================
+
+
+// ===========================================
+// 3. STORES & ROUTER
+// ===========================================
 const router = useRouter()
 const route = useRoute()
 const authStore = useAuthStore()
 const batchStore = useBatchStore()
 const locationStore = useLocationStore()
 
+// ===========================================
+// 4. REFS (STATE)
+// ===========================================
 const report_id = ref(route.params.report_id || null)
-
 const sourcePage = ref(route.query.from || '/planningReportList')
-// State untuk approval
 const approvalProgress = ref([])
-// Diubah menjadi objek yang lebih detail
 const currentUserLevel = ref(null) 
 const canApproveCurrentLevel = ref(false)
-// const currentLevelInfo = ref(null) // Dihapus karena tidak digunakan
-
 const loading = ref(true)
 const processing = ref(false)
 const error = ref(null)
+const phaseInfo = ref(null)
+const currentReport = ref(null)
+const revisionModal = ref({
+  show: false,
+  type: null,
+  itemId: null,
+  notes: ''
+})
+const warehouseInfo = ref({
+  warehouse: null,
+  bin: null,
+  location_name: null
+})
 
-const phaseInfo = ref(null);
 
+// ===========================================
+// 5. HELPER FUNCTIONS (UTILITY)
+// ===========================================
 const loadPhaseInfo = async (phaseId) => {
   if (!phaseId) return null;
   
@@ -48,35 +82,18 @@ const loadPhaseInfo = async (phaseId) => {
   }
 };
 
-
-const currentReport = ref(null)
-const revisionModal = ref({
-  show: false,
-  type: null,
-  itemId: null,
-  notes: ''
-})
-
-const warehouseInfo = ref({
-  warehouse: null,
-  bin: null,
-  location_name: null
-})
-
 const getTotalMaterialCost = () => {
   if (!currentReport.value?.activities) return 0
   
   return currentReport.value.activities.reduce((sum, activity) => {
     if (!activity.materials) return sum
     const activityTotal = activity.materials.reduce((matSum, mat) => {
-      // Menggunakan mat.total_price (yang harusnya sudah Number dari DB atau di-cast)
       return matSum + (Number(mat.total_price) || 0) 
     }, 0)
     return sum + activityTotal
   }, 0)
 }
 
-// Helper function untuk format angka
 const formatNumber = (value) => {
   if (!value && value !== 0) return '0'
   return Number(value).toLocaleString('id-ID', {
@@ -85,7 +102,6 @@ const formatNumber = (value) => {
   })
 }
 
-// Helper function untuk format currency
 const formatCurrency = (value) => {
   if (!value && value !== 0) return 'Rp 0'
   return 'Rp ' + Number(value).toLocaleString('id-ID', {
@@ -94,556 +110,11 @@ const formatCurrency = (value) => {
   })
 }
 
-// Calculate total untuk satu activity
 const calculateActivityTotal = (materials) => {
   if (!materials || materials.length === 0) return 0
   return materials.reduce((sum, mat) => sum + (Number(mat.total_price) || 0), 0)
 }
 
-// const reportTotalCost = computed(() => { // Dihapus karena getTotalMaterialCost sudah cukup
-//   if (!currentReport.value?.activities) return 0
-  
-//   return currentReport.value.activities.reduce((sum, activity) => {
-//     const activityTotal = calculateActivityTotal(activity.materials || [])
-//     return sum + activityTotal
-//   }, 0)
-// })
-
-onMounted(async () => {
-  if (!authStore.isLoggedIn) {
-    router.push('/')
-    return
-  }
-
-  if (!report_id.value) {
-    alert('⚠️ Report ID tidak ditemukan')
-    router.push(sourcePage.value)
-    return
-  }
-
-  await loadData()
-})
-
-// ✅ UPDATE loadData function
-const loadData = async () => {
-  try {
-    loading.value = true;
-    
-    await Promise.all([
-      batchStore.getBatches(),
-      locationStore.fetchAll()
-    ]);
-
-    // Kita mengambil data report dan items 
-    // Kolom approval seperti approved_by, approved_at, dll. di gh_report 
-    // masih dipertahankan karena mungkin digunakan di UI lain atau untuk fallback/legacy.
-    const { data: report, error: fetchError } = await supabase
-      .from('gh_report')
-      .select(`
-        *,
-        type_damages:gh_type_damage(*),
-        activities:gh_activity(
-          *,
-          materials:gh_material_used(*)
-        )
-      `)
-      .eq('report_id', report_id.value)
-      .single();
-    
-    if (fetchError) throw fetchError;
-    if (!report) throw new Error('Laporan tidak ditemukan');
-
-    currentReport.value = report;
-    console.log('✅ Loaded report:', report);
-    
-    // ✅ Load phase name
-    if (report.phase_id) {
-      phaseInfo.value = await loadPhaseInfo(report.phase_id);
-    }
-    
-    // Load approval progress
-    await loadApprovalProgress();
-    
-    if (report.location_id) {
-      await loadWarehouseAndBin(report.location_id);
-    }
-    
-  } catch (err) {
-    console.error('❌ Error loading data:', err);
-    error.value = err.message;
-    alert('❌ Gagal memuat data: ' + err.message);
-    router.push(sourcePage.value);
-  } finally {
-    loading.value = false;
-  }
-};
-
-const loadWarehouseAndBin = async (locationId) => {
-  try {
-    const location = locationStore.locations.find(l => l.location_id == locationId)
-    if (!location) {
-      console.warn('⚠️ Location not found:', locationId)
-      return
-    }
-
-    const locationName = location.location
-    warehouseInfo.value.location_name = locationName
-    
-    console.log('🏢 Loading warehouse for location:', locationName)
-
-    const warehouseRes = await openbravoApi.get(
-      '/org.openbravo.service.json.jsonrest/Warehouse',
-      { params: { _where: `name='${locationName}'` } }
-    )
-
-    const warehouses = warehouseRes?.data?.response?.data || []
-    if (!warehouses.length) {
-      console.warn('⚠️ Warehouse not found for location:', locationName)
-      return
-    }
-
-    const warehouse = warehouses[0]
-    warehouseInfo.value.warehouse = warehouse
-    console.log('✅ Warehouse found:', warehouse.name)
-
-    const binRes = await openbravoApi.get(
-      '/org.openbravo.service.json.jsonrest/Locator',
-      { params: { _where: `M_Warehouse_ID='${warehouse.id}'` } }
-    )
-
-    const bins = binRes?.data?.response?.data || []
-    if (!bins.length) {
-      console.warn('⚠️ Bin not found for warehouse:', warehouse.name)
-      return
-    }
-
-    warehouseInfo.value.bin = bins[0]
-    console.log('✅ Bin found:', bins[0].name)
-
-  } catch (err) {
-    console.error('❌ Error loading warehouse/bin:', err)
-  }
-}
-
-
-// ✅ FIXED createAndProcessMovement - Better Response Handling
-const createAndProcessMovement = async (materials, activityName) => {
-  console.log('🚀 Creating Openbravo Movement for activity:', activityName);
-  
-  if (!materials || materials.length === 0) {
-    console.warn('⚠️ No materials to process');
-    return {
-      success: false,
-      movementId: null,
-      successCount: 0,
-      totalMaterials: 0,
-      errors: 'No materials to process'
-    };
-  }
-
-  // Validasi warehouse info
-  if (!warehouseInfo.value.warehouse || !warehouseInfo.value.bin) {
-    console.error('❌ Warehouse or Bin not found');
-    console.error('Warehouse Info:', warehouseInfo.value);
-    return {
-      success: false,
-      movementId: null,
-      successCount: 0,
-      totalMaterials: materials.length,
-      errors: 'Warehouse or Bin not configured. Please check location settings.'
-    };
-  }
-
-  const warehouse = warehouseInfo.value.warehouse;
-  const bin = warehouseInfo.value.bin;
-  
-  // Extract organization ID
-  let orgId;
-  if (warehouse.organization?.id) {
-    orgId = warehouse.organization.id;
-  } else if (typeof warehouse.organization === 'string') {
-    orgId = warehouse.organization;
-  } else {
-    console.error('❌ Cannot extract organization ID from warehouse:', warehouse);
-    return {
-      success: false,
-      movementId: null,
-      successCount: 0,
-      totalMaterials: materials.length,
-      errors: 'Invalid organization configuration'
-    };
-  }
-
-  console.log('📦 Warehouse Info:', {
-    warehouseId: warehouse.id,
-    warehouseName: warehouse.name,
-    binId: bin.id,
-    binName: bin.name,
-    orgId: orgId
-  });
-
-  try {
-    // 1. Create Movement Header
-    console.log('📝 Step 1: Creating movement header...');
-    
-    const movementDate = new Date().toISOString();
-    const movementPayload = {
-      organization: orgId,
-      movementType: 'I-',
-      movementDate: movementDate,
-      name: `Material Usage - ${activityName} - ${new Date().toLocaleDateString('id-ID')}`,
-      description: `Auto-generated from Greenhouse Activity: ${activityName}`
-    };
-
-    console.log('📤 Movement payload:', JSON.stringify(movementPayload, null, 2));
-
-    const createMovementRes = await openbravoApi.post(
-      '/org.openbravo.service.json.jsonrest/MaterialMgmtMaterialMovement',
-      { data: movementPayload }
-    );
-
-    console.log('📥 RAW Movement response:', createMovementRes);
-    console.log('📥 Response data:', createMovementRes?.data);
-
-    // ✅ FIX: Better response parsing
-    let movementData = null;
-    let movementId = null;
-
-    // Check multiple possible response structures
-    if (createMovementRes?.data?.response?.data) {
-      movementData = createMovementRes.data.response.data;
-      console.log('✅ Found data in response.data:', movementData);
-    } else if (createMovementRes?.data?.data) {
-      movementData = createMovementRes.data.data;
-      console.log('✅ Found data in data:', movementData);
-    } else if (Array.isArray(createMovementRes?.data)) {
-      movementData = createMovementRes.data;
-      console.log('✅ Response is array:', movementData);
-    } else if (createMovementRes?.data?.id) {
-      // Single object response
-      movementData = [createMovementRes.data];
-      console.log('✅ Response is single object:', movementData);
-    }
-
-    // Extract movement ID
-    if (movementData && Array.isArray(movementData) && movementData.length > 0) {
-      movementId = movementData[0].id;
-    } else if (movementData && movementData.id) {
-      movementId = movementData.id;
-    }
-
-    if (!movementId) {
-      console.error('❌ Could not extract movement ID');
-      console.error('Full response structure:', JSON.stringify(createMovementRes, null, 2));
-      throw new Error('Failed to create movement header - could not extract ID from response');
-    }
-
-    console.log('✅ Movement header created with ID:', movementId);
-
-    // 2. Create Movement Lines
-    console.log('📝 Step 2: Creating movement lines...');
-    
-    let successCount = 0;
-    let failCount = 0;
-    const errors = [];
-
-    for (const material of materials) {
-      try {
-        console.log(`🔍 Processing material: ${material.material_name}`);
-        
-        // Escape single quotes in material name
-        const escapedName = material.material_name.replace(/'/g, "''");
-        
-        // Get product by name
-        const productRes = await openbravoApi.get(
-          '/org.openbravo.service.json.jsonrest/Product',
-          {
-            params: {
-              _where: `name='${escapedName}'`,
-              _selectedProperties: 'id,name,uOM'
-            }
-          }
-        );
-
-        const products = productRes?.data?.response?.data || [];
-        
-        if (products.length === 0) {
-          console.warn(`⚠️ Product not found in Openbravo: ${material.material_name}`);
-          errors.push(`Product not found: ${material.material_name}`);
-          failCount++;
-          continue;
-        }
-
-        const product = products[0];
-        console.log(`✅ Product found: ${product.name} (ID: ${product.id})`);
-
-        // Extract UOM ID
-        let uomId;
-        if (product.uOM?.id) {
-          uomId = product.uOM.id;
-        } else if (typeof product.uOM === 'string') {
-          uomId = product.uOM;
-        } else {
-          console.error('❌ Cannot extract UOM from product:', product);
-          errors.push(`${material.material_name}: Invalid UOM`);
-          failCount++;
-          continue;
-        }
-
-        // Create movement line
-        const qty = Math.abs(Number(material.qty) || 0);
-        if (qty === 0) {
-          console.warn(`⚠️ Skipping ${material.material_name} - quantity is 0`);
-          continue;
-        }
-
-        const linePayload = {
-          organization: orgId,
-          materialMgmtMaterialMovement: movementId,
-          product: product.id,
-          movementQuantity: qty,
-          uOM: uomId,
-          storageBin: bin.id,
-          lineNo: (successCount + 1) * 10,
-          description: `${material.material_name} - ${activityName}`
-        };
-
-        console.log('📤 Line payload:', JSON.stringify(linePayload, null, 2));
-
-        const lineRes = await openbravoApi.post(
-          '/org.openbravo.service.json.jsonrest/MaterialMgmtMaterialMovementLine',
-          { data: linePayload }
-        );
-
-        console.log('📥 Line response:', lineRes?.data);
-
-        // Check if line was created
-        const lineData = lineRes?.data?.response?.data || lineRes?.data?.data || lineRes?.data;
-        
-        if (!lineData || (Array.isArray(lineData) && lineData.length === 0)) {
-          throw new Error(`No data returned when creating line for ${material.material_name}`);
-        }
-
-        successCount++;
-        console.log(`✅ Line #${successCount} created for: ${material.material_name}`);
-
-      } catch (lineErr) {
-        console.error(`❌ Error creating line for ${material.material_name}:`, lineErr);
-        console.error('Line error response:', lineErr.response?.data);
-        errors.push(`${material.material_name}: ${lineErr.message}`);
-        failCount++;
-      }
-    }
-
-    console.log(`📊 Lines summary: ${successCount} success, ${failCount} failed out of ${materials.length} total`);
-
-    // 3. Process the Movement
-    if (successCount > 0) {
-      console.log('📝 Step 3: Processing (completing) movement...');
-      
-      try {
-        // Try to complete the movement using document action
-        const processRes = await openbravoApi.post(
-          `/org.openbravo.service.json.jsonrest/MaterialMgmtMaterialMovement/${movementId}`,
-          { 
-            data: {
-              documentAction: 'CO'
-            }
-          }
-        );
-
-        console.log('📥 Process response:', processRes?.data);
-        console.log('✅ Movement completed successfully!');
-
-        return {
-          success: true,
-          movementId: movementId,
-          successCount: successCount,
-          totalMaterials: materials.length,
-          errors: failCount > 0 ? errors.join('; ') : null
-        };
-
-      } catch (processErr) {
-        console.error('❌ Error completing movement:', processErr);
-        console.error('Process error response:', processErr.response?.data);
-        
-        // Movement created but not completed - still return success with warning
-        return {
-          success: true, // Changed to true because movement and lines were created
-          movementId: movementId,
-          successCount: successCount,
-          totalMaterials: materials.length,
-          errors: `Movement created (ID: ${movementId}) but auto-complete failed. Please complete manually in Openbravo. ${failCount > 0 ? 'Also: ' + errors.join('; ') : ''}`
-        };
-      }
-    } else {
-      // No lines created successfully
-      console.warn('⚠️ No lines created successfully, attempting to delete movement header...');
-      
-      try {
-        await openbravoApi.delete(
-          `/org.openbravo.service.json.jsonrest/MaterialMgmtMaterialMovement/${movementId}`
-        );
-        console.log('🗑️ Movement header deleted');
-      } catch (delErr) {
-        console.error('❌ Error deleting movement header:', delErr);
-      }
-
-      return {
-        success: false,
-        movementId: null,
-        successCount: 0,
-        totalMaterials: materials.length,
-        errors: `All material lines failed: ${errors.join('; ')}`
-      };
-    }
-
-  } catch (err) {
-    console.error('❌ CRITICAL ERROR in createAndProcessMovement:', err);
-    console.error('Error message:', err.message);
-    console.error('Error response:', err.response?.data);
-    console.error('Error stack:', err.stack);
-    
-    return {
-      success: false,
-      movementId: null,
-      successCount: 0,
-      totalMaterials: materials.length,
-      errors: `Critical error: ${err.message}. Check browser console for full details.`
-    };
-  }
-};
-
-const loadApprovalProgress = async () => {
-  if (!currentReport.value?.approval_record_id) {
-    console.log('⚠️ No approval record found');
-    
-    // Fallback info jika report belum masuk flow
-    canApproveCurrentLevel.value = false;
-    currentUserLevel.value = { level_order: 0, level_name: 'Staff/No Approval Flow', is_final_level: false };
-    
-    return;
-  }
-
-  try {
-    console.log('📊 Loading approval progress for record:', currentReport.value.approval_record_id);
-
-    // 1. Fetch approval record & flow info
-    const { data: recordData, error: recordErr } = await supabase
-      .from('gh_approve_record')
-      .select(`
-        current_level_order, 
-        overall_status, 
-        flow_id,
-        gh_approval_flow!inner(
-          last_level,
-          first_level
-        )
-      `)
-      .eq('record_id', currentReport.value.approval_record_id)
-      .single();
-
-    if (recordErr) throw recordErr;
-
-    const currentLevelOrder = recordData?.current_level_order || 1;
-    const lastLevel = recordData.gh_approval_flow?.last_level;
-    
-    // 2. Fetch level status untuk semua level
-    // Tidak ada perubahan di sini, tetap ambil semua level status
-    const { data: levelStatuses, error: statusErr } = await supabase
-      .from('gh_approval_level_status')
-      .select(`
-        level_status_id,
-        level_order,
-        level_name,
-        status,
-        approved_by,
-        approved_at,
-        revision_notes,
-        revision_requested_by,
-        revision_requested_at
-      `)
-      .eq('record_id', currentReport.value.approval_record_id)
-      .order('level_order', { ascending: true });
-
-    if (statusErr) throw statusErr;
-
-    // 3. Fetch approver names untuk display
-    const approverIds = [
-      ...levelStatuses.map(s => s.approved_by),
-      ...levelStatuses.map(s => s.revision_requested_by)
-    ].filter(Boolean);
-
-    let approverNames = {};
-    if (approverIds.length > 0) {
-      const { data: users } = await supabase
-        .from('user')
-        .select('user_id, username, email')
-        .in('user_id', approverIds);
-      
-      if (users) {
-        approverNames = users.reduce((acc, user) => {
-          acc[user.user_id] = user.username || user.email;
-          return acc;
-        }, {});
-      }
-    }
-
-    // 4. Enhance level statuses dengan approver names
-    approvalProgress.value = levelStatuses.map(level => ({
-      ...level,
-      approver_name: level.approved_by ? approverNames[level.approved_by] : null,
-      revisor_name: level.revision_requested_by ? approverNames[level.revision_requested_by] : null,
-      is_final_level: level.level_order === lastLevel,
-      level_status: level.status // Alias untuk compatibility
-    }));
-
-    console.log('✅ Approval progress loaded:', approvalProgress.value);
-
-    // 5. Check apakah user login punya hak approve di level saat ini
-    const { data: userLevel } = await supabase
-      .from('gh_user_approval_level')
-      .select('level_order, flow_id')
-      .eq('user_id', authStore.user.user_id)
-      .eq('flow_id', recordData.flow_id)
-      .eq('level_order', currentLevelOrder)
-      .eq('is_active', true)
-      .maybeSingle(); 
-
-    // 6. Ambil status level saat ini
-    const currentLevelStatus = levelStatuses.find(s => s.level_order === currentLevelOrder);
-    
-    // 7. User bisa approve jika:
-    // - User memiliki level yang sesuai
-    // - Status level saat ini masih 'pending'
-    // - Overall status masih 'onReview'
-    canApproveCurrentLevel.value = 
-      !!userLevel && 
-      currentLevelStatus?.status === 'pending' &&
-      recordData.overall_status === 'onReview';
-    
-    // 8. Set current user level info
-    currentUserLevel.value = {
-      level_order: currentLevelOrder,
-      level_name: currentLevelStatus?.level_name || `Level ${currentLevelOrder}`,
-      is_final_level: currentLevelOrder === lastLevel,
-    };
-    
-    // 9. Update status report dengan overall_status dari record
-    currentReport.value.report_status = recordData.overall_status;
-    
-    console.log('🔐 Can approve current level:', canApproveCurrentLevel.value);
-    console.log('📍 Current level:', currentUserLevel.value);
-    
-  } catch (err) {
-    console.error('❌ Error loading approval progress:', err);
-    canApproveCurrentLevel.value = false;
-    currentUserLevel.value = { level_order: 1, level_name: 'Error/Unknown', is_final_level: false };
-  }
-};
-
-
-// Helper functions
 const getBatchName = (batchId) => {
   const batch = batchStore.batches.find(b => b.batch_id == batchId)
   return batch?.batch_name || `Batch ${batchId}`
@@ -676,53 +147,577 @@ const formatDateTime = (dateStr) => {
   })
 }
 
-// ✅ UPDATE Computed reportInfo
-const reportInfo = computed(() => {
-  if (!currentReport.value) return null;
-  
-  const report = currentReport.value;
-  let totalTypeDamages = 0;
-  let totalActivities = 0;
-  
-  if (report.type_damages) {
-    totalTypeDamages = report.type_damages.length;
+const getStatusBadge = (status) => {
+  const badges = {
+    'onReview': {
+      text: '⏳ Review',
+      class: 'bg-yellow-100 text-yellow-800 border-yellow-200'
+    },
+    'needRevision': {
+      text: '🔄 Revision',
+      class: 'bg-red-100 text-red-800 border-red-200'
+    },
+    'approved': {
+      text: '✅ Approved',
+      class: 'bg-green-100 text-green-800 border-green-200'
+    }
   }
-  if (report.activities) {
-    totalActivities = report.activities.length;
+  return badges[status || 'onReview'] || badges['onReview']
+}
+
+
+// ===========================================
+// 6. OPENBRAVO LOADERS (Dideklarasikan di awal)
+// ===========================================
+
+const loadWarehouseAndBin = async (locationId) => {
+  try {
+    const location = locationStore.locations.find(l => l.location_id == locationId)
+    if (!location) {
+      console.warn('⚠️ Location not found:', locationId)
+      alert('⚠️ Location tidak ditemukan di database!')
+      return
+    }
+
+    const locationName = location.location
+    warehouseInfo.value.location_name = locationName
+    
+    console.log('🔍 Searching warehouse for location:', locationName)
+
+    const warehouseRes = await openbravoApi.get(
+      '/org.openbravo.service.json.jsonrest/Warehouse',
+      { 
+        params: { 
+          _where: `name='${locationName}'`,
+          _selectedProperties: 'id,name,organization,client'
+        } 
+      }
+    )
+
+    const warehouses = warehouseRes?.data?.response?.data || []
+    if (!warehouses.length) {
+      console.error('❌ Warehouse not found for location:', locationName)
+      alert(`❌ Warehouse "${locationName}" tidak ditemukan di Openbravo!`)
+      return
+    }
+
+    const warehouse = warehouses[0]
+    warehouseInfo.value.warehouse = warehouse
+    
+    if (!warehouse.client && !warehouse.organization?.client) {
+      console.error('❌ Client not found in warehouse response!')
+      alert('⚠️ Client ID tidak ditemukan di Warehouse. Hubungi admin untuk konfigurasi Openbravo.')
+      return
+    }
+
+    const binRes = await openbravoApi.get(
+      '/org.openbravo.service.json.jsonrest/Locator',
+      { params: { _where: `M_Warehouse_ID='${warehouse.id}'` } }
+    )
+
+    const bins = binRes?.data?.response?.data || []
+    if (!bins.length) {
+      console.warn('⚠️ Bin not found for warehouse:', warehouse.name)
+      alert(`⚠️ Storage Bin tidak ditemukan untuk warehouse "${warehouse.name}"`)
+      return
+    }
+
+    warehouseInfo.value.bin = bins[0]
+    console.log('✅ Bin found:', {
+      id: bins[0].id,
+      name: bins[0].name
+    })
+
+  } catch (err) {
+    console.error('❌ Error loading warehouse/bin:', err)
+    console.error('Error details:', err.response?.data)
+    alert('❌ Gagal memuat warehouse/bin dari Openbravo: ' + err.message)
   }
-  
-  // Menghapus allItemsApproved, approvedTypeDamages, approvedActivities
-  
-  return {
-    report_id: report.report_id,
-    location_id: report.location_id,
-    location_name: getLocationName(report.location_id),
-    batch_id: report.batch_id,
-    batch_name: getBatchName(report.batch_id),
-    report_date: report.report_date,
-    report_status: report.report_status, // Mengambil dari overall_status record
-    phase_id: report.phase_id,
-    phase_name: phaseInfo.value || 'Unknown Phase', 
-    totalTypeDamages,
-    totalActivities,
-    // Menghapus: approvedTypeDamages, approvedActivities, allItemsApproved
-    current_level_order: currentUserLevel.value?.level_order || 1,
-    current_level_name: currentUserLevel.value?.level_name || 'Level 1',
-    can_approve: canApproveCurrentLevel.value,
-    is_final_level: currentUserLevel.value?.is_final_level || false,
-    revision_notes: report.revision_notes,
-    revision_requested_by: report.revision_requested_by,
-    revision_requested_at: report.revision_requested_at,
-    approved_by: report.approved_by,
-    approved_at: report.approved_at,
-  };
-});
-
-// ❌ HAPUS approveTypeDamage
-// ❌ HAPUS approveActivity
+}
 
 
-// ✅ APPROVE CURRENT LEVEL (REPORT LEVEL) - WITH OPENBRAVO MOVEMENT
+// ===========================================
+// 7. APPROVAL LOADERS (Dideklarasikan di awal)
+// ===========================================
+
+const loadApprovalProgress = async () => {
+  if (!currentReport.value?.approval_record_id) {
+    console.log('⚠️ No approval record found');
+    
+    canApproveCurrentLevel.value = false;
+    currentUserLevel.value = { level_order: 0, level_name: 'Staff/No Approval Flow', is_final_level: false };
+    
+    return;
+  }
+
+  try {
+    console.log('📊 Loading approval progress for record:', currentReport.value.approval_record_id);
+
+    const { data: recordData, error: recordErr } = await supabase
+      .from('gh_approve_record')
+      .select(`
+        current_level_order, 
+        overall_status, 
+        flow_id,
+        gh_approval_flow!inner(
+          last_level,
+          first_level
+        )
+      `)
+      .eq('record_id', currentReport.value.approval_record_id)
+      .single();
+
+    if (recordErr) throw recordErr;
+
+    const currentLevelOrder = recordData?.current_level_order || 1;
+    const lastLevel = recordData.gh_approval_flow?.last_level;
+    
+    const { data: levelStatuses, error: statusErr } = await supabase
+      .from('gh_approval_level_status')
+      .select(`
+        level_status_id,
+        level_order,
+        level_name,
+        status,
+        approved_by,
+        approved_at,
+        revision_notes,
+        revision_requested_by,
+        revision_requested_at
+      `)
+      .eq('record_id', currentReport.value.approval_record_id)
+      .order('level_order', { ascending: true });
+
+    if (statusErr) throw statusErr;
+
+    const approverIds = [
+      ...levelStatuses.map(s => s.approved_by),
+      ...levelStatuses.map(s => s.revision_requested_by)
+    ].filter(Boolean);
+
+    let approverNames = {};
+    if (approverIds.length > 0) {
+      const { data: users } = await supabase
+        .from('user')
+        .select('user_id, username, email')
+        .in('user_id', approverIds);
+      
+      if (users) {
+        approverNames = users.reduce((acc, user) => {
+          acc[user.user_id] = user.username || user.email;
+          return acc;
+        }, {});
+      }
+    }
+
+    approvalProgress.value = levelStatuses.map(level => ({
+      ...level,
+      approver_name: level.approved_by ? approverNames[level.approved_by] : null,
+      revisor_name: level.revision_requested_by ? approverNames[level.revision_requested_by] : null,
+      is_final_level: level.level_order === lastLevel,
+      level_status: level.status
+    }));
+
+    const currentLevelStatus = levelStatuses.find(s => s.level_order === currentLevelOrder);
+    
+    const { data: userLevel } = await supabase
+      .from('gh_user_approval_level')
+      .select('level_order, flow_id')
+      .eq('user_id', authStore.user.user_id)
+      .eq('flow_id', recordData.flow_id)
+      .eq('level_order', currentLevelOrder)
+      .eq('is_active', true)
+      .maybeSingle(); 
+
+    canApproveCurrentLevel.value = 
+      !!userLevel && 
+      currentLevelStatus?.status === 'pending' &&
+      recordData.overall_status === 'onReview';
+    
+    currentUserLevel.value = {
+      level_order: currentLevelOrder,
+      level_name: currentLevelStatus?.level_name || `Level ${currentLevelOrder}`,
+      is_final_level: currentLevelOrder === lastLevel,
+    };
+    
+    currentReport.value.report_status = recordData.overall_status;
+    
+  } catch (err) {
+    console.error('❌ Error loading approval progress:', err);
+    canApproveCurrentLevel.value = false;
+    currentUserLevel.value = { level_order: 1, level_name: 'Error/Unknown', is_final_level: false };
+  }
+};
+
+
+// ===========================================
+// 8. OPENBRAVO PROCESSOR (Dideklarasikan di awal)
+// * DENGAN ERROR HANDLING YANG LEBIH DETAIL
+// ===========================================
+
+// ===========================================
+// 8. OPENBRAVO PROCESSOR (Refactored dari ReportReview lama)
+// ===========================================
+
+const createAndProcessMovement = async (materials, activityName) => {
+  try {
+    console.log(`\n${'='.repeat(60)}`);
+    console.log('🔄 CREATING INTERNAL CONSUMPTION (MATERIAL USAGE)');
+    console.log(`${'='.repeat(60)}`);
+    console.log('Activity:', activityName);
+    
+    if (!warehouseInfo.value.bin || !warehouseInfo.value.warehouse) {
+      throw new Error('Warehouse/Bin tidak ditemukan untuk location ini');
+    }
+
+    const warehouse = warehouseInfo.value.warehouse;
+    const bin = warehouseInfo.value.bin;
+    
+    const warehouseId = warehouse.id;
+    const binId = bin.id; // Ini adalah Locator ID dari gh_location.id_openbravo
+    
+    // Ambil organization & client dari warehouse
+    const orgId = warehouse.organization?.id || warehouse.organization || '96D7D37973EF450383B8ADCFDB666725';
+    const clientId = warehouse.client?.id || warehouse.client || '025F309A89714992995442D9CDE13A15';
+    
+    console.log('Warehouse ID:', warehouseId);
+    console.log('Warehouse Name:', warehouse.name);
+    console.log('Bin/Locator ID:', binId);
+    console.log('Bin/Locator Name:', bin.searchKey || bin.name);
+    console.log('Org ID:', orgId);
+    console.log('Client ID:', clientId);
+    console.log(`${'='.repeat(60)}\n`);
+
+    // STEP 1: Create Internal Consumption header
+    console.log('🔄 STEP 1: Creating Internal Consumption header...');
+    
+    const now = new Date();
+    const movementDate = now.toISOString().split('T')[0];
+    const consumptionName = `GH-${activityName.replace(/[^a-zA-Z0-9]/g, '').substring(0, 20)}-${Date.now()}`;
+    
+    const headerPayload = {
+      data: [
+        {
+          _entityName: 'MaterialMgmtInternalConsumption',
+          client: clientId,
+          organization: orgId,
+          name: consumptionName,
+          movementDate: movementDate
+        }
+      ]
+    };
+
+    console.log('📤 Header Payload:', JSON.stringify(headerPayload, null, 2));
+
+    const headerRes = await openbravoApi.post(
+      '/org.openbravo.service.json.jsonrest/MaterialMgmtInternalConsumption',
+      headerPayload
+    );
+
+    console.log('📥 Header Response:', JSON.stringify(headerRes?.data, null, 2));
+    
+    // Check error
+    if (headerRes?.data?.response?.status === -1) {
+      const obError = headerRes.data.response.error;
+      console.error('❌ Openbravo Error:', obError);
+      throw new Error(`Openbravo Error: ${obError?.message || JSON.stringify(obError)}`);
+    }
+
+    // Get consumption ID dari response
+    let consumptionId = null;
+    
+    if (headerRes?.data?.response?.data?.[0]?.id) {
+      consumptionId = headerRes.data.response.data[0].id;
+    } else if (headerRes?.data?.data?.[0]?.id) {
+      consumptionId = headerRes.data.data[0].id;
+    } else if (headerRes?.data?.id) {
+      consumptionId = headerRes.data.id;
+    }
+    
+    if (!consumptionId) {
+      console.error('❌ No consumption ID in response');
+      throw new Error('Gagal mendapatkan Internal Consumption ID');
+    }
+
+    console.log(`✅ Internal Consumption created: ${consumptionId}`);
+
+    // STEP 2: Create consumption lines
+    console.log('\n🔄 STEP 2: Creating consumption lines...');
+    
+    let successCount = 0;
+    let errors = [];
+
+    for (const material of materials) {
+      try {
+        console.log(`\n  📦 Processing: ${material.material_name}`);
+        
+        // Get product
+        const productRes = await openbravoApi.get(
+          '/org.openbravo.service.json.jsonrest/Product',
+          {
+            params: {
+              _where: `name='${material.material_name}'`,
+              _selectedProperties: 'id,name,uOM',
+              _startRow: 0,
+              _endRow: 1
+            }
+          }
+        );
+
+        const products = productRes?.data?.response?.data || [];
+        if (!products.length) {
+          errors.push(`${material.material_name}: Product not found`);
+          console.error(`    ❌ Product not found`);
+          continue;
+        }
+
+        const product = products[0];
+        let uomId = product.uOM;
+
+        // Get UOM if specified
+        if (material.uom) {
+          const uomRes = await openbravoApi.get(
+            '/org.openbravo.service.json.jsonrest/UOM',
+            {
+              params: {
+                _where: `name='${material.uom}'`,
+                _startRow: 0,
+                _endRow: 1
+              }
+            }
+          );
+
+          const uoms = uomRes?.data?.response?.data || [];
+          if (uoms.length > 0) {
+            uomId = uoms[0].id;
+          }
+        }
+
+        // Check stock dari bin/locator yang sama dengan id_openbravo
+        const stockRes = await openbravoApi.get(
+          '/org.openbravo.service.json.jsonrest/MaterialMgmtStorageDetail',
+          {
+            params: {
+              _where: `storageBin='${binId}' AND product='${product.id}'`,
+              _selectedProperties: 'quantityOnHand',
+              _startRow: 0,
+              _endRow: 1
+            }
+          }
+        );
+
+        const stockDetails = stockRes?.data?.response?.data || [];
+        const currentStock = stockDetails[0]?.quantityOnHand || 0;
+
+        console.log(`    📊 Stock di Bin/Locator (${bin.searchKey || bin.name}): ${currentStock}, Need: ${material.qty}`);
+
+        if (currentStock < material.qty) {
+          errors.push(`${material.material_name}: Insufficient stock (${currentStock}/${material.qty})`);
+          console.warn(`    ⚠️ Insufficient stock`);
+          continue;
+        }
+
+        // Create line
+        const linePayload = {
+          data: [
+            {
+              _entityName: 'MaterialMgmtInternalConsumptionLine',
+              client: clientId,
+              organization: orgId,
+              internalConsumption: consumptionId,
+              lineNo: (successCount + 1) * 10,
+              product: product.id,
+              uOM: uomId,
+              movementQuantity: material.qty,
+              storageBin: binId // Bin/Locator ID dari gh_location.id_openbravo
+            }
+          ]
+        };
+
+        console.log('    📤 Line Payload:', JSON.stringify(linePayload, null, 2));
+
+        const lineRes = await openbravoApi.post(
+          '/org.openbravo.service.json.jsonrest/MaterialMgmtInternalConsumptionLine',
+          linePayload
+        );
+
+        if (lineRes?.data?.response?.status === -1) {
+          const lineError = lineRes.data.response.error;
+          throw new Error(lineError?.message || 'Failed to create line');
+        }
+
+        console.log(`    ✅ Line created`);
+        successCount++;
+
+      } catch (err) {
+        console.error(`    ❌ Error:`, err.message);
+        errors.push(`${material.material_name}: ${err.message}`);
+      }
+    }
+
+    if (successCount === 0) {
+      throw new Error('No materials were added to the consumption');
+    }
+
+    console.log(`\n✅ Lines created: ${successCount}/${materials.length}`);
+
+    // STEP 3: Process Internal Consumption via API
+    console.log('\n🔄 STEP 3: Processing Internal Consumption...');
+    
+    const apiUrl = (import.meta.env.VITE_OPENBRAVO_URL || '').trim();
+    const apiPort = (import.meta.env.VITE_API_PORT || '').trim();
+    const username = (import.meta.env.VITE_API_USER || '').trim();
+    const password = (import.meta.env.VITE_API_PASS || '').trim();
+
+    if (!apiUrl || !apiPort || !username || !password) {
+      console.warn('⚠️ API credentials not fully configured - skipping process step');
+      console.log(`✅ Internal Consumption created but NOT processed: ${consumptionId}`);
+      console.log(`${'='.repeat(60)}\n`);
+      
+      return {
+        success: true,
+        movementId: consumptionId,
+        successCount,
+        totalMaterials: materials.length,
+        errors: errors.length > 0 ? errors : null,
+        warning: 'Internal Consumption created but not processed. Please process manually in Openbravo.'
+      };
+    }
+
+    const endpoint = `${apiUrl.replace(/\/+$/, '')}:${apiPort}/api/process`;
+    const token = btoa(unescape(encodeURIComponent(`${username}:${password}`)));
+
+    const processPayload = {
+      ad_process_id: '800131',
+      ad_client_id: clientId,
+      ad_org_id: orgId,
+      data: [{ id: consumptionId }]
+    };
+
+    console.log('📤 Process Payload:', JSON.stringify(processPayload, null, 2));
+
+    try {
+      const processRes = await axios.post(endpoint, processPayload, {
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Basic ${token}`,
+          'X-Requested-With': 'XMLHttpRequest'
+        },
+        withCredentials: false,
+        timeout: 30000
+      });
+
+      console.log('📥 Process Response:', JSON.stringify(processRes?.data, null, 2));
+
+      const resultObj = processRes?.data?.data?.[0];
+      
+      if (!resultObj || resultObj.result !== 1) {
+        const errorMsg = resultObj?.errormsg || resultObj?.message || 'Process failed';
+        console.error('❌ Process error:', errorMsg);
+        
+        return {
+          success: true,
+          movementId: consumptionId,
+          successCount,
+          totalMaterials: materials.length,
+          errors: errors.length > 0 ? errors : null,
+          warning: `Internal Consumption created but process failed: ${errorMsg}. Please process manually.`
+        };
+      }
+
+      console.log(`✅ Internal Consumption processed successfully`);
+      console.log(`${'='.repeat(60)}\n`);
+      
+    } catch (processErr) {
+      console.error('❌ Process API error:', processErr.message);
+      
+      return {
+        success: true,
+        movementId: consumptionId,
+        successCount,
+        totalMaterials: materials.length,
+        errors: errors.length > 0 ? errors : null,
+        warning: `Internal Consumption created but process API failed: ${processErr.message}. Please process manually.`
+      };
+    }
+
+    return {
+      success: true,
+      movementId: consumptionId,
+      successCount,
+      totalMaterials: materials.length,
+      errors: errors.length > 0 ? errors : null
+    };
+
+  } catch (err) {
+    console.error('\n❌ FATAL ERROR:', err.message);
+    
+    return {
+      success: false,
+      error: err.message,
+      errors: [],
+      fullError: err
+    };
+  }
+};
+
+
+// ===========================================
+// 9. LOADER UTAMA (Memanggil fungsi di atasnya)
+// ===========================================
+
+const loadData = async () => {
+  try {
+    loading.value = true;
+    
+    await Promise.all([
+      batchStore.getBatches(),
+      locationStore.fetchAll()
+    ]);
+
+    const { data: report, error: fetchError } = await supabase
+      .from('gh_report')
+      .select(`
+        *,
+        type_damages:gh_type_damage(*),
+        activities:gh_activity(
+          *,
+          materials:gh_material_used(*)
+        )
+      `)
+      .eq('report_id', report_id.value)
+      .single();
+    
+    if (fetchError) throw fetchError;
+    if (!report) throw new Error('Laporan tidak ditemukan');
+
+    currentReport.value = report;
+    
+    if (report.phase_id) {
+      phaseInfo.value = await loadPhaseInfo(report.phase_id);
+    }
+    
+    await loadApprovalProgress();
+    
+    if (report.location_id) {
+      await loadWarehouseAndBin(report.location_id);
+    }
+    
+  } catch (err) {
+    console.error('❌ Error loading data:', err);
+    error.value = err.message;
+    alert('❌ Gagal memuat data: ' + err.message);
+    router.push(sourcePage.value);
+  } finally {
+    loading.value = false;
+  }
+};
+
+
+// ===========================================
+// 10. APPROVAL ACTION (Memanggil fungsi di atasnya)
+// ===========================================
+
 const approveCurrentLevel = async () => {
   if (!canApproveCurrentLevel.value) {
     alert('⚠️ Anda tidak memiliki akses untuk approve di level ini');
@@ -746,14 +741,10 @@ const approveCurrentLevel = async () => {
     const currentLevelOrder = currentUserLevel.value.level_order;
     const username = authStore.user?.username || authStore.user?.email || 'Admin';
     
-    // 1. Update level status jadi 'approved'
+    // 1. Update level status
     const { error: updateLevelErr } = await supabase
       .from('gh_approval_level_status')
-      .update({
-        status: 'approved',
-        approved_by: authStore.user.user_id,
-        approved_at: new Date().toISOString()
-      })
+      .update({ status: 'approved', approved_by: authStore.user.user_id, approved_at: new Date().toISOString() })
       .eq('record_id', currentReport.value.approval_record_id)
       .eq('level_order', currentLevelOrder);
 
@@ -765,7 +756,6 @@ const approveCurrentLevel = async () => {
           .select('flow_id')
           .eq('record_id', currentReport.value.approval_record_id)
           .single();
-    
     if (flowFetchErr) throw flowFetchErr;
 
     const { error: historyErr } = await supabase
@@ -782,32 +772,24 @@ const approveCurrentLevel = async () => {
 
     if (historyErr) throw historyErr;
 
-    // 3. Check apakah ini final level
+    // 3. Check final level
     const { data: flowData } = await supabase
       .from('gh_approve_record')
-      .select(`
-        flow_id,
-        gh_approval_flow!inner(last_level)
-      `)
+      .select(`flow_id, gh_approval_flow!inner(last_level)`)
       .eq('record_id', currentReport.value.approval_record_id)
       .single();
 
     const isFinalLevel = currentLevelOrder === flowData.gh_approval_flow.last_level;
 
-    // 4. Update approve_record
+    // 4. Update approve_record & process Openbravo
     if (isFinalLevel) {
-      // ✅ FINAL APPROVAL - PROCESS OPENBRAVO MOVEMENT
       console.log('🎯 Final level approval - Processing Openbravo movements...');
 
-      // Final approval - set overall_status = 'approved'
+      // Update approval record status
       const { error: recordErr } = await supabase
         .from('gh_approve_record')
-        .update({
-          overall_status: 'approved',
-          completed_at: new Date().toISOString()
-        })
+        .update({ overall_status: 'approved', completed_at: new Date().toISOString() })
         .eq('record_id', currentReport.value.approval_record_id);
-
       if (recordErr) throw recordErr;
 
       // Update report status
@@ -815,58 +797,65 @@ const approveCurrentLevel = async () => {
         .from('gh_report')
         .update({ report_status: 'approved' })
         .eq('report_id', currentReport.value.report_id);
-
       if (reportErr) throw reportErr;
 
-      // ✅ PROCESS OPENBRAVO MOVEMENT FOR EACH ACTIVITY
+      // PROCESS OPENBRAVO MOVEMENT
       let movementSuccessCount = 0;
       let movementFailCount = 0;
       const movementErrors = [];
 
       for (const activity of currentReport.value.activities) {
-        if (!activity.materials || activity.materials.length === 0) {
-          console.log(`⚠️ Activity ${activity.act_name} has no materials, skipping...`);
-          continue;
-        }
-
-        console.log(`📦 Processing movement for activity: ${activity.act_name}`);
+        if (!activity.materials || activity.materials.length === 0) continue;
         
         try {
-          const movementResult = await createAndProcessMovement(
-            activity.materials, 
-            activity.act_name
-          );
+          console.log(`🔄 Processing activity: ${activity.act_name}`);
+          
+          // Panggilan createAndProcessMovement
+          const movementResult = await createAndProcessMovement(activity.materials, activity.act_name);
 
           if (movementResult.success) {
-            // Update activity dengan openbravo_movement_id
+            // ✅ HANYA UPDATE openbravo_movement_id, TANPA status
             const { error: updateActivityErr } = await supabase
               .from('gh_activity')
-              .update({
-                openbravo_movement_id: movementResult.movementId,
-                status: 'approved'
+              .update({ 
+                openbravo_movement_id: movementResult.movementId
+                // ❌ HAPUS: status: 'approved' (kolom tidak ada di tabel)
               })
               .eq('activity_id', activity.activity_id);
 
             if (updateActivityErr) {
-              console.error('❌ Error updating activity:', updateActivityErr);
-              movementErrors.push(`${activity.act_name}: Failed to update activity`);
+              console.error(`❌ Failed to update activity ${activity.act_name}:`, updateActivityErr);
+              movementErrors.push(`${activity.act_name}: Failed to update activity in database`);
               movementFailCount++;
             } else {
+              console.log(`✅ Activity ${activity.act_name} updated successfully with movement ID: ${movementResult.movementId}`);
               movementSuccessCount++;
-              console.log(`✅ Activity ${activity.act_name} updated with movement ID: ${movementResult.movementId}`);
+              
+              // Jika ada warning dari movement result, tambahkan ke errors
+              if (movementResult.warning) {
+                movementErrors.push(`${activity.act_name}: ${movementResult.warning}`);
+              }
             }
           } else {
+            // Movement creation failed
+            console.error(`❌ Movement failed for ${activity.act_name}:`, movementResult.error);
             movementFailCount++;
-            movementErrors.push(`${activity.act_name}: ${movementResult.errors || 'Movement creation failed'}`);
+            
+            const errorMsg = movementResult.error || 
+                            (movementResult.errors && Array.isArray(movementResult.errors) 
+                              ? movementResult.errors.join('; ') 
+                              : 'Movement creation failed');
+            
+            movementErrors.push(`${activity.act_name}: ${errorMsg}`);
           }
         } catch (err) {
-          console.error(`❌ Error processing movement for ${activity.act_name}:`, err);
+          console.error(`❌ Critical error processing ${activity.act_name}:`, err);
           movementFailCount++;
-          movementErrors.push(`${activity.act_name}: ${err.message}`);
+          movementErrors.push(`${activity.act_name}: ${err.message || 'Unknown error'}`);
         }
       }
 
-      // Show result summary
+
       let alertMessage = `✅ Report berhasil disetujui di level terakhir!\n\n`;
       alertMessage += `📊 Summary:\n`;
       alertMessage += `✅ Movements created: ${movementSuccessCount}\n`;
@@ -879,20 +868,16 @@ const approveCurrentLevel = async () => {
       alert(alertMessage);
 
     } else {
-      // Bukan final - increment current_level_order
+      // Increment current_level_order
       const { error: recordErr } = await supabase
         .from('gh_approve_record')
-        .update({
-          current_level_order: currentLevelOrder + 1
-        })
+        .update({ current_level_order: currentLevelOrder + 1 })
         .eq('record_id', currentReport.value.approval_record_id);
 
       if (recordErr) throw recordErr;
 
       alert(`✅ Report berhasil disetujui untuk level "${levelName}"!\n\nReport akan dilanjutkan ke level berikutnya.`);
     }
-
-    console.log('✅ Level approved');
 
     await loadData();
     router.push(sourcePage.value);
@@ -905,7 +890,11 @@ const approveCurrentLevel = async () => {
   }
 };
 
-// ✅ REQUEST REVISION (REPORT LEVEL)
+
+// ===========================================
+// 11. REVISION ACTION (Memanggil fungsi di atasnya)
+// ===========================================
+
 const requestRevisionForLevel = async () => {
   if (!canApproveCurrentLevel.value) {
     alert('⚠️ Anda tidak memiliki akses untuk request revision di level ini');
@@ -927,8 +916,6 @@ const requestRevisionForLevel = async () => {
     const currentLevel = currentUserLevel.value;
     if (!currentLevel) throw new Error('Current approval level not found.');
     
-    const username = authStore.user?.username || authStore.user?.email || 'Admin';
-    
     // 1. Update level status jadi 'needRevision'
     const { error: updateLevelErr } = await supabase
       .from('gh_approval_level_status')
@@ -949,7 +936,6 @@ const requestRevisionForLevel = async () => {
           .select('flow_id')
           .eq('record_id', currentReport.value.approval_record_id)
           .single();
-    
     if (flowFetchErr) throw flowFetchErr;
 
     const { error: historyErr } = await supabase
@@ -969,10 +955,7 @@ const requestRevisionForLevel = async () => {
     // 3. Update approve_record overall_status
     const { error: recordErr } = await supabase
       .from('gh_approve_record')
-      .update({
-        overall_status: 'needRevision',
-        current_level_order: 1 // Reset ke level 1
-      })
+      .update({ overall_status: 'needRevision', current_level_order: 1 }) // Reset ke level 1
       .eq('record_id', currentReport.value.approval_record_id);
 
     if (recordErr) throw recordErr;
@@ -981,12 +964,8 @@ const requestRevisionForLevel = async () => {
     const { error: resetErr } = await supabase
       .from('gh_approval_level_status')
       .update({
-        status: 'pending',
-        approved_by: null,
-        approved_at: null,
-        revision_notes: null,
-        revision_requested_by: null,
-        revision_requested_at: null
+        status: 'pending', approved_by: null, approved_at: null,
+        revision_notes: null, revision_requested_by: null, revision_requested_at: null
       })
       .eq('record_id', currentReport.value.approval_record_id)
       .neq('level_order', currentLevel.level_order); // Kecuali level yang request revision
@@ -1000,10 +979,6 @@ const requestRevisionForLevel = async () => {
       .eq('report_id', currentReport.value.report_id);
 
     if (reportErr) throw reportErr;
-
-    // ❌ HAPUS: Reset item status (optional)
-    // if(currentReport.value.type_damages) { ... }
-    // if(currentReport.value.activities) { ... }
     
     await loadData();
     closeRevisionModal();
@@ -1019,12 +994,15 @@ const requestRevisionForLevel = async () => {
   }
 };
 
-// ✅ UPDATE REQUEST REVISION (ITEM LEVEL)
+
+// ===========================================
+// 12. MODAL HANDLERS
+// ===========================================
+
 const handleRevision = async () => {
   const { type } = revisionModal.value
   
   if (type === 'level') {
-    // Call the report-level revision function
     await requestRevisionForLevel();
   } else {
     // Item revision tidak didukung
@@ -1033,14 +1011,12 @@ const handleRevision = async () => {
   }
 }
 
-// ✅ UTILITY FOR MODAL
 const openRevisionModal = (type, itemId) => {
   if (!canApproveCurrentLevel.value) {
     alert('⚠️ Anda tidak memiliki akses untuk melakukan aksi ini di level saat ini.');
     return;
   }
   
-  // ✅ Hanya izinkan type === 'level'
   if (type !== 'level') {
     alert('⚠️ Hanya revision report yang didukung. Gunakan tombol "Request Revision Report".');
     return;
@@ -1063,24 +1039,68 @@ const closeRevisionModal = () => {
   }
 }
 
-const getStatusBadge = (status) => {
-  const badges = {
-    'onReview': {
-      text: '⏳ Review',
-      class: 'bg-yellow-100 text-yellow-800 border-yellow-200'
-    },
-    'needRevision': {
-      text: '🔄 Revision',
-      class: 'bg-red-100 text-red-800 border-red-200'
-    },
-    'approved': {
-      text: '✅ Approved',
-      class: 'bg-green-100 text-green-800 border-green-200'
-    }
-  }
-  return badges[status || 'onReview'] || badges['onReview']
-}
 
+// ===========================================
+// 13. ON MOUNTED (Startup)
+// ===========================================
+
+onMounted(async () => {
+  if (!authStore.isLoggedIn) {
+    router.push('/')
+    return
+  }
+
+  if (!report_id.value) {
+    alert('⚠️ Report ID tidak ditemukan')
+    router.push(sourcePage.value)
+    return
+  }
+
+  await loadData()
+})
+
+
+// ===========================================
+// 14. COMPUTED PROPERTIES
+// ===========================================
+
+const reportInfo = computed(() => {
+  if (!currentReport.value) return null;
+  
+  const report = currentReport.value;
+  let totalTypeDamages = 0;
+  let totalActivities = 0;
+  
+  if (report.type_damages) {
+    totalTypeDamages = report.type_damages.length;
+  }
+  if (report.activities) {
+    totalActivities = report.activities.length;
+  }
+  
+  return {
+    report_id: report.report_id,
+    location_id: report.location_id,
+    location_name: getLocationName(report.location_id),
+    batch_id: report.batch_id,
+    batch_name: getBatchName(report.batch_id),
+    report_date: report.report_date,
+    report_status: report.report_status,
+    phase_id: report.phase_id,
+    phase_name: phaseInfo.value || 'Unknown Phase', 
+    totalTypeDamages,
+    totalActivities,
+    current_level_order: currentUserLevel.value?.level_order || 1,
+    current_level_name: currentUserLevel.value?.level_name || 'Level 1',
+    can_approve: canApproveCurrentLevel.value,
+    is_final_level: currentUserLevel.value?.is_final_level || false,
+    revision_notes: report.revision_notes,
+    revision_requested_by: report.revision_requested_by,
+    revision_requested_at: report.revision_requested_at,
+    approved_by: report.approved_by,
+    approved_at: report.approved_at,
+  };
+});
 </script>
 
 <template>

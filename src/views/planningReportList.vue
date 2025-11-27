@@ -8,9 +8,9 @@ import { useBatchStore } from '../stores/batch'
 import { useLocationStore } from '../stores/location'
 import { useProductionStore } from '../stores/production'
 import { useSalesStore } from '../stores/sales'
-import { onMounted, ref, computed, watch } from 'vue'
+import { onMounted, ref, computed, watch, nextTick } from 'vue' // Import nextTick
 import { supabase } from '../lib/supabase'
-import openbravoApi from '../lib/openbravo'
+// import openbravoApi from '../lib/openbravo' // Dihapus karena tidak digunakan di file ini
 
 const authStore = useAuthStore()
 const activityReportStore = useActivityReportStore()
@@ -26,6 +26,45 @@ const filterDate = ref('')
 const filterDatePlanning = ref('')
 const filterDateProduction = ref('')
 const isRefreshing = ref(false)
+
+// Ref untuk menyimpan mapping ID Record ke Current Level
+const currentLevelMap = ref({});
+
+
+// ❌ HAPUS: loadCurrentLevel (Diganti dengan loadAllApprovalLevels)
+// const loadCurrentLevel = async (approvalRecordId) => { ... }
+
+
+// ✅ FUNGSI BARU: Memuat semua level dalam satu query
+const loadAllApprovalLevels = async () => {
+  const reports = activityReportStore.reports;
+  const recordIds = [...new Set(reports.map(r => r.approval_record_id).filter(Boolean))];
+  
+  if (recordIds.length === 0) {
+    currentLevelMap.value = {};
+    return;
+  }
+  
+  try {
+    const { data, error } = await supabase
+      .from('gh_approve_record')
+      .select('record_id, current_level_order')
+      .in('record_id', recordIds);
+      
+    if (error) throw error;
+    
+    const map = {};
+    data.forEach(item => {
+      map[item.record_id] = item.current_level_order;
+    });
+    
+    currentLevelMap.value = map;
+    console.log('✅ Approval levels loaded:', map);
+  } catch (error) {
+    console.error('❌ Error loading all approval levels:', error);
+    currentLevelMap.value = {};
+  }
+};
 
 
 const getPhaseNames = async (reports) => {
@@ -61,11 +100,11 @@ const refreshData = async () => {
       batchStore.getBatches(),
       locationStore.fetchAll()
     ])
+    
+    // ✅ PANGGIL FUNGSI BARU UNTUK MEMUAT LEVEL
+    await loadAllApprovalLevels();
+
     console.log('✅ All data refreshed')
-    console.log('📋 Total activity reports:', activityReportStore.reports.length)
-    console.log('📅 Total plannings:', planningStore.plannings.length)
-    console.log('🏭 Total productions:', productionStore.productions.length)
-    console.log('💰 Total sales:', salesStore.sales.length)
   } catch (error) {
     console.error('❌ Error refreshing data:', error)
   } finally {
@@ -109,23 +148,6 @@ watch(
 );
 
 
-const loadCurrentLevel = async (approvalRecordId) => {
-  if (!approvalRecordId) return 1;
-
-  const { data, error } = await supabase
-    .from('gh_approve_record')
-    .select('current_level_order')
-    .eq('record_id', approvalRecordId)
-    .single();
-
-  if (error) {
-    console.error('Error loading current level:', error);
-    return 1;
-  }
-
-  return data?.current_level_order || 1;
-};
-
 // Helper untuk nama batch & lokasi
 const getBatchName = (batchId) => {
   const batch = batchStore.batches.find(b => b.batch_id === batchId)
@@ -156,22 +178,29 @@ const getApprovalStatus = async (approvalRecordId) => {
 };
 
 const activityReports = computed(() => {
-  let reports = activityReportStore.reports.map(report => ({
-    report_id: String(report.report_id),
-    location_id: report.location_id,
-    location_name: getLocationName(report.location_id),
-    batch_id: report.batch_id,
-    batch_name: getBatchName(report.batch_id),
-    report_date: report.report_date,
-    report_status: report.report_status,
-    phase_id: report.phase_id,
-    approval_record_id: report.approval_record_id,
-    // ✅ TAMBAHKAN: Load approval progress
-    approval_progress: null, // Will be loaded async
-    current_level: null,
-    created_at: report.created_at,
-    updated_at: report.updated_at
-  }));
+  let reports = activityReportStore.reports.map(report => {
+    
+    // ✅ AMBIL CURRENT LEVEL DARI MAP yang sudah dimuat ASYNC
+    const currentLevel = report.approval_record_id 
+      ? currentLevelMap.value[report.approval_record_id] 
+      : 1; // Default ke 1 jika tidak ada record ID
+      
+    return {
+      report_id: String(report.report_id),
+      location_id: report.location_id,
+      location_name: getLocationName(report.location_id),
+      batch_id: report.batch_id,
+      batch_name: getBatchName(report.batch_id),
+      report_date: report.report_date,
+      report_status: report.report_status,
+      phase_id: report.phase_id,
+      approval_record_id: report.approval_record_id,
+      approval_progress: null, 
+      current_level: currentLevel, // ✅ GUNAKAN DATA DARI MAP
+      created_at: report.created_at,
+      updated_at: report.updated_at
+    };
+  });
 
   // Filter dan sort
   if (filterDate.value) {
@@ -388,7 +417,6 @@ const getCurrentTime = () => {
 
 <template>
   <div class="min-h-screen bg-gradient-to-br from-gray-50 to-white">
-    <!-- Header Bar -->
     <div class="bg-white border-b border-gray-200 shadow-sm sticky top-0 z-40">
       <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-5">
         <div class="flex items-center justify-between">
@@ -423,7 +451,6 @@ const getCurrentTime = () => {
             </div>
           </div>
 
-          <!-- Toggle Buttons Desktop -->
           <div class="hidden md:flex gap-3">
             <button
               @click="selectedReport = 'activity'"
@@ -461,7 +488,6 @@ const getCurrentTime = () => {
           </div>
         </div>
 
-        <!-- Toggle Buttons Mobile -->
         <div class="flex md:hidden gap-3 mt-4">
           <button
             @click="selectedReport = 'planning'"
@@ -495,14 +521,12 @@ const getCurrentTime = () => {
             class="flex-1 px-4 py-2.5 rounded-lg font-semibold transition-all text-sm"
           >
             📈 Production
-          </button>
+            </button>
         </div>
       </div>
     </div>
 
-    <!-- Main Content -->
     <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-      <!-- Loading State -->
       <div v-if="isLoading && !isRefreshing" class="flex items-center justify-center py-20">
         <div class="text-center">
           <div
@@ -512,9 +536,7 @@ const getCurrentTime = () => {
         </div>
       </div>
 
-      <!-- Report Activity List -->
       <div v-else-if="selectedReport === 'activity'">
-        <!-- Filter & Action Bar -->
         <div class="mb-8">
           <h2 class="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-3">
             Filter & Actions
@@ -585,7 +607,6 @@ const getCurrentTime = () => {
           </div>
         </div>
 
-        <!-- Activity Reports -->
         <div class="mb-8">
           <div class="flex items-center justify-between mb-3">
             <h2 class="text-sm font-semibold text-gray-500 uppercase tracking-wide">
@@ -653,7 +674,6 @@ const getCurrentTime = () => {
                       </div>
                       <div class="flex items-center justify-between text-xs">
                         <span class="text-gray-500">Approval Progress</span>
-                        <!-- ✅ TAMPILKAN current level dari gh_approve_record -->
                         <span class="font-bold text-blue-600">
                           Level {{ report.current_level || 1 }}
                         </span>
@@ -688,7 +708,6 @@ const getCurrentTime = () => {
         </div>
       </div>
 
-      <!-- Report Planning List -->
       <div v-else-if="selectedReport === 'planning'">
         <div class="mb-8">
           <h2 class="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-3">
@@ -760,7 +779,6 @@ const getCurrentTime = () => {
           </div>
         </div>
 
-        <!-- Planning Reports -->
         <div class="mb-8">
           <div class="flex items-center justify-between mb-3">
             <h2 class="text-sm font-semibold text-gray-500 uppercase tracking-wide">
@@ -864,9 +882,7 @@ const getCurrentTime = () => {
         </div>
       </div>
 
-      <!-- Report Production & Sales List -->
       <div v-else-if="selectedReport === 'production'">
-        <!-- Filter -->
         <div class="mb-8">
           <h2 class="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-3">
             Filter
@@ -897,13 +913,11 @@ const getCurrentTime = () => {
           </div>
         </div>
 
-        <!-- Production & Sales Reports -->
         <div class="mb-8">
           <h2 class="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-3">
             Laporan Produksi & Penjualan ({{ productionReports.length }})
           </h2>
 
-          <!-- Empty State -->
           <div
             v-if="productionReports.length === 0"
             class="bg-white rounded-2xl border-2 border-gray-100 shadow-sm p-12 text-center"
@@ -925,7 +939,6 @@ const getCurrentTime = () => {
               <div
                 class="bg-white rounded-2xl border-2 border-gray-100 hover:border-[#0071f3] shadow-sm hover:shadow-xl transition-all p-6 transform hover:-translate-y-1"
               >
-                <!-- Header -->
                 <div
                   class="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-6 pb-4 border-b-2 border-gray-100"
                 >
@@ -972,9 +985,7 @@ const getCurrentTime = () => {
                   </div>
                 </div>
 
-                <!-- Content Grid -->
                 <div class="grid grid-cols-1 md:grid-cols-2 gap-5">
-                  <!-- Produksi -->
                   <div class="bg-gradient-to-br from-[#0071f3] to-[#0060d1] text-white p-5 rounded-xl">
                     <p class="font-bold text-base mb-4 flex items-center gap-2">
                       <span class="text-xl">🏭</span>
@@ -998,7 +1009,6 @@ const getCurrentTime = () => {
                     </p>
                   </div>
 
-                  <!-- Sales -->
                   <div class="bg-gradient-to-br from-green-500 to-green-600 text-white p-5 rounded-xl">
                     <p class="font-bold text-base mb-4 flex items-center gap-2">
                       <span class="text-xl">💰</span>
@@ -1030,7 +1040,6 @@ const getCurrentTime = () => {
         </div>
       </div>
 
-      <!-- Footer -->
       <footer class="text-center py-10 mt-8 border-t border-gray-200">
         <div class="flex items-center justify-center gap-2 mb-2">
           <span class="text-2xl">🌱</span>
