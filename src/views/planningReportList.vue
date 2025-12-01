@@ -8,7 +8,7 @@ import { useBatchStore } from '../stores/batch'
 import { useLocationStore } from '../stores/location'
 import { useProductionStore } from '../stores/production'
 import { useSalesStore } from '../stores/sales'
-import { onMounted, ref, computed, watch, nextTick } from 'vue' // Import nextTick
+import { onMounted, ref, computed, watch, nextTick } from 'vue'
 import { supabase } from '../lib/supabase'
 // import openbravoApi from '../lib/openbravo' // Dihapus karena tidak digunakan di file ini
 
@@ -27,42 +27,44 @@ const filterDatePlanning = ref('')
 const filterDateProduction = ref('')
 const isRefreshing = ref(false)
 
-// Ref untuk menyimpan mapping ID Record ke Current Level
-const currentLevelMap = ref({});
+// ✅ Ref BARU untuk menyimpan mapping ID Record ke Status & Level
+const approvalRecordMap = ref({});
 
 
-// ❌ HAPUS: loadCurrentLevel (Diganti dengan loadAllApprovalLevels)
-// const loadCurrentLevel = async (approvalRecordId) => { ... }
-
-
-// ✅ FUNGSI BARU: Memuat semua level dalam satu query
-const loadAllApprovalLevels = async () => {
-  const reports = activityReportStore.reports;
-  const recordIds = [...new Set(reports.map(r => r.approval_record_id).filter(Boolean))];
+// ✅ FUNGSI BARU: Memuat semua level dan status dari gh_approve_record
+const loadAllApprovalRecords = async (prodRecordIds) => {
+  // 1. Kumpulkan semua record IDs dari Activity Reports
+  const activityRecordIds = [...new Set(activityReportStore.reports.map(r => r.approval_record_id).filter(Boolean))];
   
-  if (recordIds.length === 0) {
-    currentLevelMap.value = {};
+  // 2. Kumpulkan semua record IDs dari Production/Sales Reports
+  const allRecordIds = [...new Set([...activityRecordIds, ...prodRecordIds])];
+
+  if (allRecordIds.length === 0) {
+    approvalRecordMap.value = {};
     return;
   }
   
   try {
     const { data, error } = await supabase
       .from('gh_approve_record')
-      .select('record_id, current_level_order')
-      .in('record_id', recordIds);
+      .select('record_id, current_level_order, overall_status')
+      .in('record_id', allRecordIds);
       
     if (error) throw error;
     
     const map = {};
     data.forEach(item => {
-      map[item.record_id] = item.current_level_order;
+      map[item.record_id] = {
+        current_level: item.current_level_order,
+        overall_status: item.overall_status
+      };
     });
     
-    currentLevelMap.value = map;
-    console.log('✅ Approval levels loaded:', map);
+    approvalRecordMap.value = map;
+    console.log('✅ Approval records loaded:', map);
   } catch (error) {
-    console.error('❌ Error loading all approval levels:', error);
-    currentLevelMap.value = {};
+    console.error('❌ Error loading all approval records:', error);
+    approvalRecordMap.value = {};
   }
 };
 
@@ -101,8 +103,11 @@ const refreshData = async () => {
       locationStore.fetchAll()
     ])
     
-    // ✅ PANGGIL FUNGSI BARU UNTUK MEMUAT LEVEL
-    await loadAllApprovalLevels();
+    // Kumpulkan semua Approval Record ID dari Production/Sales (hanya butuh salah satu)
+    const prodRecordIds = [...new Set(productionStore.productions.map(p => p.approval_record_id).filter(Boolean))];
+    
+    // ✅ PANGGIL FUNGSI BARU UNTUK MEMUAT LEVEL & STATUS
+    await loadAllApprovalRecords(prodRecordIds);
 
     console.log('✅ All data refreshed')
   } catch (error) {
@@ -134,7 +139,8 @@ watch(
         'planningActivityReview',
         'planningActivityView',
         'reportProductionReview',
-        'reportProductionView'
+        'reportProductionView',
+        'reportProductionEdit' // Ditambahkan jika ada
       ];
 
       if (fromPages.includes(oldName)) {
@@ -180,11 +186,20 @@ const getApprovalStatus = async (approvalRecordId) => {
 const activityReports = computed(() => {
   let reports = activityReportStore.reports.map(report => {
     
-    // ✅ AMBIL CURRENT LEVEL DARI MAP yang sudah dimuat ASYNC
-    const currentLevel = report.approval_record_id 
-      ? currentLevelMap.value[report.approval_record_id] 
-      : 1; // Default ke 1 jika tidak ada record ID
+    // 1. Dapatkan objek approval record dari map. Gunakan fallback null jika tidak ada record ID/map.
+    const recordInfo = report.approval_record_id 
+      ? approvalRecordMap.value[report.approval_record_id] 
+      : null;
       
+    // 2. Definisikan approvalInfo dengan fallback yang aman.
+    const approvalInfo = recordInfo || { 
+        current_level: 1, 
+        overall_status: report.report_status 
+    };
+
+    // 3. Ambil status yang benar (overall_status dari approval record jika ada, atau report_status asli).
+    const status = approvalInfo.overall_status || report.report_status; 
+
     return {
       report_id: String(report.report_id),
       location_id: report.location_id,
@@ -192,11 +207,11 @@ const activityReports = computed(() => {
       batch_id: report.batch_id,
       batch_name: getBatchName(report.batch_id),
       report_date: report.report_date,
-      report_status: report.report_status,
+      report_status: status, // ✅ Status diambil dari overall_status / fallback
       phase_id: report.phase_id,
       approval_record_id: report.approval_record_id,
       approval_progress: null, 
-      current_level: currentLevel, // ✅ GUNAKAN DATA DARI MAP
+      current_level: approvalInfo.current_level, // ✅ Level diambil dari map / fallback
       created_at: report.created_at,
       updated_at: report.updated_at
     };
@@ -286,57 +301,59 @@ const handlePlanningClick = (planning) => {
   })
 }
 
-// 📦 Production & Sales (digabung per tanggal + batch + lokasi)
+// 📦 Production & Sales (digabung per approval_record_id)
 const productionReports = computed(() => {
   const groupedMap = new Map()
 
-  // Group production
-  productionStore.productions.forEach(prod => {
-    const key = `${prod.date}_${prod.batch_id}_${prod.location_id}`
+  // Ambil semua item production dan sales
+  const allItems = [
+    ...productionStore.productions.map(p => ({ ...p, type: 'production' })), 
+    ...salesStore.sales.map(s => ({ ...s, type: 'sales' }))
+  ];
 
-    if (!groupedMap.has(key)) {
-      groupedMap.set(key, {
-      date: prod.date || 'N/A',
-      batch_id: prod.batch_id,
-      batch_name: getBatchName(prod.batch_id),
-      location_id: prod.location_id,
-      location_name: getLocationName(prod.location_id),
-      status: prod.status || 'Waiting',
-      production: [],
-      sales: []
-    })
+  allItems.forEach(item => {
+    // Kunci grouping adalah approval_record_id. Item tanpa ID record WAJIB diabaikan.
+    const recordId = item.approval_record_id;
+    if (!recordId) return; // 👈 KRITIS: Abaikan item jika ID Record NULL
+
+    // 1. Dapatkan Approval Info dari map (sudah aman dari undefined)
+    const recordInfo = approvalRecordMap.value[recordId] || { 
+        current_level: 1, 
+        overall_status: item.status || 'onReview' 
+    };
+    
+    // 2. Set/Update group
+    if (!groupedMap.has(recordId)) {
+      groupedMap.set(recordId, {
+        record_id: recordId, // Kunci utama untuk routing
+        date: item.date || 'N/A',
+        batch_id: item.batch_id,
+        batch_name: getBatchName(item.batch_id),
+        location_id: item.location_id,
+        location_name: getLocationName(item.location_id),
+        status: recordInfo.overall_status,
+        current_level: recordInfo.current_level,
+        production: [],
+        sales: []
+      });
     }
 
-    groupedMap.get(key).production.push({
-      category: prod.category || 'N/A',
-      qty: prod.qty || 0,
-      owner: prod.owner || 'N/A'
-    })
-  })
+    const group = groupedMap.get(recordId);
 
-  // Group sales
-  salesStore.sales.forEach(sale => {
-    const key = `${sale.date}_${sale.batch_id}_${sale.location_id}`
-
-    if (!groupedMap.has(key)) {
-      groupedMap.set(key, {
-      date: sale.date || 'N/A',
-      batch_id: sale.batch_id,
-      batch_name: getBatchName(sale.batch_id),
-      location_id: sale.location_id,
-      location_name: getLocationName(sale.location_id),
-      status: sale.status || 'Waiting',
-      production: [],
-      sales: []
-    })
+    if (item.type === 'production') {
+      group.production.push({
+        category: item.category || 'N/A',
+        qty: item.qty || 0,
+        owner: item.owner || 'N/A'
+      });
+    } else if (item.type === 'sales') {
+      group.sales.push({
+        category: item.category || 'N/A',
+        qty: item.qty || 0,
+        price: item.price || 0
+      });
     }
-
-    groupedMap.get(key).sales.push({
-      category: sale.category || 'N/A',
-      qty: sale.qty || 0,
-      price: sale.price || 0
-    })
-  })
+  });
 
   let result = Array.from(groupedMap.values())
 
@@ -350,18 +367,25 @@ const productionReports = computed(() => {
   return result
 })
 
-// 👉 PENTING: pakai QUERY, bukan params
+// ✅ PENTING: Gunakan record_id untuk routing
 const handleProductionClick = (item) => {
-  if (!item) return
+  if (!item || !item.record_id) {
+      alert('⚠️ Approval Record ID tidak ditemukan. Tidak dapat me-review laporan.');
+      return;
+  }
+  
+  let routeName = 'reportProductionReview';
+
+  if (item.status === 'needRevision' || item.status === 'revision') { // Tambahkan 'revision' untuk Production
+    routeName = 'reportProductionEdit';
+  } else if (item.status === 'approved') {
+    routeName = 'reportProductionView';
+  }
 
   router.push({
-    name: 'reportProductionReview',
-    query: {
-      batch_id: String(item.batch_id),
-      location_id: String(item.location_id),
-      date: item.date
-    }
-  })
+    name: routeName,
+    params: { record_id: String(item.record_id) } // ✅ Menggunakan record_id
+  });
 }
 
 // Status helpers untuk Planning (2 status)
@@ -381,13 +405,17 @@ const getPlanningStatusColorClass = (status) => {
   return colorMap[status] || 'bg-gray-100 text-gray-800'
 }
 
-// Status helpers Activity
+// Status helpers Activity / Production
 const getStatusText = (dbStatus) => {
   const statusMap = {
     onReview: '⏳ Waiting Review',
     needRevision: '🔄 Need Revision',
     approved: '✅ Approved'
   }
+  // Tambahkan alias untuk status Production Reports
+  if (dbStatus === 'Waiting') return '⏳ Waiting Review';
+  if (dbStatus === 'revision') return '🔄 Need Revision';
+  
   return statusMap[dbStatus] || '❓ Unknown'
 }
 
@@ -397,6 +425,11 @@ const getStatusColorClass = (dbStatus) => {
     needRevision: 'bg-red-100 text-red-800',
     approved: 'bg-green-100 text-green-800'
   }
+  
+  // Tambahkan alias untuk status Production Reports
+  if (dbStatus === 'Waiting') return 'bg-yellow-100 text-yellow-800';
+  if (dbStatus === 'revision') return 'bg-red-100 text-red-800';
+
   return colorMap[dbStatus] || 'bg-gray-100 text-gray-800'
 }
 
@@ -958,19 +991,12 @@ const getCurrentTime = () => {
                   <div class="flex items-center gap-3">
                     <span
                       class="text-xs font-bold px-4 py-2 rounded-lg"
-                      :class="{
-                        'bg-yellow-100 text-yellow-800': item.status === 'Waiting' || item.status === 'onReview',
-                        'bg-green-100 text-green-800': item.status === 'approved',
-                        'bg-red-100 text-red-800': item.status === 'revision' || item.status === 'needRevision'
-                      }"
+                      :class="getStatusColorClass(item.status)"
                     >
-                      {{ 
-                        item.status === 'approved'
-                          ? '✅ Approved'
-                          : item.status === 'revision' || item.status === 'needRevision'
-                          ? '🔄 Revision'
-                          : '⏳ Waiting'
-                      }}
+                      {{ getStatusText(item.status) }}
+                    </span>
+                    <span class="text-xs text-gray-500 font-bold px-2 py-1 rounded-lg border border-gray-300">
+                        Lv. {{ item.current_level || 1 }}
                     </span>
                     <svg
                       class="w-5 h-5 text-gray-400 group-hover:text-[#0071f3] transition-colors"

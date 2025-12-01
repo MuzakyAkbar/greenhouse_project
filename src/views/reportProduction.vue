@@ -2,10 +2,12 @@
 import { ref, onMounted, computed, watch } from "vue";
 import { useProductionStore } from "@/stores/production.js";
 import { useSalesStore } from "@/stores/sales.js";
+import { useAuthStore } from "@/stores/auth"; // ✅ TAMBAHAN
 import { supabase } from "@/lib/supabase.js";
 
 const productionStore = useProductionStore();
 const salesStore = useSalesStore();
+const authStore = useAuthStore(); // ✅ TAMBAHAN
 
 /* -----------------------------------------------------
    STATE
@@ -20,10 +22,15 @@ const report = ref({
   date: "",
 });
 
+// ✅ TAMBAHAN: Approval Flow Configuration
+const APPROVAL_FLOW_CODE = ref('production_sales_report');
+const flowId = ref(null);
+const flowLastLevel = ref(null);
+
 /* -----------------------------------------------------
    DINAMIS CATEGORY DARI PHASE
 ----------------------------------------------------- */
-const productionCategories = ref([]);   // <-- sudah dinamis
+const productionCategories = ref([]);
 
 async function fetchCategoriesByBatch(batchId) {
   if (!batchId) {
@@ -42,7 +49,6 @@ async function fetchCategoriesByBatch(batchId) {
 
     if (error) throw error;
 
-    // Ambil category sesuai phase_name
     productionCategories.value = data.map(p => p.gh_phase?.phase_name);
     console.log("📌 CATEGORY LOADED:", productionCategories.value);
   } catch (err) {
@@ -51,7 +57,6 @@ async function fetchCategoriesByBatch(batchId) {
   }
 }
 
-// Watch batch → load category
 watch(() => report.value.batch, async (batchId) => {
   await fetchCategoriesByBatch(batchId);
 });
@@ -70,6 +75,29 @@ const productionList = ref([{ category: "", owner: "", quantity: 0 }]);
 const salesList = ref([{ category: "", quantity: 0, unit: "", price: 0 }]);
 
 const isSubmitting = ref(false);
+
+/* -----------------------------------------------------
+   ✅ LOAD APPROVAL FLOW INFO
+----------------------------------------------------- */
+const loadApprovalFlowInfo = async () => {
+  try {
+    const { data, error } = await supabase
+      .from('gh_approval_flow')
+      .select('flow_id, last_level')
+      .eq('code_name', APPROVAL_FLOW_CODE.value)
+      .single();
+
+    if (error) throw error;
+
+    flowId.value = data.flow_id;
+    flowLastLevel.value = data.last_level;
+    console.log(`✅ Approval Flow Info loaded: ID=${flowId.value}, LastLevel=${flowLastLevel.value}`);
+
+  } catch (err) {
+    console.error('❌ Error loading approval flow info:', err);
+    alert('Gagal memuat konfigurasi Approval Flow. Harap hubungi Admin.');
+  }
+};
 
 /* -----------------------------------------------------
    FETCH BASIC DATA
@@ -103,7 +131,11 @@ async function fetchBatches() {
 }
 
 onMounted(async () => {
-  await Promise.all([fetchLocations(), fetchBatches()]);
+  await Promise.all([
+    fetchLocations(), 
+    fetchBatches(),
+    loadApprovalFlowInfo() // ✅ TAMBAHAN
+  ]);
 });
 
 /* -----------------------------------------------------
@@ -186,7 +218,7 @@ function removeSale(i) {
 }
 
 /* -----------------------------------------------------
-   SUBMIT LAPORAN
+   ✅ SUBMIT LAPORAN DENGAN APPROVAL FLOW
 ----------------------------------------------------- */
 async function submitReport() {
   if (isSubmitting.value) return;
@@ -201,6 +233,25 @@ async function submitReport() {
   isSubmitting.value = true;
 
   try {
+    // ✅ 1. Initialize Approval Record DULU
+    console.log("📄 Initializing approval flow...");
+    
+    const { data: recordId, error: initErr } = await supabase.rpc('initialize_approval_record', {
+      p_flow_code_name: APPROVAL_FLOW_CODE.value,
+      p_reference_id: null, // Kita isi nanti setelah production/sales dibuat
+      p_reference_type: 'gh_production_sales',
+      p_submitted_by: authStore.user.user_id
+    });
+
+    if (initErr) {
+      console.error("❌ ERROR Initializing approval record:", initErr);
+      alert(`⚠️ Gagal membuat Approval Flow. Detail: ${initErr.message}`);
+      return;
+    }
+
+    console.log("✅ Approval Record created with ID:", recordId);
+
+    // ✅ 2. Insert Production dengan approval_record_id
     const prodPayload = productionList.value
       .filter((x) => x.category && x.owner && x.quantity > 0)
       .map((x) => ({
@@ -210,13 +261,17 @@ async function submitReport() {
         owner: x.owner,
         qty: x.quantity,
         date: report.value.date,
-        status: "Waiting",
+        status: "onReview",
+        approval_record_id: recordId // ✅ TAMBAHAN
       }));
 
     if (prodPayload.length > 0) {
-      await supabase.from("gh_production").insert(prodPayload);
+      const { error: prodErr } = await supabase.from("gh_production").insert(prodPayload);
+      if (prodErr) throw prodErr;
+      console.log(`✅ ${prodPayload.length} Production record(s) created`);
     }
 
+    // ✅ 3. Insert Sales dengan approval_record_id
     const salesPayload = salesList.value
       .filter((x) => x.category && x.unit && x.quantity > 0 && x.price > 0)
       .map((x) => ({
@@ -226,7 +281,8 @@ async function submitReport() {
         qty: x.quantity,
         price: x.price,
         date: report.value.date,
-        status: "Waiting",
+        status: "onReview",
+        approval_record_id: recordId // ✅ TAMBAHAN
       }));
 
     // VALIDASI G0
@@ -241,10 +297,14 @@ async function submitReport() {
     }
 
     if (salesPayload.length > 0) {
-      await supabase.from("gh_sales").insert(salesPayload);
+      const { error: salesErr } = await supabase.from("gh_sales").insert(salesPayload);
+      if (salesErr) throw salesErr;
+      console.log(`✅ ${salesPayload.length} Sales record(s) created`);
     }
 
-    alert("✅ Data laporan berhasil disimpan!");
+    alert("✅ Data laporan berhasil disimpan dan masuk ke approval flow!");
+    resetForm();
+
   } catch (err) {
     console.error(err);
     alert(`❌ Error: ${err.message}`);
