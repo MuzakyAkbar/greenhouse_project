@@ -2,7 +2,7 @@
 // ===========================================
 // 1. IMPORTS
 // ===========================================
-import { ref, onMounted, computed } from 'vue'
+import { ref, onMounted, computed, onUnmounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useAuthStore } from '../stores/auth'
 import { useBatchStore } from '../stores/batch'
@@ -23,8 +23,6 @@ const openbravoApi = axios.create({
     'Content-Type': 'application/json',
   },
 })
-// ===========================================
-
 
 // ===========================================
 // 3. STORES & ROUTER
@@ -60,10 +58,120 @@ const warehouseInfo = ref({
   location_name: null
 })
 
+// Image preview state
+const imagePreview = ref({
+  show: false,
+  images: [],
+  currentIndex: 0,
+  title: ''
+})
+
 
 // ===========================================
 // 5. HELPER FUNCTIONS (UTILITY)
 // ===========================================
+
+// --- IMAGE PREVIEW HELPERS ---
+const openImagePreview = (images, title, startIndex = 0) => {
+  if (!images || images.length === 0) return
+  
+  imagePreview.value = {
+    show: true,
+    images: images,
+    currentIndex: startIndex,
+    title: title || 'Image Detail' // Fallback title
+  }
+  // Prevent body scroll when modal is open
+  document.body.style.overflow = 'hidden'
+}
+
+const closeImagePreview = () => {
+  imagePreview.value = {
+    show: false,
+    images: [],
+    currentIndex: 0,
+    title: ''
+  }
+  // Restore body scroll
+  document.body.style.overflow = 'auto'
+}
+
+const nextImage = () => {
+  if (imagePreview.value.currentIndex < imagePreview.value.images.length - 1) {
+    imagePreview.value.currentIndex++
+  } else {
+    imagePreview.value.currentIndex = 0
+  }
+}
+
+const prevImage = () => {
+  if (imagePreview.value.currentIndex > 0) {
+    imagePreview.value.currentIndex--
+  } else {
+    imagePreview.value.currentIndex = imagePreview.value.images.length - 1
+  }
+}
+
+const getImageUrl = (imageData) => {
+  if (typeof imageData === 'string') return imageData
+  return imageData?.url || imageData?.supabaseUrl || ''
+}
+
+// --- ROBUST DOWNLOAD IMAGE FUNCTION ---
+const downloadCurrentImage = async () => {
+  const currentImgData = imagePreview.value.images[imagePreview.value.currentIndex]
+  const url = getImageUrl(currentImgData)
+  
+  // 1. Generate Safe Filename
+  // Gunakan title dari preview, atau default 'evidence' jika kosong
+  let rawTitle = imagePreview.value.title || 'evidence'
+  // Bersihkan karakter aneh agar valid jadi nama file
+  const safeTitle = rawTitle.replace(/[^a-z0-9]/gi, '_').toLowerCase()
+  const fileName = `gh-evidence-${safeTitle}-${imagePreview.value.currentIndex + 1}.jpg`
+
+  try {
+    // 2. Coba Download Langsung (Fetch Blob)
+    // Mode 'cors' diperlukan. Jika server Supabase belum allow origin, ini akan masuk ke catch.
+    const response = await fetch(url, {
+      method: 'GET',
+      mode: 'cors', 
+      cache: 'no-cache'
+    })
+    
+    if (!response.ok) throw new Error('Network response was not ok')
+    
+    const blob = await response.blob()
+    const blobUrl = window.URL.createObjectURL(blob)
+    
+    // Create temporary anchor
+    const link = document.createElement('a')
+    link.href = blobUrl
+    link.download = fileName
+    document.body.appendChild(link)
+    link.click()
+    
+    // Cleanup
+    document.body.removeChild(link)
+    window.URL.revokeObjectURL(blobUrl)
+    
+  } catch (err) {
+    console.warn('Direct download blocked by CORS or Network error. Fallback to opening new tab.', err)
+    // 3. Fallback: Buka di Tab Baru
+    // Jika fetch gagal (karena CORS), kita paksa buka di tab baru
+    // User bisa klik kanan -> Save Image As
+    window.open(url, '_blank')
+  }
+}
+
+// Handle keyboard navigation for images
+const handleKeydown = (e) => {
+  if (!imagePreview.value.show) return
+  if (e.key === 'Escape') closeImagePreview()
+  if (e.key === 'ArrowRight') nextImage()
+  if (e.key === 'ArrowLeft') prevImage()
+}
+
+// --- EXISTING HELPERS ---
 const loadPhaseInfo = async (phaseId) => {
   if (!phaseId) return null;
   
@@ -167,7 +275,7 @@ const getStatusBadge = (status) => {
 
 
 // ===========================================
-// 6. OPENBRAVO LOADERS (Dideklarasikan di awal)
+// 6. OPENBRAVO LOADERS
 // ===========================================
 
 const loadWarehouseAndBin = async (locationId) => {
@@ -175,14 +283,14 @@ const loadWarehouseAndBin = async (locationId) => {
     const location = locationStore.locations.find(l => l.location_id == locationId)
     if (!location) {
       console.warn('⚠️ Location not found:', locationId)
-      alert('⚠️ Location tidak ditemukan di database!')
+      // alert('⚠️ Location tidak ditemukan di database!') // Optional alert
       return
     }
 
     const locationName = location.location
     warehouseInfo.value.location_name = locationName
     
-    console.log('🔍 Searching warehouse for location:', locationName)
+    // console.log('🔍 Searching warehouse for location:', locationName)
 
     const warehouseRes = await openbravoApi.get(
       '/org.openbravo.service.json.jsonrest/Warehouse',
@@ -197,19 +305,13 @@ const loadWarehouseAndBin = async (locationId) => {
     const warehouses = warehouseRes?.data?.response?.data || []
     if (!warehouses.length) {
       console.error('❌ Warehouse not found for location:', locationName)
-      alert(`❌ Warehouse "${locationName}" tidak ditemukan di Openbravo!`)
+      // alert(`❌ Warehouse "${locationName}" tidak ditemukan di Openbravo!`)
       return
     }
 
     const warehouse = warehouses[0]
     warehouseInfo.value.warehouse = warehouse
     
-    if (!warehouse.client && !warehouse.organization?.client) {
-      console.error('❌ Client not found in warehouse response!')
-      alert('⚠️ Client ID tidak ditemukan di Warehouse. Hubungi admin untuk konfigurasi Openbravo.')
-      return
-    }
-
     const binRes = await openbravoApi.get(
       '/org.openbravo.service.json.jsonrest/Locator',
       { params: { _where: `M_Warehouse_ID='${warehouse.id}'` } }
@@ -218,41 +320,30 @@ const loadWarehouseAndBin = async (locationId) => {
     const bins = binRes?.data?.response?.data || []
     if (!bins.length) {
       console.warn('⚠️ Bin not found for warehouse:', warehouse.name)
-      alert(`⚠️ Storage Bin tidak ditemukan untuk warehouse "${warehouse.name}"`)
+      // alert(`⚠️ Storage Bin tidak ditemukan untuk warehouse "${warehouse.name}"`)
       return
     }
 
     warehouseInfo.value.bin = bins[0]
-    console.log('✅ Bin found:', {
-      id: bins[0].id,
-      name: bins[0].name
-    })
 
   } catch (err) {
     console.error('❌ Error loading warehouse/bin:', err)
-    console.error('Error details:', err.response?.data)
-    alert('❌ Gagal memuat warehouse/bin dari Openbravo: ' + err.message)
   }
 }
 
 
 // ===========================================
-// 7. APPROVAL LOADERS (Dideklarasikan di awal)
+// 7. APPROVAL LOADERS
 // ===========================================
 
 const loadApprovalProgress = async () => {
   if (!currentReport.value?.approval_record_id) {
-    console.log('⚠️ No approval record found');
-    
     canApproveCurrentLevel.value = false;
     currentUserLevel.value = { level_order: 0, level_name: 'Staff/No Approval Flow', is_final_level: false };
-    
     return;
   }
 
   try {
-    console.log('📊 Loading approval progress for record:', currentReport.value.approval_record_id);
-
     const { data: recordData, error: recordErr } = await supabase
       .from('gh_approve_record')
       .select(`
@@ -351,20 +442,13 @@ const loadApprovalProgress = async () => {
 
 
 // ===========================================
-// 8. OPENBRAVO PROCESSOR (Dideklarasikan di awal)
-// * DENGAN ERROR HANDLING YANG LEBIH DETAIL
-// ===========================================
-
-// ===========================================
-// 8. OPENBRAVO PROCESSOR (Refactored dari ReportReview lama)
+// 8. OPENBRAVO PROCESSOR
 // ===========================================
 
 const createAndProcessMovement = async (materials, activityName) => {
   try {
     console.log(`\n${'='.repeat(60)}`);
     console.log('🔄 CREATING INTERNAL CONSUMPTION (MATERIAL USAGE)');
-    console.log(`${'='.repeat(60)}`);
-    console.log('Activity:', activityName);
     
     if (!warehouseInfo.value.bin || !warehouseInfo.value.warehouse) {
       throw new Error('Warehouse/Bin tidak ditemukan untuk location ini');
@@ -372,25 +456,13 @@ const createAndProcessMovement = async (materials, activityName) => {
 
     const warehouse = warehouseInfo.value.warehouse;
     const bin = warehouseInfo.value.bin;
-    
     const warehouseId = warehouse.id;
-    const binId = bin.id; // Ini adalah Locator ID dari gh_location.id_openbravo
+    const binId = bin.id; 
     
-    // Ambil organization & client dari warehouse
     const orgId = warehouse.organization?.id || warehouse.organization || '96D7D37973EF450383B8ADCFDB666725';
     const clientId = warehouse.client?.id || warehouse.client || '025F309A89714992995442D9CDE13A15';
     
-    console.log('Warehouse ID:', warehouseId);
-    console.log('Warehouse Name:', warehouse.name);
-    console.log('Bin/Locator ID:', binId);
-    console.log('Bin/Locator Name:', bin.searchKey || bin.name);
-    console.log('Org ID:', orgId);
-    console.log('Client ID:', clientId);
-    console.log(`${'='.repeat(60)}\n`);
-
-    // STEP 1: Create Internal Consumption header
-    console.log('🔄 STEP 1: Creating Internal Consumption header...');
-    
+    // STEP 1: Create Header
     const now = new Date();
     const movementDate = now.toISOString().split('T')[0];
     const consumptionName = `GH-${activityName.replace(/[^a-zA-Z0-9]/g, '').substring(0, 20)}-${Date.now()}`;
@@ -407,51 +479,28 @@ const createAndProcessMovement = async (materials, activityName) => {
       ]
     };
 
-    console.log('📤 Header Payload:', JSON.stringify(headerPayload, null, 2));
-
     const headerRes = await openbravoApi.post(
       '/org.openbravo.service.json.jsonrest/MaterialMgmtInternalConsumption',
       headerPayload
     );
 
-    console.log('📥 Header Response:', JSON.stringify(headerRes?.data, null, 2));
-    
-    // Check error
     if (headerRes?.data?.response?.status === -1) {
       const obError = headerRes.data.response.error;
-      console.error('❌ Openbravo Error:', obError);
       throw new Error(`Openbravo Error: ${obError?.message || JSON.stringify(obError)}`);
     }
 
-    // Get consumption ID dari response
-    let consumptionId = null;
-    
-    if (headerRes?.data?.response?.data?.[0]?.id) {
-      consumptionId = headerRes.data.response.data[0].id;
-    } else if (headerRes?.data?.data?.[0]?.id) {
-      consumptionId = headerRes.data.data[0].id;
-    } else if (headerRes?.data?.id) {
-      consumptionId = headerRes.data.id;
-    }
+    let consumptionId = headerRes?.data?.response?.data?.[0]?.id || headerRes?.data?.data?.[0]?.id || headerRes?.data?.id;
     
     if (!consumptionId) {
-      console.error('❌ No consumption ID in response');
       throw new Error('Gagal mendapatkan Internal Consumption ID');
     }
 
-    console.log(`✅ Internal Consumption created: ${consumptionId}`);
-
-    // STEP 2: Create consumption lines
-    console.log('\n🔄 STEP 2: Creating consumption lines...');
-    
+    // STEP 2: Create Lines
     let successCount = 0;
     let errors = [];
 
     for (const material of materials) {
       try {
-        console.log(`\n  📦 Processing: ${material.material_name}`);
-        
-        // Get product
         const productRes = await openbravoApi.get(
           '/org.openbravo.service.json.jsonrest/Product',
           {
@@ -467,14 +516,12 @@ const createAndProcessMovement = async (materials, activityName) => {
         const products = productRes?.data?.response?.data || [];
         if (!products.length) {
           errors.push(`${material.material_name}: Product not found`);
-          console.error(`    ❌ Product not found`);
           continue;
         }
 
         const product = products[0];
         let uomId = product.uOM;
 
-        // Get UOM if specified
         if (material.uom) {
           const uomRes = await openbravoApi.get(
             '/org.openbravo.service.json.jsonrest/UOM',
@@ -486,14 +533,11 @@ const createAndProcessMovement = async (materials, activityName) => {
               }
             }
           );
-
-          const uoms = uomRes?.data?.response?.data || [];
-          if (uoms.length > 0) {
-            uomId = uoms[0].id;
+          if (uomRes?.data?.response?.data?.length > 0) {
+            uomId = uomRes.data.response.data[0].id;
           }
         }
 
-        // Check stock dari bin/locator yang sama dengan id_openbravo
         const stockRes = await openbravoApi.get(
           '/org.openbravo.service.json.jsonrest/MaterialMgmtStorageDetail',
           {
@@ -509,15 +553,11 @@ const createAndProcessMovement = async (materials, activityName) => {
         const stockDetails = stockRes?.data?.response?.data || [];
         const currentStock = stockDetails[0]?.quantityOnHand || 0;
 
-        console.log(`    📊 Stock di Bin/Locator (${bin.searchKey || bin.name}): ${currentStock}, Need: ${material.qty}`);
-
         if (currentStock < material.qty) {
           errors.push(`${material.material_name}: Insufficient stock (${currentStock}/${material.qty})`);
-          console.warn(`    ⚠️ Insufficient stock`);
           continue;
         }
 
-        // Create line
         const linePayload = {
           data: [
             {
@@ -529,12 +569,10 @@ const createAndProcessMovement = async (materials, activityName) => {
               product: product.id,
               uOM: uomId,
               movementQuantity: material.qty,
-              storageBin: binId // Bin/Locator ID dari gh_location.id_openbravo
+              storageBin: binId 
             }
           ]
         };
-
-        console.log('    📤 Line Payload:', JSON.stringify(linePayload, null, 2));
 
         const lineRes = await openbravoApi.post(
           '/org.openbravo.service.json.jsonrest/MaterialMgmtInternalConsumptionLine',
@@ -542,15 +580,11 @@ const createAndProcessMovement = async (materials, activityName) => {
         );
 
         if (lineRes?.data?.response?.status === -1) {
-          const lineError = lineRes.data.response.error;
-          throw new Error(lineError?.message || 'Failed to create line');
+          throw new Error(lineRes.data.response.error?.message || 'Failed to create line');
         }
-
-        console.log(`    ✅ Line created`);
         successCount++;
 
       } catch (err) {
-        console.error(`    ❌ Error:`, err.message);
         errors.push(`${material.material_name}: ${err.message}`);
       }
     }
@@ -559,21 +593,13 @@ const createAndProcessMovement = async (materials, activityName) => {
       throw new Error('No materials were added to the consumption');
     }
 
-    console.log(`\n✅ Lines created: ${successCount}/${materials.length}`);
-
-    // STEP 3: Process Internal Consumption via API
-    console.log('\n🔄 STEP 3: Processing Internal Consumption...');
-    
+    // STEP 3: Process API
     const apiUrl = (import.meta.env.VITE_OPENBRAVO_URL || '').trim();
     const apiPort = (import.meta.env.VITE_API_PORT || '').trim();
     const username = (import.meta.env.VITE_API_USER || '').trim();
     const password = (import.meta.env.VITE_API_PASS || '').trim();
 
     if (!apiUrl || !apiPort || !username || !password) {
-      console.warn('⚠️ API credentials not fully configured - skipping process step');
-      console.log(`✅ Internal Consumption created but NOT processed: ${consumptionId}`);
-      console.log(`${'='.repeat(60)}\n`);
-      
       return {
         success: true,
         movementId: consumptionId,
@@ -594,8 +620,6 @@ const createAndProcessMovement = async (materials, activityName) => {
       data: [{ id: consumptionId }]
     };
 
-    console.log('📤 Process Payload:', JSON.stringify(processPayload, null, 2));
-
     try {
       const processRes = await axios.post(endpoint, processPayload, {
         headers: {
@@ -607,14 +631,10 @@ const createAndProcessMovement = async (materials, activityName) => {
         timeout: 30000
       });
 
-      console.log('📥 Process Response:', JSON.stringify(processRes?.data, null, 2));
-
       const resultObj = processRes?.data?.data?.[0];
       
       if (!resultObj || resultObj.result !== 1) {
         const errorMsg = resultObj?.errormsg || resultObj?.message || 'Process failed';
-        console.error('❌ Process error:', errorMsg);
-        
         return {
           success: true,
           movementId: consumptionId,
@@ -624,13 +644,8 @@ const createAndProcessMovement = async (materials, activityName) => {
           warning: `Internal Consumption created but process failed: ${errorMsg}. Please process manually.`
         };
       }
-
-      console.log(`✅ Internal Consumption processed successfully`);
-      console.log(`${'='.repeat(60)}\n`);
       
     } catch (processErr) {
-      console.error('❌ Process API error:', processErr.message);
-      
       return {
         success: true,
         movementId: consumptionId,
@@ -650,8 +665,6 @@ const createAndProcessMovement = async (materials, activityName) => {
     };
 
   } catch (err) {
-    console.error('\n❌ FATAL ERROR:', err.message);
-    
     return {
       success: false,
       error: err.message,
@@ -663,7 +676,7 @@ const createAndProcessMovement = async (materials, activityName) => {
 
 
 // ===========================================
-// 9. LOADER UTAMA (Memanggil fungsi di atasnya)
+// 9. LOADER UTAMA
 // ===========================================
 
 const loadData = async () => {
@@ -715,7 +728,7 @@ const loadData = async () => {
 
 
 // ===========================================
-// 10. APPROVAL ACTION (Memanggil fungsi di atasnya)
+// 10. APPROVAL ACTION
 // ===========================================
 
 const approveCurrentLevel = async () => {
@@ -737,7 +750,6 @@ const approveCurrentLevel = async () => {
 
   try {
     processing.value = true;
-    
     const currentLevelOrder = currentUserLevel.value.level_order;
     const username = authStore.user?.username || authStore.user?.email || 'Admin';
     
@@ -785,76 +797,92 @@ const approveCurrentLevel = async () => {
     if (isFinalLevel) {
       console.log('🎯 Final level approval - Processing Openbravo movements...');
 
-      // Update approval record status
       const { error: recordErr } = await supabase
         .from('gh_approve_record')
         .update({ overall_status: 'approved', completed_at: new Date().toISOString() })
         .eq('record_id', currentReport.value.approval_record_id);
       if (recordErr) throw recordErr;
 
-      // Update report status
       const { error: reportErr } = await supabase
         .from('gh_report')
         .update({ report_status: 'approved' })
         .eq('report_id', currentReport.value.report_id);
       if (reportErr) throw reportErr;
 
-      // PROCESS OPENBRAVO MOVEMENT
+      // ✅ UPDATE STATUS: gh_type_damage → approved
+      if (currentReport.value.type_damages && currentReport.value.type_damages.length > 0) {
+        const typeDamageIds = currentReport.value.type_damages.map(td => td.typedamage_id);
+        const { error: tdErr } = await supabase
+          .from('gh_type_damage')
+          .update({ status: 'approved' })
+          .in('typedamage_id', typeDamageIds);
+        
+        if (tdErr) console.error('❌ Error updating type_damage status:', tdErr);
+      }
+
+      // ✅ UPDATE STATUS: gh_activity → approved & process materials
       let movementSuccessCount = 0;
       let movementFailCount = 0;
       const movementErrors = [];
 
       for (const activity of currentReport.value.activities) {
-        if (!activity.materials || activity.materials.length === 0) continue;
+        // Update activity status
+        const { error: actStatusErr } = await supabase
+          .from('gh_activity')
+          .update({ status: 'approved' })
+          .eq('activity_id', activity.activity_id);
         
-        try {
-          console.log(`🔄 Processing activity: ${activity.act_name}`);
+        if (actStatusErr) {
+          console.error('❌ Error updating activity status:', actStatusErr);
+        }
+
+        // Update materials status
+        if (activity.materials && activity.materials.length > 0) {
+          const materialIds = activity.materials.map(m => m.material_used_id);
+          const { error: matStatusErr } = await supabase
+            .from('gh_material_used')
+            .update({ status: 'approved' })
+            .in('material_used_id', materialIds);
           
-          // Panggilan createAndProcessMovement
-          const movementResult = await createAndProcessMovement(activity.materials, activity.act_name);
-
-          if (movementResult.success) {
-            // ✅ HANYA UPDATE openbravo_movement_id, TANPA status
-            const { error: updateActivityErr } = await supabase
-              .from('gh_activity')
-              .update({ 
-                openbravo_movement_id: movementResult.movementId
-                // ❌ HAPUS: status: 'approved' (kolom tidak ada di tabel)
-              })
-              .eq('activity_id', activity.activity_id);
-
-            if (updateActivityErr) {
-              console.error(`❌ Failed to update activity ${activity.act_name}:`, updateActivityErr);
-              movementErrors.push(`${activity.act_name}: Failed to update activity in database`);
-              movementFailCount++;
-            } else {
-              console.log(`✅ Activity ${activity.act_name} updated successfully with movement ID: ${movementResult.movementId}`);
-              movementSuccessCount++;
-              
-              // Jika ada warning dari movement result, tambahkan ke errors
-              if (movementResult.warning) {
-                movementErrors.push(`${activity.act_name}: ${movementResult.warning}`);
-              }
-            }
-          } else {
-            // Movement creation failed
-            console.error(`❌ Movement failed for ${activity.act_name}:`, movementResult.error);
-            movementFailCount++;
-            
-            const errorMsg = movementResult.error || 
-                            (movementResult.errors && Array.isArray(movementResult.errors) 
-                              ? movementResult.errors.join('; ') 
-                              : 'Movement creation failed');
-            
-            movementErrors.push(`${activity.act_name}: ${errorMsg}`);
+          if (matStatusErr) {
+            console.error('❌ Error updating material status:', matStatusErr);
           }
-        } catch (err) {
-          console.error(`❌ Critical error processing ${activity.act_name}:`, err);
-          movementFailCount++;
-          movementErrors.push(`${activity.act_name}: ${err.message || 'Unknown error'}`);
+
+          // PROCESS OPENBRAVO MOVEMENT
+          try {
+            const movementResult = await createAndProcessMovement(activity.materials, activity.act_name);
+
+            if (movementResult.success) {
+              const { error: updateActivityErr } = await supabase
+                .from('gh_activity')
+                .update({ 
+                  openbravo_movement_id: movementResult.movementId
+                })
+                .eq('activity_id', activity.activity_id);
+
+              if (updateActivityErr) {
+                movementErrors.push(`${activity.act_name}: Failed to update activity in database`);
+                movementFailCount++;
+              } else {
+                movementSuccessCount++;
+                if (movementResult.warning) {
+                  movementErrors.push(`${activity.act_name}: ${movementResult.warning}`);
+                }
+              }
+            } else {
+              movementFailCount++;
+              const errorMsg = movementResult.error || 
+                              (movementResult.errors && Array.isArray(movementResult.errors) 
+                                ? movementResult.errors.join('; ') 
+                                : 'Movement creation failed');
+              movementErrors.push(`${activity.act_name}: ${errorMsg}`);
+            }
+          } catch (err) {
+            movementFailCount++;
+            movementErrors.push(`${activity.act_name}: ${err.message || 'Unknown error'}`);
+          }
         }
       }
-
 
       let alertMessage = `✅ Report berhasil disetujui di level terakhir!\n\n`;
       alertMessage += `📊 Summary:\n`;
@@ -864,18 +892,15 @@ const approveCurrentLevel = async () => {
         alertMessage += `❌ Movements failed: ${movementFailCount}\n\n`;
         alertMessage += `Errors:\n${movementErrors.join('\n')}`;
       }
-
       alert(alertMessage);
 
     } else {
-      // Increment current_level_order
       const { error: recordErr } = await supabase
         .from('gh_approve_record')
         .update({ current_level_order: currentLevelOrder + 1 })
         .eq('record_id', currentReport.value.approval_record_id);
 
       if (recordErr) throw recordErr;
-
       alert(`✅ Report berhasil disetujui untuk level "${levelName}"!\n\nReport akan dilanjutkan ke level berikutnya.`);
     }
 
@@ -892,7 +917,7 @@ const approveCurrentLevel = async () => {
 
 
 // ===========================================
-// 11. REVISION ACTION (Memanggil fungsi di atasnya)
+// 11. REVISION ACTION
 // ===========================================
 
 const requestRevisionForLevel = async () => {
@@ -912,11 +937,9 @@ const requestRevisionForLevel = async () => {
 
   try {
     processing.value = true;
-    
     const currentLevel = currentUserLevel.value;
-    if (!currentLevel) throw new Error('Current approval level not found.');
     
-    // 1. Update level status jadi 'needRevision'
+    // 1. Update level status
     const { error: updateLevelErr } = await supabase
       .from('gh_approval_level_status')
       .update({
@@ -952,15 +975,15 @@ const requestRevisionForLevel = async () => {
 
     if (historyErr) throw historyErr;
 
-    // 3. Update approve_record overall_status
+    // 3. Update overall status
     const { error: recordErr } = await supabase
       .from('gh_approve_record')
-      .update({ overall_status: 'needRevision', current_level_order: 1 }) // Reset ke level 1
+      .update({ overall_status: 'needRevision', current_level_order: 1 })
       .eq('record_id', currentReport.value.approval_record_id);
 
     if (recordErr) throw recordErr;
 
-    // 4. Reset semua level status kembali ke pending
+    // 4. Reset statuses
     const { error: resetErr } = await supabase
       .from('gh_approval_level_status')
       .update({
@@ -968,7 +991,7 @@ const requestRevisionForLevel = async () => {
         revision_notes: null, revision_requested_by: null, revision_requested_at: null
       })
       .eq('record_id', currentReport.value.approval_record_id)
-      .neq('level_order', currentLevel.level_order); // Kecuali level yang request revision
+      .neq('level_order', currentLevel.level_order);
 
     if (resetErr) throw resetErr;
 
@@ -979,6 +1002,41 @@ const requestRevisionForLevel = async () => {
       .eq('report_id', currentReport.value.report_id);
 
     if (reportErr) throw reportErr;
+
+    // ✅ UPDATE STATUS: gh_type_damage → needRevision
+    if (currentReport.value.type_damages && currentReport.value.type_damages.length > 0) {
+      const typeDamageIds = currentReport.value.type_damages.map(td => td.typedamage_id);
+      const { error: tdErr } = await supabase
+        .from('gh_type_damage')
+        .update({ status: 'needRevision' })
+        .in('typedamage_id', typeDamageIds);
+      
+      if (tdErr) console.error('❌ Error updating type_damage status:', tdErr);
+    }
+
+    // ✅ UPDATE STATUS: gh_activity → needRevision
+    if (currentReport.value.activities && currentReport.value.activities.length > 0) {
+      const activityIds = currentReport.value.activities.map(act => act.activity_id);
+      const { error: actErr } = await supabase
+        .from('gh_activity')
+        .update({ status: 'needRevision' })
+        .in('activity_id', activityIds);
+      
+      if (actErr) console.error('❌ Error updating activity status:', actErr);
+
+      // ✅ UPDATE STATUS: gh_material_used → needRevision
+      for (const activity of currentReport.value.activities) {
+        if (activity.materials && activity.materials.length > 0) {
+          const materialIds = activity.materials.map(m => m.material_used_id);
+          const { error: matErr } = await supabase
+            .from('gh_material_used')
+            .update({ status: 'needRevision' })
+            .in('material_used_id', materialIds);
+          
+          if (matErr) console.error('❌ Error updating material status:', matErr);
+        }
+      }
+    }
     
     await loadData();
     closeRevisionModal();
@@ -1005,7 +1063,6 @@ const handleRevision = async () => {
   if (type === 'level') {
     await requestRevisionForLevel();
   } else {
-    // Item revision tidak didukung
     alert('⚠️ Item revision tidak tersedia. Gunakan revision report saja.');
     closeRevisionModal();
   }
@@ -1045,6 +1102,8 @@ const closeRevisionModal = () => {
 // ===========================================
 
 onMounted(async () => {
+  document.addEventListener('keydown', handleKeydown)
+  
   if (!authStore.isLoggedIn) {
     router.push('/')
     return
@@ -1057,6 +1116,10 @@ onMounted(async () => {
   }
 
   await loadData()
+})
+
+onUnmounted(() => {
+  document.removeEventListener('keydown', handleKeydown)
 })
 
 
@@ -1368,6 +1431,21 @@ const reportInfo = computed(() => {
                           <p class="text-2xl font-bold text-gray-900">{{ damage.busuk || 0 }}</p>
                         </div>
                       </div>
+
+                      <div v-if="damage.images && damage.images.length > 0" class="mt-4">
+                        <p class="text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">📷 Bukti Foto</p>
+                        <div class="flex flex-wrap gap-2">
+                          <div 
+                            v-for="(img, idx) in damage.images" 
+                            :key="idx" 
+                            @click="openImagePreview(damage.images, damage.type_damage, idx)"
+                            class="relative w-16 h-16 rounded-lg overflow-hidden cursor-pointer border hover:opacity-90 transition"
+                          >
+                            <img :src="getImageUrl(img)" class="w-full h-full object-cover" loading="lazy" />
+                          </div>
+                        </div>
+                      </div>
+
                     </div>
                     
                     <div class="flex flex-col items-end gap-2">
@@ -1417,7 +1495,21 @@ const reportInfo = computed(() => {
                           <p class="text-base font-bold text-green-700">
                             {{ formatCurrency(calculateActivityTotal(activity.materials || [])) }}
                           </p>
-  </div>
+                        </div>
+                      </div>
+
+                      <div v-if="activity.images && activity.images.length > 0" class="mb-4">
+                        <p class="text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">📷 Bukti Aktivitas</p>
+                        <div class="flex flex-wrap gap-2">
+                          <div 
+                            v-for="(img, idx) in activity.images" 
+                            :key="idx" 
+                            @click="openImagePreview(activity.images, activity.act_name, idx)"
+                            class="relative w-20 h-20 rounded-lg overflow-hidden cursor-pointer border border-gray-300 hover:ring-2 hover:ring-[#0071f3] transition"
+                          >
+                            <img :src="getImageUrl(img)" class="w-full h-full object-cover" loading="lazy" />
+                          </div>
+                        </div>
                       </div>
 
                       <div v-if="activity.materials && activity.materials.length > 0" class="bg-white rounded-lg p-4">
@@ -1508,6 +1600,8 @@ const reportInfo = computed(() => {
               <p class="font-bold text-blue-900 mb-2">Cara Review</p>
               <ul class="text-sm text-blue-800 space-y-1">
                 <li>• **Review Items:** Periksa semua kerusakan tanaman dan aktivitas yang dilaporkan di bawah ini.</li>
+                <li>• **Foto:** Klik pada thumbnail foto (jika ada) untuk melihat bukti dalam ukuran penuh.</li>
+                <li>• **Download:** Klik tombol download di pojok kanan atas saat preview foto untuk menyimpan bukti.</li>
                 <li>• **Level Approval:** Klik tombol "**Approve Level**" untuk menyetujui seluruh report di level Anda dan melanjutkannya ke level berikutnya.</li>
                 <li>• **Request Revision:** Jika ada yang tidak sesuai, gunakan tombol "**Request Revision Report**" untuk mengembalikan report ke staff dan mereset status approval.</li>
                 <li>• **Material Stock:** Pengurangan stock material (Openbravo Movement) akan diproses oleh sistem setelah report disetujui di level terakhir.</li>
@@ -1598,6 +1692,62 @@ const reportInfo = computed(() => {
         </div>
       </div>
     </div>
+
+    <div v-if="imagePreview.show" class="fixed inset-0 z-[60] flex items-center justify-center bg-black bg-opacity-90 backdrop-blur-sm transition-opacity" @click.self="closeImagePreview">
+      
+      <div class="absolute top-6 right-6 z-[70] flex gap-3">
+        <button 
+          @click.stop="downloadCurrentImage" 
+          class="text-white hover:text-gray-300 transition bg-white/10 hover:bg-white/20 rounded-full p-2"
+          title="Download Image"
+        >
+          <svg class="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path>
+          </svg>
+        </button>
+
+        <button @click="closeImagePreview" class="text-white hover:text-gray-300 transition bg-white/10 hover:bg-white/20 rounded-full p-2">
+          <svg class="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+          </svg>
+        </button>
+      </div>
+
+      <button 
+        v-if="imagePreview.images.length > 1" 
+        @click.stop="prevImage" 
+        class="absolute left-4 md:left-8 text-white hover:text-gray-300 p-3 rounded-full bg-white/10 hover:bg-white/20 transition z-[70]"
+      >
+        <svg class="w-8 h-8 md:w-10 md:h-10" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"></path>
+        </svg>
+      </button>
+
+      <div class="relative max-w-7xl max-h-[85vh] p-4 flex flex-col items-center">
+        <img 
+          :src="getImageUrl(imagePreview.images[imagePreview.currentIndex])" 
+          class="max-w-full max-h-[80vh] rounded-lg shadow-2xl object-contain select-none" 
+        />
+        
+        <div class="mt-4 text-center">
+          <p class="text-white font-bold text-lg md:text-xl tracking-wide">{{ imagePreview.title }}</p>
+          <p class="text-gray-400 text-sm mt-1">
+            Image {{ imagePreview.currentIndex + 1 }} of {{ imagePreview.images.length }}
+          </p>
+        </div>
+      </div>
+
+      <button 
+        v-if="imagePreview.images.length > 1" 
+        @click.stop="nextImage" 
+        class="absolute right-4 md:right-8 text-white hover:text-gray-300 p-3 rounded-full bg-white/10 hover:bg-white/20 transition z-[70]"
+      >
+        <svg class="w-8 h-8 md:w-10 md:h-10" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path>
+        </svg>
+      </button>
+    </div>
+
   </div>
 </template>
 

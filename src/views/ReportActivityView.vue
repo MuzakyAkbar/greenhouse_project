@@ -1,7 +1,6 @@
-// ReportActivityView.vue
 <script setup>
 import html2pdf from 'html2pdf.js'
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, onUnmounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useAuthStore } from '../stores/auth'
 import { useBatchStore } from '../stores/batch'
@@ -20,12 +19,107 @@ const sourcePage = ref(route.query.from || '/planningReportList')
 const loading = ref(true)
 const error = ref(null)
 const currentReport = ref(null)
-
-
-// ✅ ADD state
 const phaseInfo = ref(null);
 
-// ✅ ADD function
+// ===========================================
+// 1. IMAGE PREVIEW STATE & LOGIC
+// ===========================================
+const imagePreview = ref({
+  show: false,
+  images: [],
+  currentIndex: 0,
+  title: ''
+})
+
+const getImageUrl = (imageData) => {
+  if (typeof imageData === 'string') return imageData
+  return imageData?.url || imageData?.supabaseUrl || ''
+}
+
+const openImagePreview = (images, title, startIndex = 0) => {
+  if (!images || images.length === 0) return
+  
+  imagePreview.value = {
+    show: true,
+    images: images,
+    currentIndex: startIndex,
+    title: title || 'Image Detail'
+  }
+  document.body.style.overflow = 'hidden'
+}
+
+const closeImagePreview = () => {
+  imagePreview.value = {
+    show: false,
+    images: [],
+    currentIndex: 0,
+    title: ''
+  }
+  document.body.style.overflow = 'auto'
+}
+
+const nextImage = () => {
+  if (imagePreview.value.currentIndex < imagePreview.value.images.length - 1) {
+    imagePreview.value.currentIndex++
+  } else {
+    imagePreview.value.currentIndex = 0
+  }
+}
+
+const prevImage = () => {
+  if (imagePreview.value.currentIndex > 0) {
+    imagePreview.value.currentIndex--
+  } else {
+    imagePreview.value.currentIndex = imagePreview.value.images.length - 1
+  }
+}
+
+const downloadCurrentImage = async () => {
+  const currentImgData = imagePreview.value.images[imagePreview.value.currentIndex]
+  const url = getImageUrl(currentImgData)
+  
+  let rawTitle = imagePreview.value.title || 'evidence'
+  const safeTitle = rawTitle.replace(/[^a-z0-9]/gi, '_').toLowerCase()
+  const fileName = `gh-evidence-${safeTitle}-${imagePreview.value.currentIndex + 1}.jpg`
+
+  try {
+    const response = await fetch(url, {
+      method: 'GET',
+      mode: 'cors', 
+      cache: 'no-cache'
+    })
+    
+    if (!response.ok) throw new Error('Network response was not ok')
+    
+    const blob = await response.blob()
+    const blobUrl = window.URL.createObjectURL(blob)
+    
+    const link = document.createElement('a')
+    link.href = blobUrl
+    link.download = fileName
+    document.body.appendChild(link)
+    link.click()
+    
+    document.body.removeChild(link)
+    window.URL.revokeObjectURL(blobUrl)
+    
+  } catch (err) {
+    console.warn('Direct download blocked, fallback to new tab.', err)
+    window.open(url, '_blank')
+  }
+}
+
+const handleKeydown = (e) => {
+  if (!imagePreview.value.show) return
+  if (e.key === 'Escape') closeImagePreview()
+  if (e.key === 'ArrowRight') nextImage()
+  if (e.key === 'ArrowLeft') prevImage()
+}
+
+// ===========================================
+// 2. DATA LOADING
+// ===========================================
+
 const loadPhaseInfo = async (phaseId) => {
   if (!phaseId) return null;
   
@@ -45,6 +139,8 @@ const loadPhaseInfo = async (phaseId) => {
 };
 
 onMounted(async () => {
+  document.addEventListener('keydown', handleKeydown) 
+
   if (!authStore.isLoggedIn) {
     router.push('/')
     return
@@ -57,6 +153,10 @@ onMounted(async () => {
   }
 
   await loadData()
+})
+
+onUnmounted(() => {
+  document.removeEventListener('keydown', handleKeydown)
 })
 
 const loadData = async () => {
@@ -86,26 +186,9 @@ const loadData = async () => {
     if (!report) throw new Error('Laporan tidak ditemukan atau belum disetujui');
 
     currentReport.value = report;
-    console.log('✅ Loaded approved report:', report);
     
-    // ✅ Load phase name
     if (report.phase_id) {
       phaseInfo.value = await loadPhaseInfo(report.phase_id);
-    }
-    
-    // Load approval history
-    if (report.approval_record_id) {
-      const { data: approvalHistory, error: historyErr } = await supabase
-        .from('vw_approval_progress')
-        .select('*')
-        .eq('record_id', report.approval_record_id)
-        .eq('level_status', 'approved')
-        .order('level_order', { ascending: true });
-      
-      if (!historyErr) {
-        currentReport.value.approval_history = approvalHistory || [];
-        console.log('✅ Approval history loaded:', approvalHistory);
-      }
     }
     
   } catch (err) {
@@ -151,7 +234,6 @@ const formatDateTime = (dateStr) => {
   })
 }
 
-// Helper functions untuk format harga
 const formatNumber = (value) => {
   if (!value && value !== 0) return '0'
   return Number(value).toLocaleString('id-ID', {
@@ -182,7 +264,9 @@ const calculateReportTotal = () => {
   }, 0)
 }
 
-// ✅ PERBAIKAN: Fungsi printReport diperbarui
+// ===========================================
+// 3. PRINT LOGIC
+// ===========================================
 const printReport = async () => {
   const loadingText = document.createElement('div')
   loadingText.textContent = '📄 Mempersiapkan PDF...'
@@ -213,7 +297,6 @@ const printReport = async () => {
     const hiddenElements = element.querySelectorAll('.no-print')
     hiddenElements.forEach(el => (el.style.display = 'none'))
 
-    // ✅ PERBAIKAN: Tambahkan kelas untuk mode cetak (mengecilkan font)
     element.classList.add('printing-mode')
 
     const filename = `ReportActivity_${currentReport.value?.report_id}_${currentReport.value?.report_date || 'Report'}.pdf`
@@ -221,12 +304,12 @@ const printReport = async () => {
     const options = {
       margin: [10, 10, 10, 10],
       filename: filename,
-      image: { type: 'png', quality: 0.98 },
+      image: { type: 'jpeg', quality: 0.98 },
       html2canvas: { 
-        // ✅ PERBAIKAN: Hapus 'scale: 2' agar font profesional
-        useCORS: true,
+        useCORS: true, 
         logging: false,
-        backgroundColor: '#ffffff'
+        backgroundColor: '#ffffff',
+        scale: 2 
       },
       jsPDF: { 
         unit: 'mm', 
@@ -235,7 +318,7 @@ const printReport = async () => {
       },
       pagebreak: { 
         mode: ['css', 'avoid-all'], 
-        before: '.pdf-page-break-before', // Ini akan kita gunakan
+        before: '.pdf-page-break-before', 
         after: '.pdf-page-break-after',
         inside: '.pdf-avoid-break-inside' 
       }
@@ -248,9 +331,7 @@ const printReport = async () => {
       console.error('❌ Gagal membuat PDF:', err)
       alert('❌ Gagal membuat PDF: ' + err.message)
     } finally {
-      // ✅ PERBAIKAN: Hapus kelas mode cetak setelah selesai
       element.classList.remove('printing-mode')
-
       hiddenElements.forEach(el => (el.style.display = ''))
       document.body.removeChild(loadingText)
     }
@@ -374,7 +455,6 @@ const printReport = async () => {
                 </div>
               </div>
 
-              <!-- ✅ Phase -->
               <div class="flex flex-col">
                 <label class="text-sm font-semibold text-gray-700 mb-2 flex items-center gap-2">
                   <span class="text-lg">🌿</span>
@@ -431,6 +511,25 @@ const printReport = async () => {
                 </div>
               </div>
 
+              <div v-if="damage.images && damage.images.length > 0" class="mt-4">
+                <p class="text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">📷 Bukti Foto</p>
+                <div class="flex flex-wrap gap-3">
+                  <div 
+                    v-for="(img, idx) in damage.images" 
+                    :key="idx" 
+                    @click="openImagePreview(damage.images, damage.type_damage, idx)"
+                    class="relative w-48 h-64 rounded-lg overflow-hidden cursor-pointer border hover:opacity-90 transition no-print-action"
+                  >
+                    <img 
+                      :src="getImageUrl(img)" 
+                      class="w-full h-full object-cover" 
+                      loading="lazy" 
+                      crossorigin="anonymous"
+                    />
+                  </div>
+                </div>
+              </div>
+
               <div v-if="damage.approved_at" class="mt-4 pt-4 border-t-2 border-gray-100">
                 <div class="bg-green-50 rounded-lg p-3">
                   <p class="text-xs text-green-600 font-semibold mb-1">✅ Disetujui</p>
@@ -478,13 +577,31 @@ const printReport = async () => {
                   </div>
                 </div>
 
+                <div v-if="activity.images && activity.images.length > 0" class="mb-2">
+                  <p class="text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">📷 Bukti Aktivitas</p>
+                  <div class="flex flex-wrap gap-3">
+                    <div 
+                      v-for="(img, idx) in activity.images" 
+                      :key="idx" 
+                      @click="openImagePreview(activity.images, activity.act_name, idx)"
+                      class="relative w-48 h-64 rounded-lg overflow-hidden cursor-pointer border border-gray-300 hover:ring-2 hover:ring-[#0071f3] transition no-print-action"
+                    >
+                      <img 
+                        :src="getImageUrl(img)" 
+                        class="w-full h-full object-cover" 
+                        loading="lazy" 
+                        crossorigin="anonymous"
+                      />
+                    </div>
+                  </div>
+                </div>
+
                 <div v-if="activity.materials && activity.materials.length > 0" class="bg-blue-50 rounded-xl p-5 border-2 border-blue-200">
                 <h4 class="text-base font-bold text-blue-900 flex items-center gap-2 mb-4">
                   <span class="text-lg">📦</span>
                   Material yang Digunakan ({{ activity.materials.length }})
                 </h4>
                 
-                <!-- Table untuk tampilan desktop -->
                 <div class="hidden md:block overflow-x-auto">
                   <table class="w-full text-sm">
                     <thead>
@@ -532,7 +649,6 @@ const printReport = async () => {
                   </table>
                 </div>
 
-                <!-- Card layout untuk mobile -->
                 <div class="md:hidden space-y-3">
                   <div
                     v-for="mat in activity.materials"
@@ -556,7 +672,6 @@ const printReport = async () => {
                     </div>
                   </div>
                   
-                  <!-- Subtotal untuk mobile -->
                   <div class="bg-blue-100 rounded-lg p-4 border-2 border-blue-300">
                     <div class="flex justify-between items-center">
                       <span class="font-bold text-blue-900">Subtotal:</span>
@@ -589,7 +704,6 @@ const printReport = async () => {
           </div>
         </div>
 
-        <!-- Grand Total Material Cost -->
         <div v-if="currentReport.activities && currentReport.activities.some(a => a.materials && a.materials.length > 0)" class="mb-8 pdf-avoid-break-inside">
           <h2 class="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-3">💰 Total Biaya Material</h2>
           <div class="bg-gradient-to-br from-green-50 to-emerald-50 rounded-2xl border-2 border-green-200 shadow-sm p-6">
@@ -633,18 +747,77 @@ const printReport = async () => {
         <p class="text-gray-400 text-xs">© 2025 All Rights Reserved</p>
       </footer>
     </div>
+
+    <div v-if="imagePreview.show" class="fixed inset-0 z-[60] flex items-center justify-center bg-black bg-opacity-90 backdrop-blur-sm transition-opacity no-print" @click.self="closeImagePreview">
+      
+      <div class="absolute top-6 right-6 z-[70] flex gap-3">
+        <button 
+          @click.stop="downloadCurrentImage" 
+          class="text-white hover:text-gray-300 transition bg-white/10 hover:bg-white/20 rounded-full p-2"
+          title="Download Image"
+        >
+          <svg class="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path>
+          </svg>
+        </button>
+
+        <button @click="closeImagePreview" class="text-white hover:text-gray-300 transition bg-white/10 hover:bg-white/20 rounded-full p-2">
+          <svg class="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+          </svg>
+        </button>
+      </div>
+
+      <button 
+        v-if="imagePreview.images.length > 1" 
+        @click.stop="prevImage" 
+        class="absolute left-4 md:left-8 text-white hover:text-gray-300 p-3 rounded-full bg-white/10 hover:bg-white/20 transition z-[70]"
+      >
+        <svg class="w-8 h-8 md:w-10 md:h-10" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"></path>
+        </svg>
+      </button>
+
+      <div class="relative max-w-7xl max-h-[85vh] p-4 flex flex-col items-center">
+        <img 
+          :src="getImageUrl(imagePreview.images[imagePreview.currentIndex])" 
+          class="max-w-full max-h-[80vh] rounded-lg shadow-2xl object-contain select-none" 
+        />
+        
+        <div class="mt-4 text-center">
+          <p class="text-white font-bold text-lg md:text-xl tracking-wide">{{ imagePreview.title }}</p>
+          <p class="text-gray-400 text-sm mt-1">
+            Image {{ imagePreview.currentIndex + 1 }} of {{ imagePreview.images.length }}
+          </p>
+        </div>
+      </div>
+
+      <button 
+        v-if="imagePreview.images.length > 1" 
+        @click.stop="nextImage" 
+        class="absolute right-4 md:right-8 text-white hover:text-gray-300 p-3 rounded-full bg-white/10 hover:bg-white/20 transition z-[70]"
+      >
+        <svg class="w-8 h-8 md:w-10 md:h-10" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path>
+        </svg>
+      </button>
+    </div>
+
   </div>
 </template>
 
 <style scoped>
-/* ✅ PERBAIKAN: Tambahkan kelas ini untuk html2pdf.js */
 #print-area.printing-mode {
   font-size: 12px;
 }
 
+/* Hide interaction elements when printing */
 @media print {
   .no-print {
     display: none !important;
+  }
+  .no-print-action {
+    pointer-events: none; /* Disable klik gambar saat print */
   }
   
   #print-area {
@@ -656,7 +829,6 @@ const printReport = async () => {
     background: white !important;
   }
 
-  /* ✅ PERBAIKAN: Tambahkan juga di sini untuk print native browser */
   #print-area.printing-mode {
     font-size: 12px;
   }

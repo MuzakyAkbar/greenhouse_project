@@ -3,8 +3,8 @@ import { ref, onMounted, watch, onUnmounted, computed } from "vue";
 import { supabase } from "@/lib/supabase.js";
 import { Html5Qrcode } from "html5-qrcode";
 import openbravoApi from '@/lib/openbravo'
-
-// Import stores
+import ImageUploadComponent from '@/components/ImageUploadComponent.vue';
+import { updateImageInDB, deleteImage, updateMultipleImagesInDB } from '@/lib/imageUpload';
 import { useLocationStore } from "@/stores/location";
 import { useBatchStore } from "@/stores/batch";
 import { useMaterialStore } from "@/stores/material";
@@ -13,10 +13,8 @@ import { useActivityReportStore } from "@/stores/activityReport";
 import { useActivityStore } from "@/stores/activity";
 import { useTypeDamageStore } from "@/stores/typeDamage";
 import { useBatchPhaseStore } from "@/stores/batchPhase";
-// ✅ IMPORT AUTH STORE
-import { useAuthStore } from "@/stores/auth"; 
+import { useAuthStore } from "@/stores/auth";
 
-// Initialize stores
 const locationStore = useLocationStore();
 const batchStore = useBatchStore();
 const materialStore = useMaterialStore();
@@ -25,227 +23,72 @@ const activityReportStore = useActivityReportStore();
 const activityStore = useActivityStore();
 const typeDamageStore = useTypeDamageStore();
 const batchPhaseStore = useBatchPhaseStore();
-// ✅ Initialize Auth Store
-const authStore = useAuthStore(); 
+const authStore = useAuthStore();
 
-
-// ======================
-// STATE - APPROVAL SYSTEM
-// ======================
-const APPROVAL_FLOW_CODE = ref('activity_report'); // Code name di gh_approval_flow
+const APPROVAL_FLOW_CODE = ref('activity_report');
 const flowId = ref(null);
 const flowLastLevel = ref(null);
 
-const fetchProductPrice = async (materialName, priceListId = 'YOUR_DEFAULT_PRICELIST_ID') => {
-    try {
-        if (!materialName) return 0;
-
-        // STEP 1: Cari Product ID berdasarkan Nama Material
-        const productRes = await openbravoApi.get(
-            '/org.openbravo.service.json.jsonrest/Product',
-            {
-                params: {
-                    _where: `name='${materialName}'`,
-                    _selectedProperties: 'id',
-                    _startRow: 0,
-                    _endRow: 1
-                }
-            }
-        );
-
-        const productId = productRes?.data?.response?.data?.[0]?.id;
-        if (!productId) {
-            console.warn(`⚠️ Product ID not found for: ${materialName}`);
-            return 0;
-        }
-
-        // STEP 2: Cari Harga (PriceListLine) berdasarkan Product ID
-        const priceRes = await openbravoApi.get(
-            '/org.openbravo.service.json.jsonrest/PricingProductPriceList',
-            {
-                params: {
-                    _where: `product='${productId}' AND priceList='${priceListId}'`, 
-                    // Ganti 'YOUR_DEFAULT_PRICELIST_ID'
-                    _selectedProperties: 'listPrice',
-                    _startRow: 0,
-                    _endRow: 1
-                }
-            }
-        );
-
-        const price = priceRes?.data?.response?.data?.[0]?.listPrice || 0;
-        
-        console.log(`✅ Price found for ${materialName}: ${price}`);
-        return Number(price);
-
-    } catch (err) {
-        console.error('❌ Error fetching material price from Openbravo:', err);
-        return 0;
-    }
-};
-
-// ======================
-// STATE - DECLARE ALL REF VARIABLES FIRST
-// ======================
 const selectedDate = ref("");
 const selectedLocation = ref("");
 const selectedBatch = ref("");
-const selectedPhase = ref(""); 
+const selectedPhase = ref("");
 const phaseList = ref([]);
-
-const formData = ref({
-  batch_id: "",
-  phase_id: ""
-});
-
-// Planning data state
+const formData = ref({ batch_id: "", phase_id: "" });
 const planningData = ref(null);
 const loadingPlanning = ref(false);
 const showPlanningSection = ref(false);
-
-const typeDamages = ref([
-  {
-    type_damage: '',
-    kuning: 0,
-    kutilang: 0,
-    busuk: 0
-  }
-])
-
-// ===== MATERIAL STATE (dari Openbravo)
-const availableMaterials = ref([])
-const materialLoading = ref(false)
-
-// Warehouse & Bin untuk tracking
-const selectedWarehouse = ref(null)
-const selectedBin = ref(null)
-
-// QR Scanner
+const typeDamages = ref([{ id: Date.now(), type_damage: '', kuning: 0, kutilang: 0, busuk: 0 }]);
+const availableMaterials = ref([]);
+const materialLoading = ref(false);
+const selectedWarehouse = ref(null);
+const selectedBin = ref(null);
 const showScanner = ref(false);
 const isScanning = ref(false);
 let html5QrCode = null;
+const formSections = ref([{ id: Date.now(), phase_id: "", activity_id: "", coa: "", materials: [{ material_name: "", qty: "", uom: "", unit_price: 0, total_price: 0 }], workers: [{ qty: "" }] }]);
+const typeDamageImages = ref({});
+const activityImages = ref({});
+const uploadingImages = ref({});
+const isSubmitting = ref(false);
 
-// Dynamic form
-const formSections = ref([
-  {
-    id: Date.now(),
-    phase_id: "",
-    activity_id: "",
-    coa: "",
-    materials: [{ 
-      material_name: "", 
-      qty: "", 
-      uom: "",
-      unit_price: 0,      
-      total_price: 0      
-    }],
-    workers: [{ qty: "" }],
-  },
-]);
-
-// Computed properties untuk data dari stores
 const locations = computed(() => locationStore.locations);
 const batches = computed(() => batchStore.batches);
 const materialStocks = computed(() => materialStore.materialStock);
 const potatoActivities = computed(() => potatoActivityStore.activities);
 
-// Loading states
-const isSubmitting = ref(false);
+const formatNumber = (n) => new Intl.NumberFormat('id-ID').format(n ?? 0);
 
-// ===== UTIL: Format Number
-const formatNumber = (n) => new Intl.NumberFormat('id-ID').format(n ?? 0)
-
-
-// ======================
-// LOAD APPROVAL FLOW INFO
-// ======================
 const loadApprovalFlowInfo = async () => {
-    try {
-        const { data, error } = await supabase
-            .from('gh_approval_flow')
-            .select('flow_id, last_level')
-            .eq('code_name', APPROVAL_FLOW_CODE.value)
-            .single();
-
-        if (error) throw error;
-
-        flowId.value = data.flow_id;
-        flowLastLevel.value = data.last_level;
-        console.log(`✅ Approval Flow Info loaded: ID=${flowId.value}, LastLevel=${flowLastLevel.value}`);
-
-    } catch (err) {
-        console.error('❌ Error loading approval flow info:', err);
-        alert('Gagal memuat konfigurasi Approval Flow. Harap hubungi Admin.');
-    }
+  try {
+    const { data, error } = await supabase.from('gh_approval_flow').select('flow_id, last_level').eq('code_name', APPROVAL_FLOW_CODE.value).single();
+    if (error) throw error;
+    flowId.value = data.flow_id;
+    flowLastLevel.value = data.last_level;
+    console.log(`✅ Approval Flow Info loaded: ID=${flowId.value}, LastLevel=${flowLastLevel.value}`);
+  } catch (err) {
+    console.error('❌ Error loading approval flow info:', err);
+    alert('Gagal memuat konfigurasi Approval Flow. Harap hubungi Admin.');
+  }
 };
 
-
-// ======================
-// FETCH PLANNING DATA
-// ======================
 const fetchPlanningData = async () => {
   if (!selectedLocation.value || !selectedBatch.value) {
     planningData.value = null;
     showPlanningSection.value = false;
     return;
   }
-
   loadingPlanning.value = true;
   try {
-    console.log('🔍 Fetching planning data for:', {
-      location: selectedLocation.value,
-      batch: selectedBatch.value,
-      date: selectedDate.value
-    });
-
-    // Fetch planning report dengan activities dan materials (hanya yang approved)
-    const { data, error } = await supabase
-      .from('gh_planning_report')
-      .select(`
-        planning_id,
-        planning_date,
-        phase_plan,
-        status,
-        gh_planning_activity (
-          activity_id,
-          act_name,
-          coa,
-          manpower,
-          order_index,
-          gh_planning_material (
-            material_id,
-            material_name,
-            qty,
-            uom
-          )
-        )
-      `)
-      .eq('location_id', selectedLocation.value)
-      .eq('batch_id', selectedBatch.value)
-      .eq('planning_date', selectedDate.value)
-      .eq('status', 'approved')
-      .order('planning_id', { ascending: false })
-      .limit(1);
-
-    if (error) {
-      console.error('❌ Error fetching planning:', error);
-      throw error;
-    }
-
+    const { data, error } = await supabase.from('gh_planning_report').select(`planning_id, planning_date, phase_plan, status, gh_planning_activity (activity_id, act_name, coa, manpower, order_index, gh_planning_material (material_id, material_name, qty, uom))`).eq('location_id', selectedLocation.value).eq('batch_id', selectedBatch.value).eq('planning_date', selectedDate.value).eq('status', 'approved').order('planning_id', { ascending: false }).limit(1);
+    if (error) throw error;
     if (data && data.length > 0) {
       planningData.value = data[0];
       showPlanningSection.value = true;
-      
-      // Auto-fill phase dari planning
-      if (planningData.value.phase_plan) {
-        selectedPhase.value = planningData.value.phase_plan;
-      }
-
-      console.log('✅ Planning data loaded:', planningData.value);
+      if (planningData.value.phase_plan) selectedPhase.value = planningData.value.phase_plan;
     } else {
       planningData.value = null;
       showPlanningSection.value = false;
-      console.log('ℹ️ No planning found for selected date, location, and batch');
     }
   } catch (err) {
     console.error('❌ Error in fetchPlanningData:', err);
@@ -256,477 +99,246 @@ const fetchPlanningData = async () => {
   }
 };
 
-// ======================
-// LOAD WAREHOUSE & BIN BY LOCATION NAME
-// ======================
 const loadWarehouseAndBin = async (locationName) => {
   if (!locationName) {
-    selectedWarehouse.value = null
-    selectedBin.value = null
-    return
+    selectedWarehouse.value = null;
+    selectedBin.value = null;
+    return;
   }
-
   try {
-    console.log('🏢 Finding warehouse for location:', locationName)
-
-    // 1. Get warehouse by location name dari Openbravo
-    const warehouseRes = await openbravoApi.get(
-      '/org.openbravo.service.json.jsonrest/Warehouse',
-      { params: { _where: `name='${locationName}'` } }
-    )
-
-    const warehouses = warehouseRes?.data?.response?.data || []
+    const warehouseRes = await openbravoApi.get('/org.openbravo.service.json.jsonrest/Warehouse', { params: { _where: `name='${locationName}'` } });
+    const warehouses = warehouseRes?.data?.response?.data || [];
     if (!warehouses.length) {
-      console.warn('⚠️ Warehouse not found for location:', locationName)
-      selectedWarehouse.value = null
-      selectedBin.value = null
-      return
+      selectedWarehouse.value = null;
+      selectedBin.value = null;
+      return;
     }
-
-    const warehouse = warehouses[0]
-    selectedWarehouse.value = warehouse
-    console.log('✅ Warehouse found:', warehouse.name)
-
-    // 2. Get first bin (locator) untuk warehouse ini
-    const binRes = await openbravoApi.get(
-      '/org.openbravo.service.json.jsonrest/Locator',
-      { params: { _where: `M_Warehouse_ID='${warehouse.id}'` } }
-    )
-
-    const bins = binRes?.data?.response?.data || []
+    const warehouse = warehouses[0];
+    selectedWarehouse.value = warehouse;
+    const binRes = await openbravoApi.get('/org.openbravo.service.json.jsonrest/Locator', { params: { _where: `M_Warehouse_ID='${warehouse.id}'` } });
+    const bins = binRes?.data?.response?.data || [];
     if (!bins.length) {
-      console.warn('⚠️ Bin not found for warehouse:', warehouse.name)
-      selectedBin.value = null
-      return
+      selectedBin.value = null;
+      return;
     }
-
-    selectedBin.value = bins[0]
-    console.log('✅ Bin found:', bins[0].name)
-
-    // 3. Load materials untuk bin ini
-    await loadMaterialsByBin(bins[0].id)
-
+    selectedBin.value = bins[0];
+    await loadMaterialsByBin(bins[0].id);
   } catch (err) {
-    console.error('❌ Error loading warehouse/bin:', err)
-    selectedWarehouse.value = null
-    selectedBin.value = null
+    console.error('❌ Error loading warehouse/bin:', err);
+    selectedWarehouse.value = null;
+    selectedBin.value = null;
   }
-}
+};
 
-// ======================
-// LOAD MATERIALS BY BIN
-// ======================
 const loadMaterialsByBin = async (binId) => {
   if (!binId) {
-    availableMaterials.value = []
-    return
+    availableMaterials.value = [];
+    return;
   }
-
-  materialLoading.value = true
+  materialLoading.value = true;
   try {
-    console.log('📦 Loading materials for bin:', binId)
-
-    const materialsRes = await openbravoApi.get(
-      '/org.openbravo.service.json.jsonrest/MaterialMgmtStorageDetail',
-      {
-        params: {
-          _where: `M_Locator_ID='${binId}' AND quantityOnHand > 0`
-        }
-      }
-    )
-
-    const rows = materialsRes?.data?.response?.data || []
-
-    // ✅ TAMBAHAN: Fetch price untuk setiap material
-    const materialsWithPrice = await Promise.all(
-      rows.map(async (r) => {
-        // Asumsi r.product adalah Product ID (Openbravo)
-        const price = await getMaterialPrice(r['product$_identifier'], r.product)
-        return {
-          productId: r.product,
-          material_name: r['product$_identifier'] || '(Tanpa Nama Produk)',
-          uomId: r.uOM,
-          uom: r['uOM$_identifier'] || null,
-          stock: r.quantityOnHand ?? 0,
-          unit_price: price // ✅ Tambahkan harga
-        }
-      })
-    )
-
-    availableMaterials.value = materialsWithPrice
-
-    console.log(`✅ Loaded ${rows.length} materials with prices`)
+    const materialsRes = await openbravoApi.get('/org.openbravo.service.json.jsonrest/MaterialMgmtStorageDetail', { params: { _where: `M_Locator_ID='${binId}' AND quantityOnHand > 0` } });
+    const rows = materialsRes?.data?.response?.data || [];
+    const materialsWithPrice = await Promise.all(rows.map(async (r) => {
+      const price = await getMaterialPrice(r['product$_identifier'], r.product);
+      return { productId: r.product, material_name: r['product$_identifier'] || '(Tanpa Nama Produk)', uomId: r.uOM, uom: r['uOM$_identifier'] || null, stock: r.quantityOnHand ?? 0, unit_price: price };
+    }));
+    availableMaterials.value = materialsWithPrice;
   } catch (err) {
-    console.error('❌ Error loading materials:', err)
-    availableMaterials.value = []
+    console.error('❌ Error loading materials:', err);
+    availableMaterials.value = [];
   } finally {
-    materialLoading.value = false
+    materialLoading.value = false;
   }
-}
+};
 
-// ======================
-// GET MATERIAL PRICE FROM OPENBRAVO
-// ======================
 const getMaterialPrice = async (materialName) => {
   try {
-    console.log('💰 Fetching price for:', materialName);
-
-    // Strategi 1: Coba cari berdasarkan product dulu
-    const stockItem = availableMaterials.value.find(
-      m => m.material_name === materialName
-    );
-
-    if (!stockItem || !stockItem.productId) {
-      console.warn(`⚠️ Product ID not found for: ${materialName}`);
-      return 0;
-    }
-
-    console.log(`   - Product ID: ${stockItem.productId}`);
-
-    // Get costing data untuk product ini
-    const costingRes = await openbravoApi.get(
-      '/org.openbravo.service.json.jsonrest/MaterialMgmtCosting',
-      {
-        params: {
-          _where: `product='${stockItem.productId}'`,
-          _orderBy: 'updated desc',
-          _maxResults: 50
-        }
-      }
-    );
-
+    const stockItem = availableMaterials.value.find(m => m.material_name === materialName);
+    if (!stockItem || !stockItem.productId) return 0;
+    const costingRes = await openbravoApi.get('/org.openbravo.service.json.jsonrest/MaterialMgmtCosting', { params: { _where: `product='${stockItem.productId}'`, _orderBy: 'updated desc', _maxResults: 50 } });
     const costings = costingRes?.data?.response?.data || [];
-    
-    console.log(`   - Found ${costings.length} costing records`);
-    
     if (costings.length > 0) {
-      // Ambil harga yang paling baru (sudah diorder by updated desc)
       const latestCosting = costings[0];
-      const price = parseFloat(latestCosting.price) || 0;
-      
-      console.log(`✅ Price found for ${materialName}:`, price);
-      console.log('   - Identifier:', latestCosting._identifier);
-      console.log('   - Updated:', latestCosting.updated);
-      console.log('   - Cost Type:', latestCosting.costType);
-      
-      return price;
-    } else {
-      console.warn(`⚠️ No costing data found for material: ${materialName}`);
-      return 0;
+      return parseFloat(latestCosting.price) || 0;
     }
+    return 0;
   } catch (err) {
-    console.error(`❌ Error fetching price for ${materialName}:`, err);
-    console.error('   - Error details:', err.response?.data || err.message);
+    console.error(`❌ Error fetching price:`, err);
     return 0;
   }
 };
 
-// ======================
-// QR SCANNER FUNCTIONS
-// ======================
 const startScanner = async () => {
   showScanner.value = true;
   isScanning.value = true;
-
   await new Promise(resolve => setTimeout(resolve, 100));
-
   try {
     const element = document.getElementById("qr-reader");
     if (!element) {
-      console.error("Element qr-reader not found in DOM");
       alert("Error: Scanner element not found");
       stopScanner();
       return;
     }
-
     html5QrCode = new Html5Qrcode("qr-reader");
-
-    const config = { 
-      fps: 10, 
-      qrbox: { width: 250, height: 250 },
-      aspectRatio: 1.0
-    };
-
-    await html5QrCode.start(
-      { facingMode: "environment" },
-      config,
-      onScanSuccess,
-      onScanError
-    );
+    const config = { fps: 10, qrbox: { width: 250, height: 250 }, aspectRatio: 1.0 };
+    await html5QrCode.start({ facingMode: "environment" }, config, onScanSuccess, onScanError);
   } catch (err) {
-    console.error("Error starting scanner:", err);
-    alert("Gagal membuka kamera. Pastikan izin kamera telah diberikan dan gunakan HTTPS atau localhost.");
+    alert("Gagal membuka kamera. Pastikan izin kamera telah diberikan.");
     stopScanner();
   }
 };
 
 const onScanSuccess = async (decodedText) => {
-  console.log("📸 QR Code detected:", decodedText);
-
   try {
     const data = JSON.parse(decodedText);
-    console.log("✅ Parsed QR data:", data);
-
     const locationId = Number(data.location_id);
     const batchId = Number(data.batch_id);
-
     selectedLocation.value = locationId;
     selectedBatch.value = batchId;
-
     let locationItem = locations.value.find(l => Number(l.location_id) === locationId);
     const locationName = locationItem?.location || "Lokasi tidak ditemukan";
-
     let batchItem = batches.value.find(b => Number(b.batch_id) === batchId);
-
     if (!batchItem) {
-      console.log("⏳ Fetching batch name from Supabase...");
-      const { data: batchData, error } = await supabase
-        .from("gh_batch")
-        .select("batch_id, batch_name, location_id, location")
-        .eq("batch_id", batchId)
-        .single();
-
-      if (error) {
-        console.error("❌ Gagal ambil batch dari Supabase:", error.message);
-      } else if (batchData) {
-        console.log("✅ Batch ditemukan di DB:", batchData);
-        // Tambahkan ke store untuk konsistensi
-        batchStore.batches.push(batchData); 
-        batchItem = batchData;
-      }
+      const { data: batchData, error } = await supabase.from("gh_batch").select("batch_id, batch_name").eq("batch_id", batchId).single();
+      if (!error && batchData) batchItem = batchData;
     }
-
     const batchName = batchItem?.batch_name || "Batch tidak ditemukan";
-
     alert(`✅ QR Code berhasil di-scan!\n📍 Lokasi: ${locationName}\n🏷️ Batch: ${batchName}`);
-
-    await loadWarehouseAndBin(locationName)
-
+    await loadWarehouseAndBin(locationName);
     stopScanner();
   } catch (err) {
-    console.error("❌ Invalid QR data:", err);
-    alert("❌ QR Code tidak valid atau tidak sesuai format JSON!");
+    alert("❌ QR Code tidak valid!");
   }
 };
 
-const onScanError = (errorMessage) => {
-  // Tidak log setiap error untuk menghindari spam
-};
+const onScanError = () => {};
 
 const stopScanner = () => {
   if (html5QrCode && html5QrCode.isScanning) {
-    html5QrCode
-      .stop()
-      .then(() => {
-        console.log("Scanner stopped");
-        html5QrCode.clear();
-        html5QrCode = null;
-        showScanner.value = false;
-        isScanning.value = false;
-      })
-      .catch((err) => {
-        console.error("Error stopping scanner:", err);
-        showScanner.value = false;
-        isScanning.value = false;
-      });
+    html5QrCode.stop().then(() => { html5QrCode.clear(); html5QrCode = null; showScanner.value = false; isScanning.value = false; }).catch(() => { showScanner.value = false; isScanning.value = false; });
   } else {
     showScanner.value = false;
     isScanning.value = false;
   }
 };
 
-// ======================
-// TYPE DAMAGE FUNCTIONS
-// ======================
-function addTypeDamageRow() {
-  typeDamages.value.push({
-    id: Date.now(),
-    type_damage: "",
-    kuning: 0,
-    kutilang: 0,
-    busuk: 0
-  });
-}
+function addTypeDamageRow() { typeDamages.value.push({ id: Date.now(), type_damage: "", kuning: 0, kutilang: 0, busuk: 0 }); }
+function removeTypeDamageRow(index) { if (typeDamages.value.length > 1) { const damageId = typeDamages.value[index].id; if (typeDamageImages.value[damageId]) delete typeDamageImages.value[damageId]; typeDamages.value.splice(index, 1); } }
+function addFormSection() { formSections.value.push({ id: Date.now(), phase_id: selectedPhase.value, activity_id: "", coa: "", materials: [{ material_name: "", qty: "", uom: "", unit_price: 0, total_price: 0 }], workers: [{ qty: "" }] }); }
+function removeFormSection(index) { if (formSections.value.length > 1) { const sectionId = formSections.value[index].id; if (activityImages.value[sectionId]) delete activityImages.value[sectionId]; formSections.value.splice(index, 1); } }
+function addMaterialRow(i) { formSections.value[i].materials.push({ material_name: "", qty: "", uom: "", unit_price: 0, total_price: 0 }); }
+function removeMaterialRow(sectionIndex, matIndex) { if (formSections.value[sectionIndex].materials.length > 1) formSections.value[sectionIndex].materials.splice(matIndex, 1); }
+function addWorkerRow(sectionIndex) { formSections.value[sectionIndex].workers.push({ qty: "" }); }
+function removeWorkerRow(sectionIndex, workerIndex) { if (formSections.value[sectionIndex].workers.length > 1) formSections.value[sectionIndex].workers.splice(workerIndex, 1); }
 
-function removeTypeDamageRow(index) {
-  if (typeDamages.value.length > 1) {
-    typeDamages.value.splice(index, 1);
+const handleTypeDamageImageUpload = (event) => {
+  const { recordId, allImages } = event;
+  typeDamageImages.value[recordId] = allImages || [];
+  console.log('✅ Type Damage images:', recordId, allImages.length);
+};
+
+const handleActivityImageUpload = (event) => {
+  const { recordId, allImages } = event;
+  activityImages.value[recordId] = allImages || [];
+  console.log('✅ Activity images:', recordId, allImages.length);
+};
+
+const handleImageDelete = async (event, type) => {
+  const { recordId, imagePath, index } = event;
+  try {
+    await deleteImage(imagePath, type, recordId);
+    if (type === 'type_damage' && typeDamageImages.value[recordId]) {
+      typeDamageImages.value[recordId].splice(index, 1);
+      if (typeDamageImages.value[recordId].length === 0) delete typeDamageImages.value[recordId];
+    } else if (activityImages.value[recordId]) {
+      activityImages.value[recordId].splice(index, 1);
+      if (activityImages.value[recordId].length === 0) delete activityImages.value[recordId];
+    }
+    alert('✅ Gambar berhasil dihapus');
+  } catch (error) {
+    alert(`Gagal menghapus gambar: ${error.message}`);
   }
-}
+};
 
-// ======================
-// FORM HANDLERS
-// ======================
-function addFormSection() {
-  formSections.value.push({
-    id: Date.now(),
-    phase_id: selectedPhase.value,
-    activity_id: "",
-    coa: "",
-    materials: [{ material_name: "", qty: "", uom: "" }],
-    workers: [{ qty: "" }],
-  });
-}
+const handleImagesUpdated = () => {};
+const handleImageUploadError = (event) => { alert(`❌ Error: ${event.error}`); };
 
-function removeFormSection(index) {
-  if (formSections.value.length > 1) {
-    formSections.value.splice(index, 1);
-  }
-}
-
-function addMaterialRow(i) {
-  formSections.value[i].materials.push({ 
-    material_name: "", 
-    qty: "", 
-    uom: "",
-    unit_price: 0,    
-    total_price: 0    
-  });
-}
-
-function removeMaterialRow(sectionIndex, matIndex) {
-  if (formSections.value[sectionIndex].materials.length > 1) {
-    formSections.value[sectionIndex].materials.splice(matIndex, 1);
-  }
-}
-
-function addWorkerRow(sectionIndex) {
-  formSections.value[sectionIndex].workers.push({ qty: "" });
-}
-
-function removeWorkerRow(sectionIndex, workerIndex) {
-  if (formSections.value[sectionIndex].workers.length > 1) {
-    formSections.value[sectionIndex].workers.splice(workerIndex, 1);
-  }
-}
-
-// ======================
-// SUBMIT TO DATABASE
-// ======================
 const submitActivityReport = async () => {
   if (!selectedBatch.value || !selectedLocation.value) {
-    alert("⚠️ Pilih lokasi dan batch terlebih dahulu!");
+    alert("⚠️ Pilih lokasi dan batch!");
     return;
   }
-  
   if (!selectedPhase.value) {
-    alert("⚠️ Pilih Phase terlebih dahulu!");
+    alert("⚠️ Pilih Phase!");
     return;
   }
-  
-  if (isSubmitting.value) {
-    console.log("⚠️ Submission already in progress, ignoring...");
-    return;
-  }
+  if (isSubmitting.value) return;
 
-  // Validasi form activities
   for (const section of formSections.value) {
     if (!section.activity_id) {
-      alert("⚠️ Harap pilih Activity untuk setiap form!");
+      alert("⚠️ Pilih Activity untuk setiap form!");
       return;
     }
   }
 
-  // Batch validate ALL materials
   const allMaterials = [];
-
   for (const section of formSections.value) {
     for (const mat of section.materials) {
       if (mat.material_name && mat.qty && parseFloat(mat.qty) > 0) {
-        allMaterials.push({
-          material_name: mat.material_name,
-          qty: mat.qty,
-          uom: mat.uom
-        });
+        allMaterials.push({ material_name: mat.material_name, qty: mat.qty, uom: mat.uom });
       }
     }
   }
 
-  // Validasi qty vs stock dari availableMaterials
   if (allMaterials.length > 0) {
     for (const material of allMaterials) {
-      const stockItem = availableMaterials.value.find(
-        m => m.material_name === material.material_name
-      );
-
+      const stockItem = availableMaterials.value.find(m => m.material_name === material.material_name);
       if (!stockItem) {
         alert(`⚠️ Material "${material.material_name}" tidak ditemukan!`);
         return;
       }
-
       if (parseFloat(material.qty) > stockItem.stock) {
-        alert(`⚠️ Stock "${material.material_name}" tidak cukup!\nDibutuhkan: ${material.qty} ${material.uom}\nTersedia: ${stockItem.stock}`);
+        alert(`⚠️ Stock tidak cukup untuk "${material.material_name}"`);
         return;
       }
     }
   }
 
   isSubmitting.value = true;
-
   try {
-    console.log("📤 Menyimpan laporan aktivitas...");
-
-    // 1. Create gh_report (sementara tanpa approval_record_id)
+    // 1. Create gh_report
     const reportPayload = {
       batch_id: Number(selectedBatch.value),
       location_id: Number(selectedLocation.value),
       report_date: selectedDate.value,
       report_status: 'onReview',
-      phase_id: selectedPhase.value || null // Sesuaikan dengan skema
+      phase_id: selectedPhase.value || null
     };
 
-    console.log("📋 Creating report:", reportPayload);
-
-    const { data: reportData, error: reportErr } = await supabase
-      .from('gh_report')
-      .insert([reportPayload])
-      .select()
-      .single();
-
+    const { data: reportData, error: reportErr } = await supabase.from('gh_report').insert([reportPayload]).select().single();
     if (reportErr) throw reportErr;
-
     const report_id = reportData.report_id;
-    console.log("✅ Report created with ID:", report_id);
-    
-    // ===============================================
-    // 1.1. Inisialisasi Approval Record
-    // ===============================================
-    const currentUser = authStore.user.user_id; // Asumsi authStore.user memiliki user_id
-    
-    console.log("🔄 Initializing approval flow...");
-    
-    // ✅ PERBAIKAN RPC: Sesuaikan parameter agar match dengan fungsi DB: 
-    // public.initialize_approval_record(p_flow_code_name, p_reference_id, p_reference_type, p_submitted_by)
+    console.log("✅ Report created:", report_id);
+
+    // 1.1 Approval Record
+    const currentUser = authStore.user.user_id;
     const { data: recordId, error: initErr } = await supabase.rpc('initialize_approval_record', {
-        p_flow_code_name: APPROVAL_FLOW_CODE.value, // Flow code name
-        p_reference_id: report_id,                 // ID dari gh_report (referensi)
-        p_reference_type: 'gh_report',             // Nama tabel referensi
-        p_submitted_by: currentUser                // User yang submit
+      p_flow_code_name: APPROVAL_FLOW_CODE.value,
+      p_reference_id: report_id,
+      p_reference_type: 'gh_report',
+      p_submitted_by: currentUser
     });
 
-    if (initErr) {
-        console.error("❌ ERROR Initializing approval record:", initErr);
-        // Lanjutkan, tapi beri peringatan
-        alert(`⚠️ Peringatan: Gagal membuat Approval Flow. Report ID ${report_id} dibuat, tapi tidak bisa di-approve. Detail: ${initErr.message}`);
-    } else {
-        console.log("✅ Approval Record created with ID:", recordId);
-        
-        // Update gh_report dengan approval_record_id
-        const { error: updateErr } = await supabase
-            .from('gh_report')
-            .update({ approval_record_id: recordId })
-            .eq('report_id', report_id);
-            
-        if(updateErr) throw updateErr;
+    if (!initErr && recordId) {
+      await supabase.from('gh_report').update({ approval_record_id: recordId }).eq('report_id', report_id);
     }
-
 
     // 2. Create type_damages
     const validDamages = typeDamages.value.filter(damage => {
-      const hasKuning = damage.kuning && parseFloat(damage.kuning) > 0;
-      const hasKutilang = damage.kutilang && parseFloat(damage.kutilang) > 0;
-      const hasBusuk = damage.busuk && parseFloat(damage.busuk) > 0;
-      return hasKuning || hasKutilang || hasBusuk;
+      const hasQty = (damage.kuning && parseFloat(damage.kuning) > 0) || (damage.kutilang && parseFloat(damage.kutilang) > 0) || (damage.busuk && parseFloat(damage.busuk) > 0);
+      const hasImage = !!(typeDamageImages.value[damage.id] && typeDamageImages.value[damage.id].length > 0);
+      return hasQty || hasImage;
     });
 
     if (validDamages.length > 0) {
@@ -735,166 +347,107 @@ const submitActivityReport = async () => {
         type_damage: damage.type_damage || null,
         kuning: damage.kuning ? parseInt(damage.kuning) : null,
         kutilang: damage.kutilang ? parseInt(damage.kutilang) : null,
-        busuk: damage.busuk ? parseInt(damage.busuk) : null
+        busuk: damage.busuk ? parseInt(damage.busuk) : null,
+        images: [],
+        _tempId: damage.id
       }));
 
-      console.log("🔍 Creating type damages:", damagePayloads);
+      const { data: insertedDamageData, error: tdErr } = await supabase.from('gh_type_damage').insert(damagePayloads.map(p => ({ report_id: p.report_id, type_damage: p.type_damage, kuning: p.kuning, kutilang: p.kutilang, busuk: p.busuk, images: p.images }))).select();
+      if (tdErr) throw tdErr;
 
-      const { error: tdErr } = await supabase
-        .from('gh_type_damage')
-        .insert(damagePayloads);
-
-      if (tdErr) {
-        console.error("⚠️ Error creating type_damages:", tdErr);
-        throw tdErr;
+      // Link images to damages
+      for (let i = 0; i < insertedDamageData.length; i++) {
+        const damage = insertedDamageData[i];
+        const tempId = validDamages[i].id;
+        if (typeDamageImages.value[tempId] && typeDamageImages.value[tempId].length > 0) {
+          try {
+            const imagesToUpdate = typeDamageImages.value[tempId].map(img => ({
+              path: img.path || '',
+              url: img.supabaseUrl || img.url || '',
+              bucket: img.bucket || ''
+            }));
+            await updateMultipleImagesInDB(damage.typedamage_id, 'type_damage', imagesToUpdate);
+          } catch (imgErr) {
+            console.error(`⚠️ Error linking images:`, imgErr);
+          }
+        }
       }
-      
-      console.log(`✅ ${damagePayloads.length} Type damage(s) created`);
     }
 
-    // 3. Create activities + material_used
-    console.log("🔄 Processing form sections:", formSections.value.length);
-    
+    // 3. Create activities
     for (const section of formSections.value) {
-      const manpowerTotal = section.workers.reduce(
-        (sum, w) => sum + (parseInt(w.qty) || 0),
-        0
-      );
-
-      const selectedActivity = potatoActivities.value.find(
-        a => a.activity_id == section.activity_id
-      );
+      const manpowerTotal = section.workers.reduce((sum, w) => sum + (parseInt(w.qty) || 0), 0);
+      const selectedActivity = potatoActivities.value.find(a => a.activity_id == section.activity_id);
 
       const activityPayload = {
         report_id,
         act_name: selectedActivity?.activity || "",
         CoA: section.coa ? parseFloat(section.coa) : null,
         manpower: manpowerTotal.toString(),
-        // ✅ PERBAIKAN COLUMN ERROR: Hapus 'status' jika tidak ada di tabel gh_activity
-        // status: 'onReview' 
+        images: []
       };
 
-      console.log("📝 Creating activity:", activityPayload);
+      const { data: activityData, error: actErr } = await supabase.from('gh_activity').insert([activityPayload]).select().single();
+      if (actErr) throw actErr;
+      const activity_id = activityData.activity_id;
 
-      const { data: activityData, error: actErr } = await supabase
-        .from('gh_activity')
-        .insert([activityPayload])
-        .select()
-        .single();
-
-      if (actErr) {
-        console.error("❌ Error creating activity:", actErr);
-        throw actErr;
+      // Link activity images
+      if (activityImages.value[section.id] && activityImages.value[section.id].length > 0) {
+        try {
+          const imagesToUpdate = activityImages.value[section.id].map(img => ({
+            path: img.path || '',
+            url: img.supabaseUrl || img.url || '',
+            bucket: img.bucket || ''
+          }));
+          await updateMultipleImagesInDB(activity_id, 'activity', imagesToUpdate);
+        } catch (imgErr) {
+          console.error(`⚠️ Error linking activity images:`, imgErr);
+        }
       }
 
-      const activity_id = activityData.activity_id;
-      console.log("✅ Activity created with ID:", activity_id);
+      // Create materials
+      const validMaterials = section.materials.filter(mat => mat.material_name && mat.qty && parseFloat(mat.qty) > 0);
+      if (validMaterials.length > 0) {
+        const materialPayloads = await Promise.all(validMaterials.map(async (mat) => {
+          const qty = parseFloat(mat.qty);
+          const unitPrice = await getMaterialPrice(mat.material_name);
+          const totalPrice = qty * unitPrice;
+          return { activity_id, material_name: mat.material_name, qty: qty, uom: mat.uom || null, unit_price: unitPrice, total_price: totalPrice };
+        }));
 
-      // 4. CREATE MATERIAL_USED
-      console.log("🔍 CHECKING MATERIALS FOR ACTIVITY:", activity_id);
-      console.log("   - section.materials:", section.materials);
-      
-      if (section.materials && section.materials.length > 0) {
-        console.log("   - Total materials in section:", section.materials.length);
-        
-        const validMaterials = section.materials.filter(mat => {
-          const isValid = mat.material_name && mat.qty && parseFloat(mat.qty) > 0;
-          console.log(`   - Material: ${mat.material_name}, Qty: ${mat.qty}, Valid: ${isValid}`);
-          return isValid;
-        });
-
-        console.log("   - Valid materials count:", validMaterials.length);
-
-        if (validMaterials.length > 0) {
-          const materialPayloads = await Promise.all(
-            validMaterials.map(async (mat) => {
-               const qty = parseFloat(mat.qty);
-              const unitPrice = await getMaterialPrice(mat.material_name);
-              const totalPrice = qty * unitPrice;
-
-              return {
-                activity_id,
-                material_name: mat.material_name,
-                qty: qty,
-                uom: mat.uom || null,
-                unit_price: unitPrice,
-                total_price: totalPrice
-              };
-            })
-          );
-
-          console.log("📦 INSERTING MATERIAL USED RECORDS:", JSON.stringify(materialPayloads, null, 2));
-
-          const { data: matData, error: matErr } = await supabase
-            .from('gh_material_used')
-            .insert(materialPayloads)
-            .select();
-
-          if (matErr) {
-            console.error("❌ ERROR CREATING MATERIAL USED:", matErr);
-            console.error("   - Error details:", JSON.stringify(matErr, null, 2));
-            throw matErr;
-          }
-
-          console.log(`✅ ${matData.length} Material used record(s) created`);
-          console.log("   - Created records:", JSON.stringify(matData, null, 2));
-        } else {
-          console.log("⚠️ NO VALID MATERIALS to insert for activity:", activity_id);
-        }
-      } else {
-        console.log("⚠️ NO MATERIALS ARRAY or EMPTY for activity:", activity_id);
+        const { error: matErr } = await supabase.from('gh_material_used').insert(materialPayloads);
+        if (matErr) throw matErr;
       }
     }
 
-    alert(`✅ Data berhasil disimpan ke database!\nReport ID: ${report_id}`);
-    
+    alert(`✅ Data berhasil disimpan!\nReport ID: ${report_id}`);
     resetForm();
 
   } catch (err) {
-    console.error("❌ Gagal menyimpan report:", err);
-    alert(`❌ Terjadi kesalahan: ${err.message}`);
+    console.error("❌ Submit Error:", err);
+    alert(`❌ Error: ${err.message}`);
   } finally {
     isSubmitting.value = false;
   }
 };
 
-// ======================
-// RESET FORM
-// ======================
 function resetForm() {
   selectedLocation.value = "";
   selectedBatch.value = "";
   selectedPhase.value = "";
-  selectedWarehouse.value = null
-  selectedBin.value = null
-  availableMaterials.value = []
-  planningData.value = null
-  showPlanningSection.value = false
-  
-  typeDamages.value = [
-    {
-      id: Date.now(),
-      type_damage: "",
-      kuning: 0,
-      kutilang: 0,
-      busuk: 0
-    }
-  ];
-  
-  formSections.value = [
-    {
-      id: Date.now(),
-      phase_id: "",
-      activity_id: "",
-      coa: "",
-      materials: [{ material_name: "", qty: "", uom: "" }],
-      workers: [{ qty: "" }],
-    },
-  ];
+  selectedWarehouse.value = null;
+  selectedBin.value = null;
+  availableMaterials.value = [];
+  planningData.value = null;
+  showPlanningSection.value = false;
+  typeDamages.value = [{ id: Date.now(), type_damage: "", kuning: 0, kutilang: 0, busuk: 0 }];
+  formSections.value = [{ id: Date.now(), phase_id: "", activity_id: "", coa: "", materials: [{ material_name: "", qty: "", uom: "", unit_price: 0, total_price: 0 }], workers: [{ qty: "" }] }];
   selectedDate.value = new Date().toISOString().split("T")[0];
+  typeDamageImages.value = {};
+  activityImages.value = {};
+  uploadingImages.value = {};
 }
 
-// Helper functions
 function getLocationName(locationId) {
   const location = locations.value.find(l => l.location_id == locationId);
   return location ? location.location : "";
@@ -905,36 +458,18 @@ function getBatchName(batchId) {
   return batch ? batch.batch_name : "";
 }
 
-// Format date untuk display
 function formatDate(dateString) {
   if (!dateString) return '';
   const date = new Date(dateString);
-  return date.toLocaleDateString('id-ID', { 
-    weekday: 'long', 
-    year: 'numeric', 
-    month: 'long', 
-    day: 'numeric' 
-  });
+  return date.toLocaleDateString('id-ID', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
 }
 
-// ======================
-// WATCHERS - DECLARE AFTER ALL REF VARIABLES
-// ======================
+watch([selectedLocation, selectedBatch, selectedDate], () => { fetchPlanningData(); });
 
-// Watch untuk trigger fetch planning data
-watch([selectedLocation, selectedBatch, selectedDate], () => {
-  fetchPlanningData();
-});
-
-// Watch selectedBatch untuk load phases
 watch(selectedBatch, async (batch) => {
   formData.value.batch_id = batch;
-
   const locationName = selectedLocation.value ? getLocationName(selectedLocation.value) : null;
-  if(locationName) {
-    await loadWarehouseAndBin(locationName);
-  }
-  
+  if(locationName) await loadWarehouseAndBin(locationName);
   if (batch) {
     phaseList.value = await batchPhaseStore.fetchPhasesForBatch(batch);
   } else {
@@ -942,85 +477,52 @@ watch(selectedBatch, async (batch) => {
   }
 });
 
-// Watch selectedPhase untuk auto-sync ke semua sections
 watch(selectedPhase, (newPhase) => {
-  formSections.value.forEach(section => {
-    section.phase_id = newPhase; // ✅ Perbaiki field name ke phase_id
-  });
+  formSections.value.forEach(section => { section.phase_id = newPhase; });
 });
 
-// Watcher - Auto-fill CoA
-watch(
-  formSections,
-  (sections) => {
-    sections.forEach((s) => {
-      const selected = potatoActivities.value.find(
-        (a) => a.activity_id == s.activity_id
-      );
-      s.coa = selected ? selected.CoA_code : "";
-    });
-  },
-  { deep: true }
-);
+watch(formSections, (sections) => {
+  sections.forEach((s) => {
+    const selected = potatoActivities.value.find((a) => a.activity_id == s.activity_id);
+    s.coa = selected ? selected.CoA_code : "";
+  });
+}, { deep: true });
 
-// Watcher untuk auto-fill UoM & Price/Total Price
-watch(
-  formSections,
-  (sections) => {
-    sections.forEach((section) => {
-      section.materials.forEach((material) => {
-        if (material.material_name) {
-          const selectedMaterial = availableMaterials.value.find(
-            (m) => m.material_name === material.material_name
-          );
-          
-          // Di dalam watcher formSections/materials (sekitar line 737)
-          if (selectedMaterial) {
-              material.uom = selectedMaterial.uom || "";
-              // ✅ Pastikan unit_price dari availableMaterials (yang sudah diisi di loadMaterialsByBin) tidak 0
-              material.unit_price = selectedMaterial.unit_price || 0; 
-              
-              // Hitung total price
-              const qty = parseFloat(material.qty) || 0;
-              material.total_price = qty * material.unit_price;
-          }
-        } else {
-          material.uom = "";
-          material.unit_price = 0;
-          material.total_price = 0;
+watch(formSections, (sections) => {
+  sections.forEach((section) => {
+    section.materials.forEach((material) => {
+      if (material.material_name) {
+        const selectedMaterial = availableMaterials.value.find((m) => m.material_name === material.material_name);
+        if (selectedMaterial) {
+          material.uom = selectedMaterial.uom || "";
+          material.unit_price = selectedMaterial.unit_price || 0;
+          const qty = parseFloat(material.qty) || 0;
+          material.total_price = qty * material.unit_price;
         }
-      });
+      } else {
+        material.uom = "";
+        material.unit_price = 0;
+        material.total_price = 0;
+      }
     });
-  },
-  { deep: true }
-);
+  });
+}, { deep: true });
 
-// ======================
-// LIFECYCLE HOOKS
-// ======================
 onMounted(async () => {
-  console.log("🚀 Memuat data awal...");
   selectedDate.value = new Date().toISOString().split("T")[0];
-
   try {
     await Promise.all([
       locationStore.fetchAll(),
       batchStore.getBatches(),
       potatoActivityStore.fetchAll(),
-      loadApprovalFlowInfo(), // ✅ Muat flow info saat mount
+      loadApprovalFlowInfo(),
     ]);
-
-    console.log("✅ Data berhasil dimuat");
-    console.log("Activities:", potatoActivities.value);
   } catch (error) {
-    console.error("❌ Gagal memuat data:", error);
-    alert("Gagal memuat data. Silakan refresh halaman.");
+    alert("Gagal memuat data. Silakan refresh.");
   }
 });
 
-onUnmounted(() => {
-  stopScanner();
-});
+onUnmounted(() => { stopScanner(); });
 </script>
 
 <template>
@@ -1305,7 +807,20 @@ onUnmounted(() => {
                 <path d="M135.2 17.7L128 32H32C14.3 32 0 46.3 0 64S14.3 96 32 96H416c17.7 0 32-14.3 32-32s-14.3-32-32-32H320l-7.2-14.3C307.4 6.8 296.3 0 284.2 0H163.8c-12.1 0-23.2 6.8-28.6 17.7zM416 128H32L53.2 467c1.6 25.3 22.6 45 47.9 45H346.9c25.3 0 46.3-19.7 47.9-45L416 128z"/>
               </svg>
             </button>
-
+            
+            <ImageUploadComponent
+              v-if="damage.id" 
+              type="type_damage"
+              :recordId="damage.id"
+              :existingImages="typeDamageImages[damage.id] || []"
+              @upload-success="handleTypeDamageImageUpload"
+              @upload-error="handleImageUploadError"
+              @delete="(e) => handleImageDelete(e, 'type_damage')"
+              @images-updated="handleImagesUpdated"
+              :multiple="true"
+              class="mb-4 p-4 bg-blue-50 rounded-lg border border-blue-200"
+            />
+            
             <div class="grid grid-cols-1 md:grid-cols-4 gap-5">
               <div class="flex flex-col md:col-span-1">
                 <label class="text-sm font-semibold text-gray-700 mb-2">
@@ -1359,6 +874,17 @@ onUnmounted(() => {
               </div>
             </div>
           </div>
+        </div>
+        <div class="flex justify-center mt-6">
+          <button
+            @click="addTypeDamageRow"
+            class="bg-white hover:bg-gray-50 text-gray-700 font-semibold px-6 py-3 rounded-xl border-2 border-gray-200 hover:border-red-500 shadow-sm hover:shadow-lg transition-all flex items-center gap-2"
+          >
+            <svg class="w-5 h-5 text-red-500" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512" fill="currentColor">
+              <path d="M256 80c0-17.7-14.3-32-32-32s-32 14.3-32 32l0 144L48 224c-17.7 0-32 14.3-32 32s14.3 32 32 32l144 0 0 144c0 17.7 14.3 32 32 32s32-14.3 32-32l0-144 144 0c17.7 0 32-14.3 32-32s-14.3-32-32-32l-144 0 0-144z"/>
+            </svg>
+            Tambah Jenis Kerusakan
+          </button>
         </div>
       </div>
 
@@ -1420,6 +946,19 @@ onUnmounted(() => {
                 />
               </div>
             </div>
+            
+            <ImageUploadComponent
+              v-if="section.id"
+              type="activity"
+              :recordId="section.id"
+              :existingImages="activityImages[section.id] || []"
+              @upload-success="handleActivityImageUpload"
+              @upload-error="handleImageUploadError"
+              @delete="(e) => handleImageDelete(e, 'activity')"
+              @images-updated="handleImagesUpdated"
+              :multiple="true"
+              class="mb-6 p-4 bg-green-50 rounded-lg border border-green-200"
+            />
 
             <div class="mb-6 bg-gray-50 rounded-xl p-5">
               <div class="flex justify-between items-center mb-4">

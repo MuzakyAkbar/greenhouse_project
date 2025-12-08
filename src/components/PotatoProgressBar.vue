@@ -118,22 +118,6 @@
         {{ label }}
       </text>
     </svg>
-    
-    <!-- Info detail -->
-    <div class="potato-info">
-      <div class="info-item">
-        <span class="info-label">Sukses:</span>
-        <span class="info-value success">{{ success.toLocaleString('id-ID') }}</span>
-      </div>
-      <div class="info-item">
-        <span class="info-label">Total:</span>
-        <span class="info-value">{{ total.toLocaleString('id-ID') }}</span>
-      </div>
-      <div class="info-item">
-        <span class="info-label">Rusak:</span>
-        <span class="info-value damaged">{{ damaged.toLocaleString('id-ID') }}</span>
-      </div>
-    </div>
   </div>
 </template>
 

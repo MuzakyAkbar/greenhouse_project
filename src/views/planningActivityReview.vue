@@ -1,5 +1,4 @@
 <script setup>
-// 1. Imports
 import { ref, onMounted, computed } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useAuthStore } from '../stores/auth'
@@ -7,39 +6,39 @@ import { useBatchStore } from '../stores/batch'
 import { useLocationStore } from '../stores/location'
 import { supabase } from '../lib/supabase'
 import openbravoApi from '@/lib/openbravo'
-// import axios from 'axios' // Dihapus karena tidak digunakan
 
-// 2. Router & Stores
 const router = useRouter()
 const route = useRoute()
 const authStore = useAuthStore()
 const batchStore = useBatchStore()
 const locationStore = useLocationStore()
 
-// 3. Refs (State)
-const report_id = ref(route.params.report_id || null)
+const report_id = ref(route.params.planning_id || null)
 const sourcePage = ref(route.query.from || '/planningReportList')
+
+// State untuk approval
 const approvalProgress = ref([])
 const currentUserLevel = ref(null) 
 const canApproveCurrentLevel = ref(false)
+
 const loading = ref(true)
 const processing = ref(false)
 const error = ref(null)
+
 const phaseInfo = ref(null)
 const currentReport = ref(null)
+
 const revisionModal = ref({
   show: false,
-  type: null,
-  itemId: null,
   notes: ''
 })
+
 const warehouseInfo = ref({
   warehouse: null,
   bin: null,
   location_name: null
 })
 
-// 4. Helper Functions (Non-Openbravo, Non-Dependent Loaders)
 const loadPhaseInfo = async (phaseId) => {
   if (!phaseId) return null;
   
@@ -58,20 +57,39 @@ const loadPhaseInfo = async (phaseId) => {
   }
 };
 
+// Helper: Get all materials from all activities for Openbravo
+const getAllMaterialsForMovement = computed(() => {
+  if (!currentReport.value?.activities) return [];
+
+  return currentReport.value.activities.reduce((allMaterials, activity) => {
+    if (activity.materials && activity.materials.length > 0) {
+      activity.materials.forEach(mat => {
+        allMaterials.push({
+          material_name: mat.material_name,
+          qty: parseFloat(mat.qty) || 0,
+          uom: mat.uom,
+          unit_price: parseFloat(mat.unit_price) || 0,
+          total_price: parseFloat(mat.total_price) || 0,
+          activity_name: activity.act_name
+        });
+      });
+    }
+    return allMaterials;
+  }, []);
+});
+
 const getTotalMaterialCost = () => {
   if (!currentReport.value?.activities) return 0
   
   return currentReport.value.activities.reduce((sum, activity) => {
     if (!activity.materials) return sum
     const activityTotal = activity.materials.reduce((matSum, mat) => {
-      // Menggunakan mat.total_price (yang harusnya sudah Number dari DB atau di-cast)
-      return matSum + (Number(mat.total_price) || 0) 
+      return matSum + (Number(mat.total_price) || 0)
     }, 0)
     return sum + activityTotal
   }, 0)
 }
 
-// Helper function untuk format angka
 const formatNumber = (value) => {
   if (!value && value !== 0) return '0'
   return Number(value).toLocaleString('id-ID', {
@@ -80,7 +98,6 @@ const formatNumber = (value) => {
   })
 }
 
-// Helper function untuk format currency
 const formatCurrency = (value) => {
   if (!value && value !== 0) return 'Rp 0'
   return 'Rp ' + Number(value).toLocaleString('id-ID', {
@@ -89,12 +106,409 @@ const formatCurrency = (value) => {
   })
 }
 
-// Calculate total untuk satu activity
 const calculateActivityTotal = (materials) => {
   if (!materials || materials.length === 0) return 0
   return materials.reduce((sum, mat) => sum + (Number(mat.total_price) || 0), 0)
 }
 
+const reportTotalCost = computed(() => {
+  if (!currentReport.value?.activities) return 0
+  
+  return currentReport.value.activities.reduce((sum, activity) => {
+    const activityTotal = calculateActivityTotal(activity.materials || [])
+    return sum + activityTotal
+  }, 0)
+})
+
+onMounted(async () => {
+  if (!authStore.isLoggedIn) {
+    router.push('/')
+    return
+  }
+
+  if (!report_id.value) {
+    alert('⚠️ Report ID tidak ditemukan')
+    router.push(sourcePage.value)
+    return
+  }
+
+  await loadData()
+})
+
+const loadData = async () => {
+  try {
+    loading.value = true;
+    
+    // 1. Load data master (Batch & Location)
+    await Promise.all([
+      batchStore.getBatches(),
+      locationStore.fetchAll()
+    ]);
+
+    console.log('🔍 Fetching Planning ID:', report_id.value);
+
+    // 2. ✅ PERBAIKAN: Query ke tabel 'gh_planning', bukan 'gh_report'
+    // Sesuaikan relasi join dengan struktur tabel planning Anda (gh_planning_activity, dll)
+    const { data: planning, error: fetchError } = await supabase
+      .from('gh_planning_report') // 👈 Ubah dari gh_report ke gh_planning
+      .select(`
+        *,
+        activities:gh_planning_activity(
+          activity_id, planning_id, act_name, coa, manpower,
+          materials:gh_planning_material(*) 
+        )
+      `)
+      .eq('planning_id', report_id.value) // 👈 Ubah filter ke planning_id
+      .maybeSingle(); // 👈 Gunakan maybeSingle() agar tidak error merah jika data kosong
+    
+    if (fetchError) throw fetchError;
+    
+    if (!planning) {
+      throw new Error(`Data Planning dengan ID ${report_id.value} tidak ditemukan.`);
+    }
+
+    // Mapping data agar struktur variabel 'currentReport' tetap jalan di template
+    // Kita samakan nama fieldnya dengan yang dipakai di template (report_id, report_status, dll)
+    currentReport.value = {
+      ...planning,
+      report_id: planning.planning_id,       // Mapping ID
+      report_status: planning.status,        // Mapping Status (biasanya di planning kolomnya 'status')
+      report_date: planning.planning_date,   // Mapping Tanggal
+      approval_record_id: planning.approval_record_id || null // Pastikan kolom ini ada di tabel gh_planning
+    };
+
+    console.log('✅ Loaded planning:', currentReport.value);
+    
+    // Load Phase Info (jika ada kolom phase_plan yang berupa ID)
+    // Catatan: Di data SQL sebelumnya phase_plan kadang string 'Planlet', kadang ID '23'.
+    if (planning.phase_plan && !isNaN(planning.phase_plan)) {
+      phaseInfo.value = await loadPhaseInfo(planning.phase_plan);
+    } else {
+      phaseInfo.value = planning.phase_plan || 'N/A';
+    }
+    
+    // Load Approval jika ada record ID
+    if (planning.approval_record_id) {
+        await loadApprovalProgress();
+    }
+    
+    // Load Warehouse info untuk Openbravo (jika location ada)
+    if (planning.location_id) {
+      await loadWarehouseAndBin(planning.location_id);
+    }
+    
+  } catch (err) {
+    console.error('❌ Error loading data:', err);
+    error.value = err.message;
+    // Jangan redirect paksa agar kita bisa baca errornya di layar
+    // router.push(sourcePage.value); 
+  } finally {
+    loading.value = false;
+  }
+};
+
+const loadWarehouseAndBin = async (locationId) => {
+  try {
+    const location = locationStore.locations.find(l => l.location_id == locationId)
+    if (!location) {
+      console.warn('⚠️ Location not found:', locationId)
+      return
+    }
+
+    const locationName = location.location
+    warehouseInfo.value.location_name = locationName
+    
+    console.log('🏢 Loading warehouse for location:', locationName)
+
+    const warehouseRes = await openbravoApi.get(
+      '/org.openbravo.service.json.jsonrest/Warehouse',
+      { params: { _where: `name='${locationName}'` } }
+    )
+
+    const warehouses = warehouseRes?.data?.response?.data || []
+    if (!warehouses.length) {
+      console.warn('⚠️ Warehouse not found for location:', locationName)
+      return
+    }
+
+    const warehouse = warehouses[0]
+    warehouseInfo.value.warehouse = warehouse
+    console.log('✅ Warehouse found:', warehouse.name)
+
+    const binRes = await openbravoApi.get(
+      '/org.openbravo.service.json.jsonrest/Locator',
+      { params: { _where: `M_Warehouse_ID='${warehouse.id}'` } }
+    )
+
+    const bins = binRes?.data?.response?.data || []
+    if (!bins.length) {
+      console.warn('⚠️ Bin not found for warehouse:', warehouse.name)
+      return
+    }
+
+    warehouseInfo.value.bin = bins[0]
+    console.log('✅ Bin found:', bins[0].name)
+
+  } catch (err) {
+    console.error('❌ Error loading warehouse/bin:', err)
+  }
+}
+
+// ✅ CREATE INTERNAL CONSUMPTION (MOVEMENT) DI OPENBRAVO
+const createInternalConsumption = async (materials) => {
+  if (!materials || materials.length === 0) {
+    console.log('ℹ️ No materials to process');
+    return { success: true, movementId: 'NO_MATERIALS', successCount: 0, totalMaterials: 0 };
+  }
+
+  if (!warehouseInfo.value.warehouse || !warehouseInfo.value.bin) {
+    throw new Error('Warehouse/Bin information not available');
+  }
+
+  try {
+    console.log(`📤 Creating Internal Consumption for ${materials.length} materials...`);
+    
+    const warehouse = warehouseInfo.value.warehouse;
+    const bin = warehouseInfo.value.bin;
+    const documentNo = `IC-${currentReport.value.report_id}-${Date.now()}`;
+    
+    // 1. Get Organization
+    const orgRes = await openbravoApi.get(
+      '/org.openbravo.service.json.jsonrest/Organization',
+      { params: { _where: `name='${warehouse.organization$_identifier}'` } }
+    );
+    const org = orgRes?.data?.response?.data?.[0];
+    if (!org) throw new Error('Organization not found');
+
+    console.log('✅ Organization found:', org.name);
+
+    // 2. Create Movement Header
+    const movementHeader = {
+      organization: org.id,
+      client: org.client,
+      warehouse: warehouse.id,
+      movementType: 'M-',
+      movementDate: new Date().toISOString().split('T')[0],
+      documentNo: documentNo,
+      description: `Internal Consumption for Report #${currentReport.value.report_id}`,
+      posted: 'N'
+    };
+
+    const headerResponse = await openbravoApi.post(
+      '/org.openbravo.service.json.jsonrest/MaterialMgmtMaterialMovement',
+      { data: movementHeader }
+    );
+
+    const movementId = headerResponse?.data?.response?.data?.[0]?.id;
+    if (!movementId) throw new Error('Failed to create movement header');
+
+    console.log(`✅ Movement header created: ${movementId}`);
+
+    // 3. Get all products in one request (optimization)
+    const productRes = await openbravoApi.get(
+      '/org.openbravo.service.json.jsonrest/Product',
+      {
+        params: {
+          _selectedProperties: 'id,_identifier,name',
+          _maxResults: 1000
+        }
+      }
+    );
+
+    const allProducts = productRes?.data?.response?.data || [];
+    console.log(`📦 Loaded ${allProducts.length} products from Openbravo`);
+
+    // 4. Create Movement Lines
+    let successCount = 0;
+    const errors = [];
+
+    for (const mat of materials) {
+      try {
+        // Find product by material name (case-insensitive, trimmed)
+        const product = allProducts.find(p => 
+          p._identifier?.toLowerCase().trim() === mat.material_name?.toLowerCase().trim() ||
+          p.name?.toLowerCase().trim() === mat.material_name?.toLowerCase().trim()
+        );
+
+        if (!product) {
+          console.warn(`⚠️ Product not found in Openbravo: ${mat.material_name}`);
+          errors.push(`Product not found: ${mat.material_name}`);
+          continue;
+        }
+
+        // Create movement line with negative quantity for consumption
+        const lineData = {
+          organization: org.id,
+          client: org.client,
+          movement: movementId,
+          product: product.id,
+          movementQuantity: -Math.abs(parseFloat(mat.qty)), // Negative for consumption
+          uOM: mat.uom || 'EA',
+          storageBin: bin.id,
+          description: `${mat.material_name} for ${mat.activity_name || 'Activity'}`
+        };
+
+        await openbravoApi.post(
+          '/org.openbravo.service.json.jsonrest/MaterialMgmtMovementLine',
+          { data: lineData }
+        );
+
+        successCount++;
+        console.log(`✅ Line created for: ${mat.material_name} (${mat.qty} ${mat.uom})`);
+        
+      } catch (lineErr) {
+        console.error(`❌ Failed to create line for ${mat.material_name}:`, lineErr);
+        errors.push(`${mat.material_name}: ${lineErr.message}`);
+      }
+    }
+
+    console.log(`📊 Created ${successCount}/${materials.length} movement lines`);
+
+    // 5. Process/Post Movement
+    if (successCount > 0) {
+      try {
+        await openbravoApi.post(
+          `/org.openbravo.service.json.jsonrest/MaterialMgmtMaterialMovement/${movementId}/process`,
+          {}
+        );
+        console.log('✅ Movement processed (posted) successfully');
+      } catch (processErr) {
+        console.warn('⚠️ Movement created but failed to process (post):', processErr.message);
+        // Don't throw - movement is created, just not posted
+      }
+    }
+
+    return {
+      success: successCount > 0,
+      movementId: documentNo,
+      successCount,
+      totalMaterials: materials.length,
+      errors: errors.length > 0 ? errors.join('; ') : null
+    };
+
+  } catch (err) {
+    console.error('❌ Error creating internal consumption:', err);
+    return {
+      success: false,
+      movementId: null,
+      successCount: 0,
+      totalMaterials: materials.length,
+      errors: err.message
+    };
+  }
+};
+
+const loadApprovalProgress = async () => {
+  if (!currentReport.value?.approval_record_id) {
+    console.log('⚠️ No approval record found');
+    canApproveCurrentLevel.value = false;
+    currentUserLevel.value = { level_order: 0, level_name: 'Staff/No Approval Flow', is_final_level: false };
+    return;
+  }
+
+  try {
+    console.log('📊 Loading approval progress for record:', currentReport.value.approval_record_id);
+
+    const { data: recordData, error: recordErr } = await supabase
+      .from('gh_approve_record')
+      .select(`
+        current_level_order, 
+        overall_status, 
+        flow_id,
+        gh_approval_flow!inner(
+          last_level,
+          first_level
+        )
+      `)
+      .eq('record_id', currentReport.value.approval_record_id)
+      .single();
+
+    if (recordErr) throw recordErr;
+
+    const currentLevelOrder = recordData?.current_level_order || 1;
+    const lastLevel = recordData.gh_approval_flow?.last_level;
+    
+    const { data: levelStatuses, error: statusErr } = await supabase
+      .from('gh_approval_level_status')
+      .select(`
+        level_status_id,
+        level_order,
+        level_name,
+        status,
+        approved_by,
+        approved_at,
+        revision_notes,
+        revision_requested_by,
+        revision_requested_at
+      `)
+      .eq('record_id', currentReport.value.approval_record_id)
+      .order('level_order', { ascending: true });
+
+    if (statusErr) throw statusErr;
+
+    const approverIds = [
+      ...levelStatuses.map(s => s.approved_by),
+      ...levelStatuses.map(s => s.revision_requested_by)
+    ].filter(Boolean);
+
+    let approverNames = {};
+    if (approverIds.length > 0) {
+      const { data: users } = await supabase
+        .from('user')
+        .select('user_id, username, email')
+        .in('user_id', approverIds);
+      
+      if (users) {
+        approverNames = users.reduce((acc, user) => {
+          acc[user.user_id] = user.username || user.email;
+          return acc;
+        }, {});
+      }
+    }
+
+    approvalProgress.value = levelStatuses.map(level => ({
+      ...level,
+      approver_name: level.approved_by ? approverNames[level.approved_by] : null,
+      revisor_name: level.revision_requested_by ? approverNames[level.revision_requested_by] : null,
+      is_final_level: level.level_order === lastLevel,
+      level_status: level.status
+    }));
+
+    const { data: userLevel } = await supabase
+      .from('gh_user_approval_level')
+      .select('level_order, flow_id')
+      .eq('user_id', authStore.user.user_id)
+      .eq('flow_id', recordData.flow_id)
+      .eq('level_order', currentLevelOrder)
+      .eq('is_active', true)
+      .maybeSingle();
+
+    const currentLevelStatus = levelStatuses.find(s => s.level_order === currentLevelOrder);
+    
+    canApproveCurrentLevel.value = 
+      !!userLevel && 
+      currentLevelStatus?.status === 'pending' &&
+      recordData.overall_status === 'onReview';
+    
+    currentUserLevel.value = {
+      level_order: currentLevelOrder,
+      level_name: currentLevelStatus?.level_name || `Level ${currentLevelOrder}`,
+      is_final_level: currentLevelOrder === lastLevel,
+    };
+    
+    currentReport.value.report_status = recordData.overall_status;
+    
+    console.log('🔐 Can approve current level:', canApproveCurrentLevel.value);
+    console.log('📍 Current level:', currentUserLevel.value);
+    
+  } catch (err) {
+    console.error('❌ Error loading approval progress:', err);
+    canApproveCurrentLevel.value = false;
+    currentUserLevel.value = { level_order: 1, level_name: 'Error/Unknown', is_final_level: false };
+  }
+};
+
+// Helper functions
 const getBatchName = (batchId) => {
   const batch = batchStore.batches.find(b => b.batch_id == batchId)
   return batch?.batch_name || `Batch ${batchId}`
@@ -127,629 +541,31 @@ const formatDateTime = (dateStr) => {
   })
 }
 
-const getStatusBadge = (status) => {
-  const badges = {
-    'onReview': {
-      text: '⏳ Review',
-      class: 'bg-yellow-100 text-yellow-800 border-yellow-200'
-    },
-    'needRevision': {
-      text: '🔄 Revision',
-      class: 'bg-red-100 text-red-800 border-red-200'
-    },
-    'approved': {
-      text: '✅ Approved',
-      class: 'bg-green-100 text-green-800 border-green-200'
-    }
-  }
-  return badges[status || 'onReview'] || badges['onReview']
-}
-
-// 5. loadWarehouseAndBin (Openbravo Dependency)
-const loadWarehouseAndBin = async (locationId) => {
-  try {
-    const location = locationStore.locations.find(l => l.location_id == locationId)
-    if (!location) {
-      console.warn('⚠️ Location not found:', locationId)
-      alert('⚠️ Location tidak ditemukan di database!')
-      return
-    }
-
-    const locationName = location.location
-    warehouseInfo.value.location_name = locationName
-    
-    console.log('🔍 Searching warehouse for location:', locationName)
-
-    // ✅ Request client & organization explicitly
-    const warehouseRes = await openbravoApi.get(
-      '/org.openbravo.service.json.jsonrest/Warehouse',
-      { 
-        params: { 
-          _where: `name='${locationName}'`,
-          _selectedProperties: 'id,name,organization,client'
-        } 
-      }
-    )
-
-    console.log('📥 Warehouse search response:', warehouseRes?.data)
-
-    const warehouses = warehouseRes?.data?.response?.data || []
-    if (!warehouses.length) {
-      console.error('❌ Warehouse not found for location:', locationName)
-      alert(`❌ Warehouse "${locationName}" tidak ditemukan di Openbravo!`)
-      return
-    }
-
-    const warehouse = warehouses[0]
-    warehouseInfo.value.warehouse = warehouse
-    
-    console.log('✅ Warehouse found:', {
-      id: warehouse.id,
-      name: warehouse.name,
-      organization: warehouse.organization,
-      client: warehouse.client
-    })
-
-    // ✅ Validate client exists
-    if (!warehouse.client && !warehouse.organization?.client) {
-      console.error('❌ Client not found in warehouse response!')
-      console.error('Full warehouse object:', warehouse)
-      alert('⚠️ Client ID tidak ditemukan di Warehouse. Hubungi admin untuk konfigurasi Openbravo.')
-      return
-    }
-
-    // Load bin
-    const binRes = await openbravoApi.get(
-        '/org.openbravo.service.json.jsonrest/Locator', // <--- ENDPOINT SUDAH BENAR
-        { params: { _where: `M_Warehouse_ID='${warehouse.id}'` } }
-    )
-
-    const bins = binRes?.data?.response?.data || []
-    if (!bins.length) {
-      console.warn('⚠️ Bin not found for warehouse:', warehouse.name)
-      alert(`⚠️ Storage Bin tidak ditemukan untuk warehouse "${warehouse.name}"`)
-      return
-    }
-
-    warehouseInfo.value.bin = bins[0]
-    console.log('✅ Bin found:', {
-      id: bins[0].id,
-      name: bins[0].name
-    })
-
-  } catch (err) {
-    console.error('❌ Error loading warehouse/bin:', err)
-    console.error('Error details:', err.response?.data)
-    alert('❌ Gagal memuat warehouse/bin dari Openbravo: ' + err.message)
-  }
-}
-
-// 6. loadApprovalProgress (Supabase Dependency, used by loadData)
-const loadApprovalProgress = async () => {
-  if (!currentReport.value?.approval_record_id) {
-    console.log('⚠️ No approval record found');
-    
-    // Fallback info jika report belum masuk flow
-    canApproveCurrentLevel.value = false;
-    currentUserLevel.value = { level_order: 0, level_name: 'Staff/No Approval Flow', is_final_level: false };
-    
-    return;
-  }
-
-  try {
-    console.log('📊 Loading approval progress for record:', currentReport.value.approval_record_id);
-
-    // 1. Fetch approval record & flow info
-    const { data: recordData, error: recordErr } = await supabase
-      .from('gh_approve_record')
-      .select(`
-        current_level_order, 
-        overall_status, 
-        flow_id,
-        gh_approval_flow!inner(
-          last_level,
-          first_level
-        )
-      `)
-      .eq('record_id', currentReport.value.approval_record_id)
-      .single();
-
-    if (recordErr) throw recordErr;
-
-    const currentLevelOrder = recordData?.current_level_order || 1;
-    const lastLevel = recordData.gh_approval_flow?.last_level;
-    
-    // 2. Fetch level status untuk semua level
-    const { data: levelStatuses, error: statusErr } = await supabase
-      .from('gh_approval_level_status')
-      .select(`
-        level_status_id,
-        level_order,
-        level_name,
-        status,
-        approved_by,
-        approved_at,
-        revision_notes,
-        revision_requested_by,
-        revision_requested_at
-      `)
-      .eq('record_id', currentReport.value.approval_record_id)
-      .order('level_order', { ascending: true });
-
-    if (statusErr) throw statusErr;
-
-    // 3. Fetch approver names untuk display
-    const approverIds = [
-      ...levelStatuses.map(s => s.approved_by),
-      ...levelStatuses.map(s => s.revision_requested_by)
-    ].filter(Boolean);
-
-    let approverNames = {};
-    if (approverIds.length > 0) {
-      const { data: users } = await supabase
-        .from('user')
-        .select('user_id, username, email')
-        .in('user_id', approverIds);
-      
-      if (users) {
-        approverNames = users.reduce((acc, user) => {
-          acc[user.user_id] = user.username || user.email;
-          return acc;
-        }, {});
-      }
-    }
-
-    // 4. Enhance level statuses dengan approver names
-    approvalProgress.value = levelStatuses.map(level => ({
-      ...level,
-      approver_name: level.approved_by ? approverNames[level.approved_by] : null,
-      revisor_name: level.revision_requested_by ? approverNames[level.revision_requested_by] : null,
-      is_final_level: level.level_order === lastLevel,
-      level_status: level.status // Alias untuk compatibility
-    }));
-
-    console.log('✅ Approval progress loaded:', approvalProgress.value);
-
-    // 5. Check apakah user login punya hak approve di level saat ini
-    const { data: userLevel } = await supabase
-      .from('gh_user_approval_level')
-      .select('level_order, flow_id')
-      .eq('user_id', authStore.user.user_id)
-      .eq('flow_id', recordData.flow_id)
-      .eq('level_order', currentLevelOrder)
-      .eq('is_active', true)
-      .maybeSingle(); 
-
-    // 6. Ambil status level saat ini
-    const currentLevelStatus = levelStatuses.find(s => s.level_order === currentLevelOrder);
-    
-    // 7. User bisa approve jika:
-    // - User memiliki level yang sesuai
-    // - Status level saat ini masih 'pending'
-    // - Overall status masih 'onReview'
-    canApproveCurrentLevel.value = 
-      !!userLevel && 
-      currentLevelStatus?.status === 'pending' &&
-      recordData.overall_status === 'onReview';
-    
-    // 8. Set current user level info
-    currentUserLevel.value = {
-      level_order: currentLevelOrder,
-      level_name: currentLevelStatus?.level_name || `Level ${currentLevelOrder}`,
-      is_final_level: currentLevelOrder === lastLevel,
-    };
-    
-    // 9. Update status report dengan overall_status dari record
-    currentReport.value.report_status = recordData.overall_status;
-    
-    console.log('🔐 Can approve current level:', canApproveCurrentLevel.value);
-    console.log('📍 Current level:', currentUserLevel.value);
-    
-  } catch (err) {
-    console.error('❌ Error loading approval progress:', err);
-    canApproveCurrentLevel.value = false;
-    currentUserLevel.value = { level_order: 1, level_name: 'Error/Unknown', is_final_level: false };
-  }
-};
-
-
-// 7. createAndProcessMovement (Openbravo Dependency, used by approveCurrentLevel)
-const createAndProcessMovement = async (materials, activityName) => {
-  console.log('🚀 Creating Openbravo Internal Consumption for activity:', activityName);
+const reportInfo = computed(() => {
+  if (!currentReport.value) return null;
   
-  if (!materials || materials.length === 0) {
-    console.warn('⚠️ No materials to process');
-    return {
-      success: false,
-      movementId: null,
-      successCount: 0,
-      totalMaterials: 0,
-      errors: 'No materials to process'
-    };
-  }
-
-  // Validasi warehouse info
-  if (!warehouseInfo.value.warehouse || !warehouseInfo.value.bin) {
-    console.error('❌ Warehouse or Bin not found');
-    console.error('Warehouse Info:', warehouseInfo.value);
-    return {
-      success: false,
-      movementId: null,
-      successCount: 0,
-      totalMaterials: materials.length,
-      errors: 'Warehouse or Bin not configured. Please check location settings.'
-    };
-  }
-
-  const warehouse = warehouseInfo.value.warehouse;
-  const bin = warehouseInfo.value.bin;
+  const report = currentReport.value;
   
-  // Extract organization ID and client ID
-  let orgId, clientId;
-  
-  if (warehouse.organization?.id) {
-    orgId = warehouse.organization.id;
-  } else if (typeof warehouse.organization === 'string') {
-    orgId = warehouse.organization;
-  } else {
-    console.error('❌ Cannot extract organization ID from warehouse:', warehouse);
-    return {
-      success: false,
-      movementId: null,
-      successCount: 0,
-      totalMaterials: materials.length,
-      errors: 'Invalid organization configuration'
-    };
-  }
+  return {
+    report_id: report.report_id,
+    location_id: report.location_id,
+    location_name: getLocationName(report.location_id),
+    batch_id: report.batch_id,
+    batch_name: getBatchName(report.batch_id),
+    report_date: report.report_date,
+    report_status: report.report_status,
+    phase_id: report.phase_id,
+    phase_name: phaseInfo.value || 'Unknown Phase', 
+    totalTypeDamages: report.type_damages?.length || 0,
+    totalActivities: report.activities?.length || 0,
+    current_level_order: currentUserLevel.value?.level_order || 1,
+    current_level_name: currentUserLevel.value?.level_name || 'Level 1',
+    can_approve: canApproveCurrentLevel.value,
+    is_final_level: currentUserLevel.value?.is_final_level || false,
+  };
+});
 
-  // Extract client ID
-  if (warehouse.client?.id) {
-    clientId = warehouse.client.id;
-  } else if (typeof warehouse.client === 'string') {
-    clientId = warehouse.client;
-  } else if (warehouse.organization?.client?.id) {
-    clientId = warehouse.organization.client.id;
-  } else {
-    console.error('❌ Cannot extract client ID from warehouse:', warehouse);
-    return {
-      success: false,
-      movementId: null,
-      successCount: 0,
-      totalMaterials: materials.length,
-      errors: 'Invalid client configuration'
-    };
-  }
-
-  console.log('📦 Warehouse Info:', {
-    warehouseId: warehouse.id,
-    warehouseName: warehouse.name,
-    binId: bin.id,
-    binName: bin.name,
-    orgId: orgId,
-    clientId: clientId
-  });
-
-  // ✅ CRITICAL: Validate clientId
-  if (!clientId) {
-    console.error('❌ Client ID is missing!');
-    console.error('Full warehouse object:', warehouse);
-    return {
-      success: false,
-      movementId: null,
-      successCount: 0,
-      totalMaterials: materials.length,
-      errors: 'Client ID not found in warehouse configuration'
-    };
-  }
-
-  try {
-    // 1. Create Internal Consumption Header
-    console.log('📝 Step 1: Creating Internal Consumption header...');
-    
-    const movementDate = new Date().toISOString().split('T')[0]; // Format: YYYY-MM-DD
-    
-    const headerPayload = {
-      data: [
-        {
-          _entityName: "MaterialMgmtInternalConsumption",
-          client: clientId,
-          organization: orgId,
-          name: `Material Usage - ${activityName} - ${new Date().toLocaleDateString('id-ID')}`,
-          movementDate: movementDate,
-          description: `Auto-generated from Greenhouse Activity: ${activityName}`
-        }
-      ]
-    };
-
-    console.log('📤 Internal Consumption header payload:', JSON.stringify(headerPayload, null, 2));
-
-    const createHeaderRes = await openbravoApi.post(
-      '/org.openbravo.service.json.jsonrest/MaterialMgmtInternalConsumption',
-      headerPayload
-    );
-
-    console.log('📥 RAW Header response:', createHeaderRes);
-    console.log('📥 Response data:', createHeaderRes?.data);
-
-    // Extract Internal Consumption ID
-    let consumptionData = null;
-    let consumptionId = null;
-
-    // Check multiple possible response structures
-    if (createHeaderRes?.data?.response?.data) {
-      consumptionData = createHeaderRes.data.response.data;
-      console.log('✅ Found data in response.data:', consumptionData);
-    } else if (createHeaderRes?.data?.data) {
-      consumptionData = createHeaderRes.data.data;
-      console.log('✅ Found data in data:', consumptionData);
-    } else if (Array.isArray(createHeaderRes?.data)) {
-      consumptionData = createHeaderRes.data;
-      console.log('✅ Response is array:', consumptionData);
-    } else if (createHeaderRes?.data?.id) {
-      consumptionData = [createHeaderRes.data];
-      console.log('✅ Response is single object:', consumptionData);
-    }
-
-    // Extract consumption ID
-    if (consumptionData && Array.isArray(consumptionData) && consumptionData.length > 0) {
-      consumptionId = consumptionData[0].id;
-    } else if (consumptionData && consumptionData.id) {
-      consumptionId = consumptionData.id;
-    }
-
-    if (!consumptionId) {
-      console.error('❌ Could not extract consumption ID');
-      console.error('Full response structure:', JSON.stringify(createHeaderRes, null, 2));
-      throw new Error('Failed to create Internal Consumption header - could not extract ID from response');
-    }
-
-    console.log('✅ Internal Consumption header created with ID:', consumptionId);
-
-    // 2. Create Internal Consumption Lines
-    console.log('📝 Step 2: Creating Internal Consumption lines...');
-    
-    let successCount = 0;
-    let failCount = 0;
-    const errors = [];
-
-    for (let i = 0; i < materials.length; i++) {
-      const material = materials[i];
-      
-      try {
-        console.log(`🔍 Processing material ${i + 1}/${materials.length}: ${material.material_name}`);
-        
-        // Escape single quotes in material name
-        const escapedName = material.material_name.replace(/'/g, "''");
-        
-        // Get product by name
-        const productRes = await openbravoApi.get(
-          '/org.openbravo.service.json.jsonrest/Product',
-          {
-            params: {
-              _where: `name='${escapedName}'`,
-              _selectedProperties: 'id,name,uOM'
-            }
-          }
-        );
-
-        const products = productRes?.data?.response?.data || [];
-        
-        if (products.length === 0) {
-          console.warn(`⚠️ Product not found in Openbravo: ${material.material_name}`);
-          errors.push(`Product not found: ${material.material_name}`);
-          failCount++;
-          continue;
-        }
-
-        const product = products[0];
-        console.log(`✅ Product found: ${product.name} (ID: ${product.id})`);
-
-        // Extract UOM ID
-        let uomId;
-        if (product.uOM?.id) {
-          uomId = product.uOM.id;
-        } else if (typeof product.uOM === 'string') {
-          uomId = product.uOM;
-        } else {
-          console.error('❌ Cannot extract UOM from product:', product);
-          errors.push(`${material.material_name}: Invalid UOM`);
-          failCount++;
-          continue;
-        }
-
-        // Validate quantity
-        const qty = Math.abs(Number(material.qty) || 0);
-        if (qty === 0) {
-          console.warn(`⚠️ Skipping ${material.material_name} - quantity is 0`);
-          continue;
-        }
-
-        // Create Internal Consumption Line
-        const linePayload = {
-          data: [
-            {
-              _entityName: "MaterialMgmtInternalConsumptionLine",
-              client: clientId,
-              organization: orgId,
-              internalConsumption: consumptionId,
-              lineNo: (successCount + 1) * 10,
-              product: product.id,
-              uOM: uomId,
-              movementQuantity: qty,
-              storageBin: bin.id
-            }
-          ]
-        };
-
-        console.log('📤 Line payload:', JSON.stringify(linePayload, null, 2));
-
-        const lineRes = await openbravoApi.post(
-          '/org.openbravo.service.json.jsonrest/MaterialMgmtInternalConsumptionLine',
-          linePayload
-        );
-
-        console.log('📥 Line response:', lineRes?.data);
-
-        // Check if line was created
-        const lineData = lineRes?.data?.response?.data || lineRes?.data?.data || lineRes?.data;
-        
-        if (!lineData || (Array.isArray(lineData) && lineData.length === 0)) {
-          throw new Error(`No data returned when creating line for ${material.material_name}`);
-        }
-
-        successCount++;
-        console.log(`✅ Line #${successCount} created for: ${material.material_name}`);
-
-      } catch (lineErr) {
-        console.error(`❌ Error creating line for ${material.material_name}:`, lineErr);
-        console.error('Line error response:', lineErr.response?.data);
-        errors.push(`${material.material_name}: ${lineErr.message}`);
-        failCount++;
-      }
-    }
-
-    console.log(`📊 Lines summary: ${successCount} success, ${failCount} failed out of ${materials.length} total`);
-
-    // 3. Process (Complete) the Internal Consumption
-    if (successCount > 0) {
-      console.log('📝 Step 3: Processing (completing) Internal Consumption...');
-      
-      try {
-        // Complete the document using document action
-        const processPayload = {
-          data: [
-            {
-              _entityName: "MaterialMgmtInternalConsumption",
-              id: consumptionId,
-              documentAction: "CO" // Complete
-            }
-          ]
-        };
-
-        console.log('📤 Process payload:', JSON.stringify(processPayload, null, 2));
-
-        const processRes = await openbravoApi.put(
-          `/org.openbravo.service.json.jsonrest/MaterialMgmtInternalConsumption/${consumptionId}`,
-          processPayload
-        );
-
-        console.log('📥 Process response:', processRes?.data);
-        console.log('✅ Internal Consumption completed successfully!');
-
-        return {
-          success: true,
-          movementId: consumptionId,
-          successCount: successCount,
-          totalMaterials: materials.length,
-          errors: failCount > 0 ? errors.join('; ') : null
-        };
-
-      } catch (processErr) {
-        console.error('❌ Error completing Internal Consumption:', processErr);
-        console.error('Process error response:', processErr.response?.data);
-        
-        // Document created but not completed - still return success with warning
-        return {
-          success: true,
-          movementId: consumptionId,
-          successCount: successCount,
-          totalMaterials: materials.length,
-          errors: `Internal Consumption created (ID: ${consumptionId}) but auto-complete failed. Please complete manually in Openbravo. ${failCount > 0 ? 'Also: ' + errors.join('; ') : ''}`
-        };
-      }
-    } else {
-      // No lines created successfully - delete header
-      console.warn('⚠️ No lines created successfully, attempting to delete Internal Consumption header...');
-      
-      try {
-        await openbravoApi.delete(
-          `/org.openbravo.service.json.jsonrest/MaterialMgmtInternalConsumption/${consumptionId}`
-        );
-        console.log('🗑️ Internal Consumption header deleted');
-      } catch (delErr) {
-        console.error('❌ Error deleting header:', delErr);
-      }
-
-      return {
-        success: false,
-        movementId: null,
-        successCount: 0,
-        totalMaterials: materials.length,
-        errors: `All material lines failed: ${errors.join('; ')}`
-      };
-    }
-
-  } catch (err) {
-    console.error('❌ CRITICAL ERROR in createAndProcessMovement:', err);
-    console.error('Error message:', err.message);
-    console.error('Error response:', err.response?.data);
-    console.error('Error stack:', err.stack);
-    
-    return {
-      success: false,
-      movementId: null,
-      successCount: 0,
-      totalMaterials: materials.length,
-      errors: `Critical error: ${err.message}. Check browser console for full details.`
-    };
-  }
-};
-
-
-// 8. loadData (Main data loading function)
-const loadData = async () => {
-  try {
-    loading.value = true;
-    
-    await Promise.all([
-      batchStore.getBatches(),
-      locationStore.fetchAll()
-    ]);
-
-    const { data: report, error: fetchError } = await supabase
-      .from('gh_report')
-      .select(`
-        *,
-        type_damages:gh_type_damage(*),
-        activities:gh_activity(
-          *,
-          materials:gh_material_used(*)
-        )
-      `)
-      .eq('report_id', report_id.value)
-      .single();
-    
-    if (fetchError) throw fetchError;
-    if (!report) throw new Error('Laporan tidak ditemukan');
-
-    currentReport.value = report;
-    console.log('✅ Loaded report:', report);
-    
-    // Load phase name
-    if (report.phase_id) {
-      phaseInfo.value = await loadPhaseInfo(report.phase_id);
-    }
-    
-    // Load approval progress
-    await loadApprovalProgress();
-    
-    // Load Openbravo warehouse/bin info
-    if (report.location_id) {
-      await loadWarehouseAndBin(report.location_id);
-    }
-    
-  } catch (err) {
-    console.error('❌ Error loading data:', err);
-    error.value = err.message;
-    alert('❌ Gagal memuat data: ' + err.message);
-    router.push(sourcePage.value);
-  } finally {
-    loading.value = false;
-  }
-};
-
-
-// 9. approveCurrentLevel (Approval Action)
+// ✅ APPROVE CURRENT LEVEL - Satu tombol untuk semua
 const approveCurrentLevel = async () => {
   if (!canApproveCurrentLevel.value) {
     alert('⚠️ Anda tidak memiliki akses untuk approve di level ini');
@@ -762,8 +578,9 @@ const approveCurrentLevel = async () => {
   }
 
   const levelName = currentUserLevel.value.level_name;
+  const isFinalLevel = currentUserLevel.value.is_final_level;
   
-  if (!confirm(`✅ Approve report ini untuk level "${levelName}"?\n\nReport akan ${currentUserLevel.value.is_final_level ? 'FULLY APPROVED dan stock material akan dikurangi' : 'dilanjutkan ke level berikutnya'}.`)) {
+  if (!confirm(`✅ Approve report ini untuk level "${levelName}"?\n\n${isFinalLevel ? '⚠️ FINAL LEVEL: Stok material akan dikurangi di Openbravo!' : 'Report akan dilanjutkan ke level berikutnya.'}`)) {
     return;
   }
 
@@ -772,8 +589,59 @@ const approveCurrentLevel = async () => {
     
     const currentLevelOrder = currentUserLevel.value.level_order;
     const username = authStore.user?.username || authStore.user?.email || 'Admin';
-    
-    // 1. Update level status jadi 'approved'
+    let movementResult = { success: true, movementId: 'N/A' };
+
+    // ✅ PENGURANGAN STOK HANYA DI FINAL LEVEL
+    // Di dalam approveCurrentLevel, bagian FINAL LEVEL:
+    if (isFinalLevel) {
+        console.log('🔄 FINAL LEVEL: Processing stock reduction...');
+        
+        // Validasi warehouse/bin
+        if (!warehouseInfo.value.warehouse || !warehouseInfo.value.bin) {
+            throw new Error('❌ Informasi Warehouse/Bin Openbravo tidak lengkap. Tidak dapat mengurangi stok.');
+        }
+
+        const materials = getAllMaterialsForMovement.value;
+        
+        if (materials.length > 0) {
+            console.log(`📦 Processing ${materials.length} materials for stock reduction...`);
+            
+            movementResult = await createInternalConsumption(materials);
+
+            if (!movementResult.success) {
+                // Jangan lempar error langsung, beri pilihan
+                const confirmProceed = confirm(
+                    `⚠️ Gagal memproses sebagian/semua material di Openbravo:\n\n${movementResult.errors}\n\n` +
+                    `Berhasil: ${movementResult.successCount}/${movementResult.totalMaterials}\n\n` +
+                    `Tetap lanjutkan approval?`
+                );
+                
+                if (!confirmProceed) {
+                    throw new Error('Approval dibatalkan oleh user');
+                }
+            } else {
+                console.log(`✅ Internal Consumption created: ${movementResult.movementId}`);
+            }
+            
+            // Update Openbravo Document ID di semua aktivitas
+            if (movementResult.movementId && movementResult.movementId !== 'NO_MATERIALS') {
+                const { error: updateActErr } = await supabase
+                    .from('gh_activity')
+                    .update({ openbravo_movement_id: movementResult.movementId })
+                    .eq('report_id', currentReport.value.report_id);
+                
+                if (updateActErr) {
+                    console.error('❌ Failed to update openbravo_movement_id:', updateActErr);
+                } else {
+                    console.log('✅ Updated openbravo_movement_id for all activities');
+                }
+            }
+        } else {
+            console.log('ℹ️ No materials to process in final level');
+        }
+    }
+
+    // 2. Update level status jadi 'approved'
     const { error: updateLevelErr } = await supabase
       .from('gh_approval_level_status')
       .update({
@@ -786,20 +654,18 @@ const approveCurrentLevel = async () => {
 
     if (updateLevelErr) throw updateLevelErr;
 
-    // 2. Insert history
-    const { data: recordFlowData, error: flowFetchErr } = await supabase
-          .from('gh_approve_record')
-          .select('flow_id')
-          .eq('record_id', currentReport.value.approval_record_id)
-          .single();
+    // 3. Insert history
+    const { data: flowDataHistory } = await supabase
+      .from('gh_approve_record')
+      .select('flow_id')
+      .eq('record_id', currentReport.value.approval_record_id)
+      .single();
     
-    if (flowFetchErr) throw flowFetchErr;
-
     const { error: historyErr } = await supabase
       .from('gh_approval_history')
       .insert({
         record_id: currentReport.value.approval_record_id,
-        flow_id: recordFlowData.flow_id,
+        flow_id: flowDataHistory.flow_id,
         user_id: authStore.user.user_id,
         level_order: currentLevelOrder,
         level_name: levelName,
@@ -809,24 +675,8 @@ const approveCurrentLevel = async () => {
 
     if (historyErr) throw historyErr;
 
-    // 3. Check apakah ini final level
-    const { data: flowData } = await supabase
-      .from('gh_approve_record')
-      .select(`
-        flow_id,
-        gh_approval_flow!inner(last_level)
-      `)
-      .eq('record_id', currentReport.value.approval_record_id)
-      .single();
-
-    const isFinalLevel = currentLevelOrder === flowData.gh_approval_flow.last_level;
-
     // 4. Update approve_record
     if (isFinalLevel) {
-      // ✅ FINAL APPROVAL - PROCESS OPENBRAVO MOVEMENT
-      console.log('🎯 Final level approval - Processing Openbravo movements...');
-
-      // Final approval - set overall_status = 'approved'
       const { error: recordErr } = await supabase
         .from('gh_approve_record')
         .update({
@@ -837,7 +687,6 @@ const approveCurrentLevel = async () => {
 
       if (recordErr) throw recordErr;
 
-      // Update report status
       const { error: reportErr } = await supabase
         .from('gh_report')
         .update({ report_status: 'approved' })
@@ -845,68 +694,7 @@ const approveCurrentLevel = async () => {
 
       if (reportErr) throw reportErr;
 
-      // ✅ PROCESS OPENBRAVO MOVEMENT FOR EACH ACTIVITY
-      let movementSuccessCount = 0;
-      let movementFailCount = 0;
-      const movementErrors = [];
-
-      for (const activity of currentReport.value.activities) {
-        if (!activity.materials || activity.materials.length === 0) {
-          console.log(`⚠️ Activity ${activity.act_name} has no materials, skipping...`);
-          continue;
-        }
-
-        console.log(`📦 Processing movement for activity: ${activity.act_name}`);
-        
-        try {
-          const movementResult = await createAndProcessMovement(
-            activity.materials, 
-            activity.act_name
-          );
-
-          if (movementResult.success) {
-            // Update activity dengan openbravo_movement_id
-            const { error: updateActivityErr } = await supabase
-              .from('gh_activity')
-              .update({
-                openbravo_movement_id: movementResult.movementId,
-                status: 'approved'
-              })
-              .eq('activity_id', activity.activity_id);
-
-            if (updateActivityErr) {
-              console.error('❌ Error updating activity:', updateActivityErr);
-              movementErrors.push(`${activity.act_name}: Failed to update activity`);
-              movementFailCount++;
-            } else {
-              movementSuccessCount++;
-              console.log(`✅ Activity ${activity.act_name} updated with movement ID: ${movementResult.movementId}`);
-            }
-          } else {
-            movementFailCount++;
-            movementErrors.push(`${activity.act_name}: ${movementResult.errors || 'Movement creation failed'}`);
-          }
-        } catch (err) {
-          console.error(`❌ Error processing movement for ${activity.act_name}:`, err);
-          movementFailCount++;
-          movementErrors.push(`${activity.act_name}: ${err.message}`);
-        }
-      }
-
-      // Show result summary
-      let alertMessage = `✅ Report berhasil disetujui di level terakhir!\n\n`;
-      alertMessage += `📊 Summary:\n`;
-      alertMessage += `✅ Movements created: ${movementSuccessCount}\n`;
-      
-      if (movementFailCount > 0) {
-        alertMessage += `❌ Movements failed: ${movementFailCount}\n\n`;
-        alertMessage += `Errors:\n${movementErrors.join('\n')}`;
-      }
-
-      alert(alertMessage);
-
     } else {
-      // Bukan final - increment current_level_order
       const { error: recordErr } = await supabase
         .from('gh_approve_record')
         .update({
@@ -915,13 +703,18 @@ const approveCurrentLevel = async () => {
         .eq('record_id', currentReport.value.approval_record_id);
 
       if (recordErr) throw recordErr;
-
-      alert(`✅ Report berhasil disetujui untuk level "${levelName}"!\n\nReport akan dilanjutkan ke level berikutnya.`);
     }
 
     console.log('✅ Level approved');
 
     await loadData();
+
+    if (isFinalLevel) {
+      alert(`✅ Report berhasil disetujui di level terakhir!\n\n✅ FULLY APPROVED\n📦 Movement ID: ${movementResult.movementId}\n📊 Materials processed: ${movementResult.successCount}/${movementResult.totalMaterials}`);
+    } else {
+      alert(`✅ Report berhasil disetujui untuk level "${levelName}"!\n\nReport akan dilanjutkan ke level berikutnya.`);
+    }
+    
     router.push(sourcePage.value);
     
   } catch (err) {
@@ -932,8 +725,7 @@ const approveCurrentLevel = async () => {
   }
 };
 
-
-// 10. requestRevisionForLevel (Approval Action)
+// ✅ REQUEST REVISION
 const requestRevisionForLevel = async () => {
   if (!canApproveCurrentLevel.value) {
     alert('⚠️ Anda tidak memiliki akses untuk request revision di level ini');
@@ -957,7 +749,6 @@ const requestRevisionForLevel = async () => {
     
     const username = authStore.user?.username || authStore.user?.email || 'Admin';
     
-    // 1. Update level status jadi 'needRevision'
     const { error: updateLevelErr } = await supabase
       .from('gh_approval_level_status')
       .update({
@@ -971,20 +762,17 @@ const requestRevisionForLevel = async () => {
 
     if (updateLevelErr) throw updateLevelErr;
 
-    // 2. Insert history
-    const { data: recordFlowData, error: flowFetchErr } = await supabase
-          .from('gh_approve_record')
-          .select('flow_id')
-          .eq('record_id', currentReport.value.approval_record_id)
-          .single();
-    
-    if (flowFetchErr) throw flowFetchErr;
+    const { data: flowDataHistory } = await supabase
+      .from('gh_approve_record')
+      .select('flow_id')
+      .eq('record_id', currentReport.value.approval_record_id)
+      .single();
 
     const { error: historyErr } = await supabase
       .from('gh_approval_history')
       .insert({
         record_id: currentReport.value.approval_record_id,
-        flow_id: recordFlowData.flow_id,
+        flow_id: flowDataHistory.flow_id,
         user_id: authStore.user.user_id,
         level_order: currentLevel.level_order,
         level_name: currentLevel.level_name,
@@ -994,18 +782,16 @@ const requestRevisionForLevel = async () => {
 
     if (historyErr) throw historyErr;
 
-    // 3. Update approve_record overall_status
     const { error: recordErr } = await supabase
       .from('gh_approve_record')
       .update({
         overall_status: 'needRevision',
-        current_level_order: 1 // Reset ke level 1
+        current_level_order: 1
       })
       .eq('record_id', currentReport.value.approval_record_id);
 
     if (recordErr) throw recordErr;
 
-    // 4. Reset semua level status kembali ke pending
     const { error: resetErr } = await supabase
       .from('gh_approval_level_status')
       .update({
@@ -1017,19 +803,16 @@ const requestRevisionForLevel = async () => {
         revision_requested_at: null
       })
       .eq('record_id', currentReport.value.approval_record_id)
-      .neq('level_order', currentLevel.level_order); // Kecuali level yang request revision
+      .neq('level_order', currentLevel.level_order);
 
     if (resetErr) throw resetErr;
 
-    // 5. Update report status
     const { error: reportErr } = await supabase
       .from('gh_report')
       .update({ report_status: 'needRevision' })
       .eq('report_id', currentReport.value.report_id);
 
     if (reportErr) throw reportErr;
-
-    // ❌ HAPUS: Reset item status (optional)
     
     await loadData();
     closeRevisionModal();
@@ -1045,37 +828,14 @@ const requestRevisionForLevel = async () => {
   }
 };
 
-
-// 11. Modal Handlers
-const handleRevision = async () => {
-  const { type } = revisionModal.value
-  
-  if (type === 'level') {
-    // Call the report-level revision function
-    await requestRevisionForLevel();
-  } else {
-    // Item revision tidak didukung
-    alert('⚠️ Item revision tidak tersedia. Gunakan revision report saja.');
-    closeRevisionModal();
-  }
-}
-
-const openRevisionModal = (type, itemId) => {
+const openRevisionModal = () => {
   if (!canApproveCurrentLevel.value) {
     alert('⚠️ Anda tidak memiliki akses untuk melakukan aksi ini di level saat ini.');
     return;
   }
   
-  // ✅ Hanya izinkan type === 'level'
-  if (type !== 'level') {
-    alert('⚠️ Hanya revision report yang didukung. Gunakan tombol "Request Revision Report".');
-    return;
-  }
-
   revisionModal.value = {
     show: true,
-    type,
-    itemId,
     notes: ''
   }
 }
@@ -1083,72 +843,27 @@ const openRevisionModal = (type, itemId) => {
 const closeRevisionModal = () => {
   revisionModal.value = {
     show: false,
-    type: null,
-    itemId: null,
     notes: ''
   }
 }
 
-
-// 12. onMounted
-onMounted(async () => {
-  if (!authStore.isLoggedIn) {
-    router.push('/')
-    return
+const getStatusBadge = (status) => {
+  const badges = {
+    'onReview': {
+      text: '⏳ Review',
+      class: 'bg-yellow-100 text-yellow-800 border-yellow-200'
+    },
+    'needRevision': {
+      text: '🔄 Revision',
+      class: 'bg-red-100 text-red-800 border-red-200'
+    },
+    'approved': {
+      text: '✅ Approved',
+      class: 'bg-green-100 text-green-800 border-green-200'
+    }
   }
-
-  if (!report_id.value) {
-    alert('⚠️ Report ID tidak ditemukan')
-    router.push(sourcePage.value)
-    return
-  }
-
-  await loadData()
-})
-
-
-// 13. Computed properties
-const reportInfo = computed(() => {
-  if (!currentReport.value) return null;
-  
-  const report = currentReport.value;
-  let totalTypeDamages = 0;
-  let totalActivities = 0;
-  
-  if (report.type_damages) {
-    totalTypeDamages = report.type_damages.length;
-  }
-  if (report.activities) {
-    totalActivities = report.activities.length;
-  }
-  
-  // Menghapus allItemsApproved, approvedTypeDamages, approvedActivities
-  
-  return {
-    report_id: report.report_id,
-    location_id: report.location_id,
-    location_name: getLocationName(report.location_id),
-    batch_id: report.batch_id,
-    batch_name: getBatchName(report.batch_id),
-    report_date: report.report_date,
-    report_status: report.report_status, // Mengambil dari overall_status record
-    phase_id: report.phase_id,
-    phase_name: phaseInfo.value || 'Unknown Phase', 
-    totalTypeDamages,
-    totalActivities,
-    // Menghapus: approvedTypeDamages, approvedActivities, allItemsApproved
-    current_level_order: currentUserLevel.value?.level_order || 1,
-    current_level_name: currentUserLevel.value?.level_name || 'Level 1',
-    can_approve: canApproveCurrentLevel.value,
-    is_final_level: currentUserLevel.value?.is_final_level || false,
-    revision_notes: report.revision_notes,
-    revision_requested_by: report.revision_requested_by,
-    revision_requested_at: report.revision_requested_at,
-    approved_by: report.approved_by,
-    approved_at: report.approved_at,
-  };
-});
-
+  return badges[status || 'onReview'] || badges['onReview']
+}
 </script>
 
 <template>
@@ -1235,14 +950,14 @@ const reportInfo = computed(() => {
                 <p class="text-sm text-gray-600 font-semibold mb-2">🌾 Kerusakan Tanaman</p>
                 <div class="flex items-center gap-3">
                   <span class="text-2xl font-bold text-gray-900">{{ reportInfo.totalTypeDamages }}</span>
-                  <span class="text-sm text-gray-500">items</span>
+                  <span class="text-sm text-gray-500">item(s)</span>
                 </div>
               </div>
               <div class="bg-white rounded-lg p-4">
                 <p class="text-sm text-gray-600 font-semibold mb-2">⚙️ Aktivitas</p>
                 <div class="flex items-center gap-3">
                   <span class="text-2xl font-bold text-gray-900">{{ reportInfo.totalActivities }}</span>
-                  <span class="text-sm text-gray-500">items</span>
+                  <span class="text-sm text-gray-500">item(s)</span>
                 </div>
               </div>
               <div class="bg-gradient-to-br from-green-50 to-emerald-50 rounded-lg p-4 border-2 border-green-200">
@@ -1357,9 +1072,8 @@ const reportInfo = computed(() => {
                   @click="approveCurrentLevel"
                   :disabled="processing"
                   class="flex-1 bg-green-500 hover:bg-green-600 text-white font-bold py-3 rounded-xl transition disabled:opacity-50"
-                  
                 >
-                  ✅ Approve Level {{ currentUserLevel.level_order }}
+                  ✅ Approve Level {{ currentUserLevel.level_order }} ({{ currentUserLevel.is_final_level ? 'Final Approval & Stock' : 'Lanjutkan' }})
                 </button>
                 <button
                   @click="openRevisionModal('level', null)"
@@ -1401,7 +1115,7 @@ const reportInfo = computed(() => {
                 >
                   <div class="flex items-start justify-between gap-4 mb-4">
                     <div class="flex-1">
-                      <p class="font-bold text-gray-900 text-lg mb-3">{{ damage.type_damage || 'Kerusakan' }}</p> 
+                      <p class="font-bold text-gray-900 text-lg mb-3">{{ damage.type_damage || 'Kerusakan' }}</p>
                       <div class="grid grid-cols-3 gap-3">
                         <div class="bg-white rounded-lg p-3">
                           <p class="text-xs text-gray-500 font-semibold mb-1">🟡 Kuning</p>
@@ -1419,21 +1133,17 @@ const reportInfo = computed(() => {
                     </div>
                     
                     <div class="flex flex-col items-end gap-2">
-                       <span 
-                        :class="getStatusBadge(damage.status).class"
+                      <span 
+                        :class="getStatusBadge(currentReport.report_status).class"
                         class="px-3 py-1 rounded-lg font-bold text-xs border-2 whitespace-nowrap"
                       >
-                        {{ getStatusBadge(damage.status).text }}
+                        {{ getStatusBadge(currentReport.report_status).text }} (Item)
                       </span>
                       
                       </div>
                   </div>
                   
-                  <div v-if="damage.revision_notes && damage.status === 'needRevision'" class="mt-3 bg-red-50 border-2 border-red-200 rounded-lg p-3">
-                    <p class="text-xs text-red-600 font-semibold mb-1">Revision Notes:</p>
-                    <p class="text-sm text-red-900">{{ damage.revision_notes }}</p>
                   </div>
-                </div>
               </div>
             </div>
 
@@ -1524,26 +1234,22 @@ const reportInfo = computed(() => {
                     </div>
                     
                     <div class="flex flex-col items-end gap-2">
-                       <span 
-                        :class="getStatusBadge(activity.status).class"
+                      <span 
+                        :class="getStatusBadge(currentReport.report_status).class"
                         class="px-3 py-1 rounded-lg font-bold text-xs border-2 whitespace-nowrap"
                       >
-                        {{ getStatusBadge(activity.status).text }}
+                        {{ getStatusBadge(currentReport.report_status).text }} (Item)
                       </span>
                       
                       </div>
                   </div>
 
-                  <div v-if="activity.openbravo_movement_id && activity.status === 'approved'" class="mt-3 bg-green-50 border-2 border-green-200 rounded-lg p-3">
-                    <p class="text-xs text-green-600 font-semibold mb-1">✅ Approved</p>
-                    <p class="text-sm text-green-900">Openbravo Document ID: {{ activity.openbravo_movement_id }}</p>
+                  <div v-if="activity.openbravo_movement_id" class="mt-3 bg-green-50 border-2 border-green-200 rounded-lg p-3">
+                    <p class="text-xs text-green-600 font-semibold mb-1">Openbravo Movement</p>
+                    <p class="text-sm text-green-900">Document ID: {{ activity.openbravo_movement_id }}</p>
                   </div>
                   
-                  <div v-if="activity.revision_notes && activity.status === 'needRevision'" class="mt-3 bg-red-50 border-2 border-red-200 rounded-lg p-3">
-                    <p class="text-xs text-red-600 font-semibold mb-1">Revision Notes:</p>
-                    <p class="text-sm text-red-900">{{ activity.revision_notes }}</p>
                   </div>
-                </div>
               </div>
             </div>
           </div>
@@ -1553,12 +1259,11 @@ const reportInfo = computed(() => {
           <div class="flex items-start gap-3">
             <span class="text-2xl">💡</span>
             <div class="flex-1">
-              <p class="font-bold text-blue-900 mb-2">Cara Review</p>
+              <p class="font-bold text-blue-900 mb-2">Cara Review (Approval Level)</p>
               <ul class="text-sm text-blue-800 space-y-1">
-                <li>• **Review Items:** Periksa semua kerusakan tanaman dan aktivitas yang dilaporkan di bawah ini.</li>
-                <li>• **Level Approval:** Klik tombol "**Approve Level**" untuk menyetujui seluruh report di level Anda dan melanjutkannya ke level berikutnya.</li>
-                <li>• **Request Revision:** Jika ada yang tidak sesuai, gunakan tombol "**Request Revision Report**" untuk mengembalikan report ke staff dan mereset status approval.</li>
-                <li>• **Material Stock:** Pengurangan stock material (Openbravo Movement) akan diproses oleh sistem setelah report disetujui di level terakhir.</li>
+                <li>• **Approval Global:** Report disetujui per **level** (bukan per item). Setelah tombol "Approve Level" ditekan, report akan lanjut ke level berikutnya.</li>
+                <li>• **Pengurangan Stok:** Stok material di Openbravo **hanya akan dikurangi** secara otomatis saat report disetujui di **Level Final** (terakhir).</li>
+                <li>• **Revisi:** Gunakan "Request Revision Report" untuk mengembalikan seluruh laporan ke Staff.</li>
               </ul>
             </div>
           </div>
@@ -1598,7 +1303,9 @@ const reportInfo = computed(() => {
             Item Type
           </label>
           <div class="px-4 py-3 border-2 border-gray-200 rounded-xl bg-gray-50 text-gray-700 font-medium">
-            📋 Seluruh Report (Level {{ currentUserLevel?.level_order }})
+            <template>
+              📋 Seluruh Report (Level {{ currentUserLevel?.level_order }})
+            </template>
           </div>
         </div>
 
@@ -1609,7 +1316,7 @@ const reportInfo = computed(() => {
           <textarea
             v-model="revisionModal.notes"
             rows="6"
-            placeholder="Tuliskan dengan jelas apa yang perlu diperbaiki...&#10;&#10;Contoh:&#10;- Data kuning di Type Damage 1 perlu diverifikasi ulang&#10;- Quantity material A di Aktivitas 'Penyemprotan' terlalu banyak. Cek kembali"
+            placeholder="Tuliskan dengan jelas apa yang perlu diperbaiki...&#10;&#10;Contoh untuk kerusakan:&#10;- Data kuning perlu diverifikasi ulang&#10;- Jumlah busuk tidak sesuai dengan kondisi aktual"
             class="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:border-[#0071f3] focus:outline-none transition resize-none"
             :disabled="processing"
           ></textarea>

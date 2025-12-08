@@ -1,6 +1,9 @@
 <script setup>
 import { ref, onMounted } from 'vue'
-import { useRouter, useRoute } from 'vue-router'
+import { useRouter } from 'vue-router'
+import ModalView from '@/components/ModalView.vue'
+import PotatoProgressBar from '@/components/PotatoProgressBar.vue'
+import DamageRepairModal from '@/components/DamageRepairModal.vue'
 import {
   Chart,
   LineController,
@@ -14,12 +17,8 @@ import {
   Tooltip,
   Legend,
   BarController,
-  BarElement
+  BarElement,
 } from 'chart.js'
-import * as XLSX from 'xlsx'
-import html2canvas from 'html2canvas'
-import jsPDF from 'jspdf'
-import { supabase } from '@/lib/supabase'
 
 Chart.register(
   LineController,
@@ -33,496 +32,537 @@ Chart.register(
   Tooltip,
   Legend,
   BarController,
-  BarElement
+  BarElement,
 )
 
+import { useAuthStore } from '../stores/auth'
+import { supabase } from '@/lib/supabase'
+
+import logoPG from '../assets/logoPG.svg' 
+
+// Helper function untuk normalize phase name
+const normalizePhase = (phaseName) => {
+  const phase = phaseName?.toLowerCase() || '';
+  
+  if (phase.includes('planlet')) return 'Planlet';
+  if (phase.includes('g0')) return 'G0';
+  if (phase === 'g1' || phase.includes('g1')) return 'G1';
+  if (phase === 'g2' || phase.includes('g2')) return 'G2';
+  
+  return null; 
+}
+
+const locationBatches = ref({});
+const locationList = ref([]);
+const authStore = useAuthStore()
+const isOpen = ref(false)
+
+// State Baru untuk Repair
+const isRepairModalOpen = ref(false)
+const selectedPhaseForRepair = ref(null)
+
+const openModal = () => {
+  isOpen.value = true
+}
+
+const closeModal = () => {
+  isOpen.value = false
+}
+
+// Function Baru untuk Repair
+const openRepairModal = (phase) => {
+  selectedPhaseForRepair.value = phase
+  isRepairModalOpen.value = true
+}
+
+const closeRepairModal = () => {
+  isRepairModalOpen.value = false
+  selectedPhaseForRepair.value = null
+}
+
+const handleRepairSuccess = async () => {
+  closeRepairModal()
+  await loadDashboardData()
+}
+
+const logout = async () => {
+  const is_validate = await authStore.logout()
+  if (is_validate) {
+    router.push('/')
+    return
+  }
+  alert('Logout failed. Please try again.')
+}
+
 const router = useRouter()
-const route = useRoute()
 
-const batchId = ref(null)
+// Navigasi halaman
+const goToDetail = (batchId) => router.push(`/batch/${batchId}`)
+const tambahBatch = () => router.push('/tambah-batch')
+const bukaFormActivity = () => router.push('/formReportActivity')
+const bukaLaporanActivity = () => router.push('/planningReportList')
 
-const batch = ref({
-  id: 1,
-  nama: 'Loading...',
-  planlet: 0,
-  g0: 0,
-  g1: 0,
-  g2: 0,
-  sukses: 0,
-  terjual: 0,
-  pendapatan: 0,
-  pengeluaran: 0,
+// Data ringkasan
+const summary = ref({
   totalPlanlet: 0,
+  planletBagus: 0,
+  planletJelek: 0,
+  planletDitanam: 0,
   g0Terjual: 0,
   g0Diproduksi: 0,
-  g2Diproduksi: 0,
-  g2Terjual: 0,
   g0Dirawat: 0,
   g1Hidup: 0,
   g1Mati: 0,
+  g2Diproduksi: 0,
   g2Mitra: 0,
-  g2Petani: 0
+  g2Petani: 0,
+  g2Terjual: 0,
+  pendapatan: 0,
 })
 
+// Struktur successRate Baru
+const successRate = ref({
+  planlet: {
+    total: 0,
+    kuning: 0,
+    kutilang: 0,
+    busuk: 0,
+    damaged: 0,     // rusak (bisa diperbaiki)
+    dead: 0,        // mati (tidak bisa diperbaiki)
+    success: 0,
+    percentage: 0
+  },
+  g0: {
+    total: 0,
+    kuning: 0,
+    kutilang: 0,
+    busuk: 0,
+    damaged: 0,
+    dead: 0,
+    success: 0,
+    percentage: 0
+  },
+  g1: {
+    total: 0,
+    kuning: 0,
+    kutilang: 0,
+    busuk: 0,
+    damaged: 0,
+    dead: 0,
+    success: 0,
+    percentage: 0
+  },
+  g2: {
+    total: 0,
+    kuning: 0,
+    kutilang: 0,
+    busuk: 0,
+    damaged: 0,
+    dead: 0,
+    success: 0,
+    percentage: 0
+  }
+})
+
+// Persentase progres
 const progres = ref({
   planletToG0: 0,
   G0ToG1: 0,
   G1ToG2: 0,
 })
 
-const activityReport = ref([])
-const materialList = ref([])
-const totalMaterial = ref(0)
-
-onMounted(async () => {
-  // Parse batch_id dari route params
-  const paramId = route.params.id
-  console.log('🔍 Route params:', route.params)
-  console.log('🔍 Param id:', paramId, 'Type:', typeof paramId)
-  
-  if (!paramId) {
-    console.error('❌ No batch_id in route params')
-    alert('Batch ID tidak ditemukan')
-    router.push('/dashboard')
-    return
-  }
-  
-  batchId.value = parseInt(paramId, 10)
-  
-  if (isNaN(batchId.value)) {
-    console.error('❌ Invalid batch_id (NaN)')
-    alert('Batch ID tidak valid')
-    router.push('/dashboard')
-    return
-  }
-  
-  console.log('✅ Valid batch_id:', batchId.value)
-  
-  await loadBatchData()
-  await loadActivityReports()
-  await loadMaterialData()
-  
-  // Inisialisasi charts setelah data dimuat
-  setTimeout(() => {
-    initCharts()
-  }, 500)
+// Data untuk charts
+const chartData = ref({
+  faseChart: null,
+  kepemilikanChart: null,
+  penjualanChart: null
 })
 
-const loadBatchData = async () => {
-  console.log('📦 Loading batch data for ID:', batchId.value)
-  
-  // Ambil info batch
-  const { data: batchData, error: batchError } = await supabase
+// Fungsi utama load data
+const loadDashboardData = async () => {
+  const { data: locData } = await supabase
+    .from("gh_location")
+    .select("*");
+
+  locationList.value = locData || [];
+
+  const { data: batchData } = await supabase
     .from("gh_batch")
-    .select("*")
-    .eq("batch_id", batchId.value)
-    .single()
+    .select("batch_id, batch_name, location_id, tanggal_mulai");
 
-  if (batchError) {
-    console.error('❌ Error loading batch:', batchError)
-    alert('Gagal memuat data batch')
-    router.push('/dashboard')
-    return
-  }
+  const grouped = {};
 
-  batch.value.nama = batchData.batch_name
-  console.log('✅ Batch loaded:', batchData)
+  batchData?.forEach(b => {
+    if (!grouped[b.location_id]) grouped[b.location_id] = [];
+    grouped[b.location_id].push(b);
+  });
 
-  // Ambil data produksi untuk batch ini
+  locationBatches.value = grouped;
+
+  summary.value = {
+    totalPlanlet: 0,
+    planletBagus: 0,
+    planletJelek: 0,
+    planletDitanam: 0,
+    g0Terjual: 0,
+    g0Diproduksi: 0,
+    g0Dirawat: 0,
+    g1Hidup: 0,
+    g1Mati: 0,
+    g2Diproduksi: 0,
+    g2Mitra: 0,
+    g2Petani: 0,
+    g2Terjual: 0,
+    pendapatan: 0,
+  };
+
+  successRate.value = {
+    planlet: { total: 0, kuning: 0, kutilang: 0, busuk: 0, damaged: 0, dead: 0, success: 0, percentage: 0 },
+    g0: { total: 0, kuning: 0, kutilang: 0, busuk: 0, damaged: 0, dead: 0, success: 0, percentage: 0 },
+    g1: { total: 0, kuning: 0, kutilang: 0, busuk: 0, damaged: 0, dead: 0, success: 0, percentage: 0 },
+    g2: { total: 0, kuning: 0, kutilang: 0, busuk: 0, damaged: 0, dead: 0, success: 0, percentage: 0 }
+  };
+
+  // 1. Ambil data produksi
   const { data: productionData } = await supabase
     .from("gh_data_production")
-    .select("production_type, qty")
-    .eq("batch_id", batchId.value)
-
-  console.log('📊 Production data:', productionData)
+    .select("production_type, qty, location_id");
 
   if (productionData) {
     productionData.forEach(item => {
-      const qty = parseFloat(item.qty) || 0
-      const type = item.production_type?.toLowerCase() || ''
+      const qty = parseFloat(item.qty) || 0;
+      const normalizedType = normalizePhase(item.production_type);
 
-      if (type.includes('planlet')) {
-        batch.value.totalPlanlet += qty
-        batch.value.planlet += qty
-      } else if (type.includes('g0')) {
-        if (type.includes('terjual')) {
-          batch.value.g0Terjual += qty
-          batch.value.terjual += qty
-        } else if (type.includes('diproduksi') || type.includes('produksi')) {
-          batch.value.g0Diproduksi += qty
-          batch.value.g0 += qty
-        }
-      } else if (type.includes('g1')) {
-        batch.value.g1 += qty
-        if (type.includes('hidup')) {
-          batch.value.g1Hidup += qty
-        } else if (type.includes('mati')) {
-          batch.value.g1Mati += qty
-        }
-      } else if (type.includes('g2')) {
-        if (type.includes('diproduksi') || type.includes('produksi')) {
-          batch.value.g2Diproduksi += qty
-          batch.value.g2 += qty
-        } else if (type.includes('terjual')) {
-          batch.value.g2Terjual += qty
-        }
+      if (normalizedType === 'Planlet') {
+        summary.value.totalPlanlet += qty;
+        successRate.value.planlet.total += qty;
+      } else if (normalizedType === 'G0') {
+        summary.value.g0Diproduksi += qty;
+        successRate.value.g0.total += qty;
+      } else if (normalizedType === 'G1') {
+        successRate.value.g1.total += qty;
+      } else if (normalizedType === 'G2') {
+        summary.value.g2Diproduksi += qty;
+        successRate.value.g2.total += qty;
       }
-    })
+    });
   }
 
-  // Ambil data penjualan
+  // 2. Ambil report approved
+  const { data: reportData } = await supabase
+    .from("gh_report")
+    .select(`
+      report_id,
+      location_id,
+      batch_id,
+      phase_id,
+      report_status,
+      gh_phase!inner(phase_name)
+    `)
+    .eq("report_status", "approved");
+
+  // 3. Ambil kerusakan (UPDATED: Menggunakan gh_damage_summary agar data NETT)
+  if (reportData && reportData.length > 0) {
+    const approvedReportIds = reportData.map(r => r.report_id);
+    
+    // PERBAIKAN: Ambil dari gh_damage_summary, bukan gh_type_damage
+    // Agar mendapatkan nilai *_nett yang sudah dikurangi repair
+    const { data: damageSummaryData } = await supabase
+      .from("gh_damage_summary")
+      .select("kuning_nett, kutilang_nett, busuk_nett, report_id")
+      .in("report_id", approvedReportIds);
+
+    const reportPhaseMap = {};
+    reportData.forEach(report => {
+      if (report.gh_phase && report.gh_phase.phase_name) {
+        reportPhaseMap[report.report_id] = report.gh_phase.phase_name;
+      }
+    });
+
+    if (damageSummaryData) {
+      damageSummaryData.forEach(damage => {
+        // PERBAIKAN: Gunakan kolom _nett
+        const kuning = parseInt(damage.kuning_nett) || 0;
+        const kutilang = parseInt(damage.kutilang_nett) || 0;
+        const busuk = parseInt(damage.busuk_nett) || 0;
+        
+        const phaseName = reportPhaseMap[damage.report_id];
+        
+        if (phaseName) {
+          const normalizedPhase = normalizePhase(phaseName);
+          
+          if (normalizedPhase === 'Planlet') {
+            successRate.value.planlet.kuning += kuning;
+            successRate.value.planlet.kutilang += kutilang;
+            successRate.value.planlet.busuk += busuk;
+            successRate.value.planlet.damaged += (kuning + kutilang);
+            successRate.value.planlet.dead += busuk;
+          } else if (normalizedPhase === 'G0') {
+            successRate.value.g0.kuning += kuning;
+            successRate.value.g0.kutilang += kutilang;
+            successRate.value.g0.busuk += busuk;
+            successRate.value.g0.damaged += (kuning + kutilang);
+            successRate.value.g0.dead += busuk;
+          } else if (normalizedPhase === 'G1') {
+            successRate.value.g1.kuning += kuning;
+            successRate.value.g1.kutilang += kutilang;
+            successRate.value.g1.busuk += busuk;
+            successRate.value.g1.damaged += (kuning + kutilang);
+            successRate.value.g1.dead += busuk;
+          } else if (normalizedPhase === 'G2') {
+            successRate.value.g2.kuning += kuning;
+            successRate.value.g2.kutilang += kutilang;
+            successRate.value.g2.busuk += busuk;
+            successRate.value.g2.damaged += (kuning + kutilang);
+            successRate.value.g2.dead += busuk;
+          }
+        }
+      });
+    }
+  }
+
+  // Hitung Success & Percentage
+  Object.keys(successRate.value).forEach(key => {
+    const phase = successRate.value[key];
+    phase.success = Math.max(0, phase.total - phase.damaged - phase.dead);
+    phase.percentage = phase.total > 0 
+      ? ((phase.success / phase.total) * 100).toFixed(1) 
+      : 0;
+  });
+
+  progres.value.planletToG0 = successRate.value.planlet.percentage;
+  progres.value.G0ToG1 = successRate.value.g0.percentage;
+  progres.value.G1ToG2 = successRate.value.g1.percentage;
+
+  // 5. Pendapatan
   const { data: salesData } = await supabase
     .from("gh_sales")
-    .select("qty, price")
-    .eq("batch_id", batchId.value)
+    .select("qty, price");
 
   if (salesData) {
-    batch.value.pendapatan = salesData.reduce((total, item) => {
-      return total + (parseFloat(item.qty) || 0) * (parseFloat(item.price) || 0)
-    }, 0)
+    summary.value.pendapatan = salesData.reduce((total, item) => {
+      return total + (parseFloat(item.qty) || 0) * (parseFloat(item.price) || 0);
+    }, 0);
   }
 
-  // Hitung progres
-  progres.value.planletToG0 = batch.value.planlet > 0 
-    ? ((batch.value.g0 / batch.value.planlet) * 100).toFixed(1) 
-    : 0
-  progres.value.G0ToG1 = batch.value.g0 > 0 
-    ? ((batch.value.g1 / batch.value.g0) * 100).toFixed(1) 
-    : 0
-  progres.value.G1ToG2 = batch.value.g1 > 0 
-    ? ((batch.value.g2 / batch.value.g1) * 100).toFixed(1) 
-    : 0
+  await initCharts();
+}
+
+onMounted(async () => {
+  await loadDashboardData();
+});
+
+// Chart Functions (Sama seperti sebelumnya)
+const initCharts = async () => {
+  await initFaseChart();
+  await initKepemilikanChart();
+  await initPenjualanChart();
+};
+
+const initFaseChart = async () => {
+  const canvas = document.getElementById('faseChart');
+  if (!canvas) return;
   
-  // Hitung success rate
-  batch.value.sukses = batch.value.planlet > 0 
-    ? ((batch.value.g2 / batch.value.planlet) * 100).toFixed(1) 
-    : 0
-}
-
-const loadActivityReports = async () => {
-  // Ambil reports untuk batch ini
-  const { data: reportData } = await supabase
-    .from("gh_report")
-    .select("report_id, location_id")
-    .eq("batch_id", batchId.value)
-    .eq("report_status", "approved")
-
-  if (!reportData || reportData.length === 0) {
-    console.log('⚠️ No activity reports found')
-    return
+  if (chartData.value.faseChart) {
+    chartData.value.faseChart.destroy();
   }
 
-  const reportIds = reportData.map(r => r.report_id)
+  const { data: productionData } = await supabase
+    .from("gh_data_production")
+    .select("production_type, qty");
 
-  // Ambil activities
-  const { data: activities } = await supabase
-    .from("gh_activity")
-    .select("activity_id, act_name, manpower, report_id")
-    .in("report_id", reportIds)
-    .eq("status", "approved")
+  const faseData = { planlet: 0, g0: 0, g1: 0, g2: 0 };
 
-  if (!activities) return
+  productionData?.forEach(item => {
+    const qty = parseFloat(item.qty) || 0;
+    const type = item.production_type?.toLowerCase() || '';
+    if (type.includes('planlet')) faseData.planlet += qty;
+    else if (type.includes('g0')) faseData.g0 += qty;
+    else if (type.includes('g1')) faseData.g1 += qty;
+    else if (type.includes('g2')) faseData.g2 += qty;
+  });
 
-  // Ambil locations
-  const locationIds = [...new Set(reportData.map(r => r.location_id))]
-  const { data: locations } = await supabase
-    .from("gh_location")
-    .select("location_id, location")
-    .in("location_id", locationIds)
-
-  const locationMap = {}
-  locations?.forEach(loc => {
-    locationMap[loc.location_id] = loc.location
-  })
-
-  // ✅ PERUBAHAN: Ambil material used dengan field harga
-  const activityIds = activities.map(a => a.activity_id)
-  const { data: materialsUsed } = await supabase
-    .from("gh_material_used")
-    .select("material_name, qty, uom, unit_price, total_price, activity_id")
-    .in("activity_id", activityIds)
-
-  // ✅ PERUBAHAN: Map ke activity report dengan harga
-  activityReport.value = activities.map(activity => {
-    const report = reportData.find(r => r.report_id === activity.report_id)
-    const materials = materialsUsed?.filter(m => m.activity_id === activity.activity_id) || []
-    
-    // Hitung total untuk activity ini
-    const activityTotal = materials.reduce((sum, m) => sum + (Number(m.total_price) || 0), 0)
-    
-    // Untuk tampilan table, ambil material pertama (atau bisa di-loop nanti)
-    const firstMaterial = materials[0]
-    
-    return {
-      report_id: activity.report_id,
-      location: locationMap[report.location_id] || 'Unknown',
-      Activity: activity.act_name,
-      material_name: firstMaterial?.material_name || '-',
-      Qty: firstMaterial?.qty || 0,
-      UoM: firstMaterial?.uom || '-',
-      unit_price: firstMaterial?.unit_price || 0,
-      total_price: firstMaterial?.total_price || 0,
-      manpower: activity.manpower || 0,
-      materials: materials, // ✅ Simpan semua materials
-      activity_total: activityTotal // ✅ Total untuk activity ini
+  chartData.value.faseChart = new Chart(canvas, {
+    type: 'line',
+    data: {
+      labels: ['Planlet', 'G0', 'G1', 'G2'],
+      datasets: [{
+        label: 'Jumlah Produksi',
+        data: [faseData.planlet, faseData.g0, faseData.g1, faseData.g2],
+        borderColor: '#0071f3',
+        backgroundColor: 'rgba(0, 113, 243, 0.1)',
+        tension: 0.4,
+        fill: true,
+        pointRadius: 6,
+        pointHoverRadius: 8,
+        pointBackgroundColor: '#0071f3',
+        pointBorderColor: '#fff',
+        pointBorderWidth: 2
+      }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: { display: true, position: 'top' },
+        title: { display: true, text: 'Produksi Per Fase', font: { size: 16, weight: 'bold' } }
+      },
+      scales: {
+        y: {
+          beginAtZero: true,
+          ticks: { callback: function(value) { return value.toLocaleString('id-ID'); } }
+        }
+      }
     }
-  })
+  });
+};
 
-  console.log('✅ Activity reports loaded:', activityReport.value.length)
-}
+const initKepemilikanChart = async () => {
+  const canvas = document.getElementById('kepemilikanChart');
+  if (!canvas) return;
 
-const loadMaterialData = async () => {
-  // ✅ PERUBAHAN: Ambil dari gh_material_used yang sudah digunakan di activities
-  const { data: reportData } = await supabase
-    .from("gh_report")
-    .select("report_id")
-    .eq("batch_id", batchId.value)
-    .eq("report_status", "approved")
-
-  if (!reportData || reportData.length === 0) {
-    console.log('⚠️ No reports for material data')
-    return
+  if (chartData.value.kepemilikanChart) {
+    chartData.value.kepemilikanChart.destroy();
   }
 
-  const reportIds = reportData.map(r => r.report_id)
+  const { data: productionData } = await supabase
+    .from("gh_production")
+    .select("owner, qty, category");
 
-  const { data: activities } = await supabase
-    .from("gh_activity")
-    .select("activity_id")
-    .in("report_id", reportIds)
-    .eq("status", "approved")
+  const ownerData = {};
+  productionData?.forEach(item => {
+    const owner = item.owner || 'Tidak Diketahui';
+    const qty = parseFloat(item.qty) || 0;
+    ownerData[owner] = (ownerData[owner] || 0) + qty;
+  });
 
-  if (!activities || activities.length === 0) return
+  const labels = Object.keys(ownerData);
+  const data = Object.values(ownerData);
+  const colors = ['#0071f3', '#00a8e8', '#ff6b6b', '#4ecdc4', '#ffd93d', '#a29bfe'];
 
-  const activityIds = activities.map(a => a.activity_id)
-
-  // ✅ Ambil semua material yang digunakan dengan harga
-  const { data: materialsUsed } = await supabase
-    .from("gh_material_used")
-    .select("material_name, qty, uom, unit_price, total_price")
-    .in("activity_id", activityIds)
-
-  if (materialsUsed && materialsUsed.length > 0) {
-    // ✅ Group by material_name dan sum qty & total_price
-    const materialMap = {}
-    
-    materialsUsed.forEach(m => {
-      const name = m.material_name
-      if (!materialMap[name]) {
-        materialMap[name] = {
-          material_name: name,
-          Qty: 0,
-          UoM: m.uom,
-          unit_price: Number(m.unit_price) || 0,
-          total_price: 0
-        }
-      }
-      materialMap[name].Qty += Number(m.qty) || 0
-      materialMap[name].total_price += Number(m.total_price) || 0
-    })
-
-    materialList.value = Object.values(materialMap).map((m, index) => ({
-      material_id: index + 1,
-      material_name: m.material_name,
-      Qty: m.Qty,
-      UoM: m.UoM,
-      harga_satuan: m.unit_price,
-      total_harga: m.total_price
-    }))
-
-    // ✅ Hitung total dari semua material
-    totalMaterial.value = materialList.value.reduce((sum, m) => sum + m.total_harga, 0)
-  }
-
-  console.log('✅ Material data loaded:', materialList.value.length, 'Total:', totalMaterial.value)
-}
-
-const initCharts = () => {
-  // Fase Pertumbuhan
-  const faseCanvas = document.getElementById('faseChart')
-  if (faseCanvas) {
-    new Chart(faseCanvas, {
-      type: 'line',
-      data: {
-        labels: ['Planlet', 'G0', 'G1', 'G2'],
-        datasets: [{
-          label: batch.value.nama,
-          data: [batch.value.planlet, batch.value.g0, batch.value.g1, batch.value.g2],
-          borderColor: '#0071f3',
-          backgroundColor: 'rgba(0, 113, 243, 0.08)',
-          fill: true,
-          tension: 0.4,
-          borderWidth: 3,
-          pointRadius: 5,
-          pointHoverRadius: 7,
-          pointBackgroundColor: '#0071f3',
-          pointBorderColor: '#fff',
-          pointBorderWidth: 2,
-        }]
-      },
-      options: {
-        responsive: true,
-        maintainAspectRatio: false,
-        plugins: {
-          legend: { display: false },
-          title: { 
-            display: true, 
-            text: 'Perkembangan Fase Pertumbuhan Kentang',
-            font: { size: 15, weight: '600' },
-            color: '#1f2937',
-            padding: { bottom: 20 }
-          }
-        },
-        scales: {
-          y: {
-            beginAtZero: true,
-            grid: { color: '#f3f4f6', drawBorder: false },
-            ticks: { color: '#6b7280', font: { size: 11 } }
-          },
-          x: {
-            grid: { display: false, drawBorder: false },
-            ticks: { color: '#6b7280', font: { size: 11 } }
-          }
-        }
-      }
-    })
-  }
-
-  // Distribusi G2
-  const kepemilikanCanvas = document.getElementById('kepemilikanChart')
-  if (kepemilikanCanvas) {
-    new Chart(kepemilikanCanvas, {
-      type: 'doughnut',
-      data: {
-        labels: ['Milik Mitra', 'Milik Petani'],
-        datasets: [{
-          data: [batch.value.g2Mitra || 180, batch.value.g2Petani || 130],
-          backgroundColor: ['#0071f3', '#8FABD4'],
-          borderWidth: 0,
-          hoverOffset: 8,
-        }]
-      },
-      options: {
-        responsive: true,
-        maintainAspectRatio: false,
-        cutout: '60%',
-        plugins: {
-          legend: { 
-            position: 'bottom',
-            labels: {
-              padding: 15,
-              font: { size: 12, weight: '500' },
-              usePointStyle: true,
-              pointStyle: 'circle'
+  chartData.value.kepemilikanChart = new Chart(canvas, {
+    type: 'pie',
+    data: {
+      labels: labels,
+      datasets: [{
+        data: data,
+        backgroundColor: colors.slice(0, labels.length),
+        borderColor: '#fff',
+        borderWidth: 2
+      }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: { display: true, position: 'bottom' },
+        title: { display: true, text: 'Distribusi Kepemilikan Kentang', font: { size: 16, weight: 'bold' } },
+        tooltip: {
+          callbacks: {
+            label: function(context) {
+              const label = context.label || '';
+              const value = context.parsed || 0;
+              const total = context.dataset.data.reduce((a, b) => a + b, 0);
+              const percentage = ((value / total) * 100).toFixed(1);
+              return `${label}: ${value.toLocaleString('id-ID')} (${percentage}%)`;
             }
-          },
-          title: { 
-            display: true, 
-            text: 'Distribusi Kepemilikan G2',
-            font: { size: 15, weight: '600' },
-            color: '#1f2937',
-            padding: { bottom: 20 }
           }
         }
       }
-    })
+    }
+  });
+};
+
+const initPenjualanChart = async () => {
+  const canvas = document.getElementById('penjualanChart');
+  if (!canvas) return;
+
+  if (chartData.value.penjualanChart) {
+    chartData.value.penjualanChart.destroy();
   }
 
-  // Keuangan
-  const keuanganCanvas = document.getElementById('keuanganChart')
-  if (keuanganCanvas) {
-    new Chart(keuanganCanvas, {
-      type: 'bar',
-      data: {
-        labels: ['Pendapatan', 'Pengeluaran', 'Material Cost'],
-        datasets: [{
-          label: 'Nilai (Rp)',
-          data: [batch.value.pendapatan, batch.value.pengeluaran || 4200000, totalMaterial.value],
-          backgroundColor: ['#0071f3', '#374151', '#8FABD4'],
-          borderRadius: 8,
-          borderSkipped: false,
-        }]
-      },
-      options: {
-        responsive: true,
-        maintainAspectRatio: false,
-        scales: { 
-          y: { 
-            beginAtZero: true,
-            grid: { color: '#f3f4f6', drawBorder: false },
-            ticks: { color: '#6b7280', font: { size: 11 } }
-          },
-          x: {
-            grid: { display: false, drawBorder: false },
-            ticks: { color: '#6b7280', font: { size: 11 } }
-          }
+  const { data: salesData } = await supabase
+    .from("gh_sales")
+    .select("date, qty, price, category")
+    .order("date", { ascending: true });
+
+  const monthlyData = {};
+  salesData?.forEach(item => {
+    if (!item.date) return;
+    const date = new Date(item.date);
+    const monthYear = `${date.toLocaleString('id-ID', { month: 'short' })} ${date.getFullYear()}`;
+    
+    if (!monthlyData[monthYear]) {
+      monthlyData[monthYear] = { qty: 0, revenue: 0 };
+    }
+    
+    monthlyData[monthYear].qty += parseFloat(item.qty) || 0;
+    monthlyData[monthYear].revenue += (parseFloat(item.qty) || 0) * (parseFloat(item.price) || 0);
+  });
+
+  const labels = Object.keys(monthlyData);
+  const qtyData = labels.map(month => monthlyData[month].qty);
+  const revenueData = labels.map(month => monthlyData[month].revenue / 1000000);
+
+  chartData.value.penjualanChart = new Chart(canvas, {
+    type: 'bar',
+    data: {
+      labels: labels,
+      datasets: [
+        {
+          label: 'Jumlah Terjual',
+          data: qtyData,
+          backgroundColor: 'rgba(0, 113, 243, 0.8)',
+          borderColor: '#0071f3',
+          borderWidth: 2,
+          yAxisID: 'y'
         },
-        plugins: {
-          legend: { display: false },
-          title: { 
-            display: true, 
-            text: 'Perbandingan Keuangan Batch',
-            font: { size: 15, weight: '600' },
-            color: '#1f2937',
-            padding: { bottom: 20 }
-          },
-          tooltip: {
-            callbacks: {
-              label: (ctx) => `Rp ${ctx.parsed.y.toLocaleString('id-ID')}`
-            },
-            backgroundColor: '#1f2937',
-            padding: 12,
-            cornerRadius: 8,
-          }
+        {
+          label: 'Pendapatan (Juta Rp)',
+          data: revenueData,
+          backgroundColor: 'rgba(255, 159, 64, 0.8)',
+          borderColor: '#ff9f40',
+          borderWidth: 2,
+          yAxisID: 'y1'
+        }
+      ]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      interaction: { mode: 'index', intersect: false },
+      plugins: {
+        legend: { display: true, position: 'top' },
+        title: { display: true, text: 'Penjualan & Pendapatan Bulanan', font: { size: 16, weight: 'bold' } }
+      },
+      scales: {
+        y: {
+          type: 'linear', display: true, position: 'left',
+          title: { display: true, text: 'Jumlah Unit' },
+          ticks: { callback: function(value) { return value.toLocaleString('id-ID'); } }
+        },
+        y1: {
+          type: 'linear', display: true, position: 'right',
+          title: { display: true, text: 'Pendapatan (Juta Rp)' },
+          grid: { drawOnChartArea: false },
+          ticks: { callback: function(value) { return 'Rp ' + value.toFixed(1) + 'M'; } }
         }
       }
-    })
+    }
+  });
+};
+
+const getBatchesDisplay = (locationId) => {
+  const batches = locationBatches.value[locationId] || []
+  if (batches.length === 0) return 'Tidak ada batch'
+  if (batches.length <= 2) {
+    return batches.map(b => b.batch_name).join(', ')
   }
+  return batches.slice(0, 2).map(b => b.batch_name).join(', ') + ', ...'
 }
 
-function exportToExcel() {
-  const wb = XLSX.utils.book_new()
-
-  const stats = [
-    ['Nama Batch', batch.value.nama],
-    ['Keberhasilan (%)', batch.value.sukses],
-    ['Planlet ke G0 (%)', progres.value.planletToG0],
-    ['G0 ke G1 (%)', progres.value.G0ToG1],
-    ['G1 ke G2 (%)', progres.value.G1ToG2],
-    ['Terjual', batch.value.terjual],
-    ['Pendapatan (Rp)', batch.value.pendapatan],
-    ['Pengeluaran (Rp)', batch.value.pengeluaran],
-    ['Total Material (Rp)', totalMaterial.value]
-  ]
-  const wsStats = XLSX.utils.aoa_to_sheet(stats)
-  XLSX.utils.book_append_sheet(wb, wsStats, 'Statistik Batch')
-
-  const wsActivity = XLSX.utils.json_to_sheet(activityReport.value)
-  XLSX.utils.book_append_sheet(wb, wsActivity, 'Activity Report')
-
-  const wsMaterial = XLSX.utils.json_to_sheet(
-    materialList.value.map((m) => ({
-      'Nama Material': m.material_name,
-      Qty: m.Qty,
-      UoM: m.UoM,
-      'Harga Satuan (Rp)': m.harga_satuan,
-      'Total Harga (Rp)': m.Qty * m.harga_satuan
-    }))
-  )
-  XLSX.utils.book_append_sheet(wb, wsMaterial, 'Material')
-
-  XLSX.writeFile(wb, `${batch.value.nama}_Detail.xlsx`)
-}
-
-async function exportToPDF() {
-  const element = document.getElementById('exportArea')
-  const canvas = await html2canvas(element, { scale: 2 })
-  const imgData = canvas.toDataURL('image/png')
-  const pdf = new jsPDF('p', 'mm', 'a4')
-  const pdfWidth = pdf.internal.pageSize.getWidth()
-  const pdfHeight = (canvas.height * pdfWidth) / canvas.width
-  pdf.addImage(imgData, 'PNG', 0, 0, pdfWidth, pdfHeight)
-  pdf.save(`${batch.value.nama}_Detail.pdf`)
+const getBatchCount = (locationId) => {
+  return locationBatches.value[locationId]?.length || 0
 }
 </script>
 
