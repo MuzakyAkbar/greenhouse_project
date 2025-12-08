@@ -264,6 +264,25 @@ const router = createRouter({
       component: () => import("../views/DamageReportEdit.vue"),
       meta: { requiresAuth: true },
     },
+    // ✅ ENVIRONMENT LOG ROUTES
+    {
+      path: "/environment-log-list",
+      name: "environmentLogList",
+      component: () => import("../views/EnvironmentLogList.vue"),
+      meta: { requiresAuth: true },
+    },
+    {
+      path: "/environment-log/add",
+      name: "addEnvironmentLog",
+      component: () => import("../views/AddEnvironmentLog.vue"),
+      meta: { requiresAuth: true },
+    },
+    {
+      path: "/environment-log/view/:env_id",
+      name: "environmentLogView",
+      component: () => import("../views/EnvironmentLogView.vue"),
+      meta: { requiresAuth: true },
+    },
   ],
 });
 

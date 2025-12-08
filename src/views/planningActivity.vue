@@ -4,9 +4,11 @@ import { supabase } from "@/lib/supabase.js";
 import { Html5Qrcode } from "html5-qrcode";
 import openbravoApi from '@/lib/openbravo'
 import { useRouter } from 'vue-router';
+import { useAuthStore } from "@/stores/auth"; // Tambahkan Auth Store
 
-// Initialize router
+// Initialize router & auth
 const router = useRouter();
+const authStore = useAuthStore();
 
 // Import stores
 import { useLocationStore } from "@/stores/location";
@@ -114,12 +116,9 @@ const getUsedMaterialsByLocationAndDate = async (locationId, date, materialName)
     if (cacheTimestamp.value && (now - cacheTimestamp.value) < CACHE_DURATION) {
       const cached = materialUsageCache.value.get(cacheKey);
       if (cached !== undefined) {
-        console.log('💾 Using cached data for:', materialName);
         return cached;
       }
     }
-    
-    console.log('🔍 Fetching used materials from DB:', { locationId, date, materialName });
     
     const currentDateTime = new Date();
     
@@ -127,10 +126,6 @@ const getUsedMaterialsByLocationAndDate = async (locationId, date, materialName)
       .from('gh_planning_material')
       .select(`
         qty,
-        uom,
-        updated_at,
-        created_at,
-        planning_id,
         gh_planning_report!inner(
           planning_date,
           location_id,
@@ -150,27 +145,6 @@ const getUsedMaterialsByLocationAndDate = async (locationId, date, materialName)
 
     const totalUsed = data.reduce((sum, item) => sum + parseFloat(item.qty || 0), 0);
     
-    if (data.length > 0) {
-      const latestUpdate = data[0].updated_at;
-      const recordCount = data.length;
-      
-      const byDate = data.reduce((acc, item) => {
-        const planDate = item.gh_planning_report.planning_date;
-        if (!acc[planDate]) acc[planDate] = 0;
-        acc[planDate] += parseFloat(item.qty || 0);
-        return acc;
-      }, {});
-      
-      console.log(`📊 ${materialName} at location ${locationId}:`, {
-        totalUsed,
-        recordCount,
-        latestUpdate,
-        breakdown: byDate
-      });
-    } else {
-      console.log(`📊 ${materialName}: No usage found at location ${locationId}`);
-    }
-    
     materialUsageCache.value.set(cacheKey, totalUsed);
     cacheTimestamp.value = now;
     
@@ -187,29 +161,22 @@ const getUsedMaterialsByLocationAndDate = async (locationId, date, materialName)
 const clearMaterialCache = () => {
   materialUsageCache.value.clear();
   cacheTimestamp.value = null;
-  console.log('🗑️ Material usage cache cleared');
 };
 
 // ======================
-// HELPER: Update Display untuk Single Material
+// HELPER: Update Display
 // ======================
 const updateMaterialDisplay = (sectionIndex, matIndex, material, usageMap, currentFormUsage) => {
   const usedElement = document.getElementById(`used-${sectionIndex}-${matIndex}`);
   const availableElement = document.getElementById(`available-${sectionIndex}-${matIndex}`);
   
-  if (!usedElement || !availableElement) {
-    console.warn(`⚠️ Elements not found for section ${sectionIndex}, material ${matIndex}`);
-    return;
-  }
+  if (!usedElement || !availableElement) return;
   
   const selectedMaterial = availableMaterials.value.find(
     (m) => m.material_name === material.material_name
   );
   
-  if (!selectedMaterial) {
-    console.warn(`⚠️ Material not found in availableMaterials: ${material.material_name}`);
-    return;
-  }
+  if (!selectedMaterial) return;
   
   const stockFromOpenbravo = parseFloat(selectedMaterial.stock);
   const usedQtyFromDB = usageMap.get(material.material_name) || 0;
@@ -232,14 +199,6 @@ const updateMaterialDisplay = (sectionIndex, matIndex, material, usageMap, curre
   
   availableElement.textContent = `${formatNumber(availableStock)} ${uom}`;
   
-  console.log(`✅ Updated display for ${material.material_name} (Activity ${sectionIndex + 1}):`, {
-    stock: stockFromOpenbravo,
-    usedFromDB: usedQtyFromDB,
-    usedInPreviousActivities,
-    totalUsed,
-    available: availableStock
-  });
-  
   if (material.qty && parseFloat(material.qty) > availableStock) {
     availableElement.classList.add('text-red-600');
     availableElement.classList.remove('text-green-700');
@@ -249,16 +208,8 @@ const updateMaterialDisplay = (sectionIndex, matIndex, material, usageMap, curre
   }
 };
 
-// ======================
-// FUNGSI: Update Semua Material Display
-// ======================
 const updateAllMaterialDisplay = async () => {
-  if (!selectedLocation.value || availableMaterials.value.length === 0) {
-    console.log('⏸️ Waiting for location and materials...');
-    return;
-  }
-  
-  console.log('🔄 Updating all material displays...');
+  if (!selectedLocation.value || availableMaterials.value.length === 0) return;
   
   const uniqueMaterials = new Set();
   formSections.value.forEach(section => {
@@ -269,12 +220,7 @@ const updateAllMaterialDisplay = async () => {
     });
   });
   
-  if (uniqueMaterials.size === 0) {
-    console.log('⏸️ No materials selected');
-    return;
-  }
-  
-  console.log('📋 Materials to check:', Array.from(uniqueMaterials));
+  if (uniqueMaterials.size === 0) return;
   
   const usagePromises = Array.from(uniqueMaterials).map(async (materialName) => {
     const usedQty = await getUsedMaterialsByLocationAndDate(
@@ -288,34 +234,25 @@ const updateAllMaterialDisplay = async () => {
   const usageResults = await Promise.all(usagePromises);
   const usageMap = new Map(usageResults.map(r => [r.materialName, r.usedQty]));
   
-  console.log('📊 Usage map from DB:', Object.fromEntries(usageMap));
-  
   const currentFormUsage = new Map();
   
   for (let sectionIndex = 0; sectionIndex < formSections.value.length; sectionIndex++) {
     const section = formSections.value[sectionIndex];
-    
     for (let matIndex = 0; matIndex < section.materials.length; matIndex++) {
       const material = section.materials[matIndex];
-      
       if (material.material_name) {
         updateMaterialDisplay(sectionIndex, matIndex, material, usageMap, currentFormUsage);
-        
         if (material.qty && parseFloat(material.qty) > 0) {
           const currentUsage = currentFormUsage.get(material.material_name) || 0;
           currentFormUsage.set(material.material_name, currentUsage + parseFloat(material.qty));
-          
-          console.log(`📝 Activity ${sectionIndex + 1} - ${material.material_name}: +${material.qty}, total form usage: ${currentFormUsage.get(material.material_name)}`);
         }
       }
     }
   }
-  
-  console.log('✅ All displays updated with accumulated usage');
 };
 
 // ======================
-// LOAD WAREHOUSE & BIN BY LOCATION NAME
+// LOAD WAREHOUSE & BIN
 // ======================
 const loadWarehouseAndBin = async (locationName) => {
   if (!locationName) {
@@ -326,8 +263,6 @@ const loadWarehouseAndBin = async (locationName) => {
   }
 
   try {
-    console.log('🏢 Finding warehouse for location:', locationName);
-
     const warehouseRes = await openbravoApi.get(
       '/org.openbravo.service.json.jsonrest/Warehouse',
       { 
@@ -340,7 +275,6 @@ const loadWarehouseAndBin = async (locationName) => {
 
     const warehouses = warehouseRes?.data?.response?.data || [];
     if (!warehouses.length) {
-      console.warn('⚠️ Warehouse not found for location:', locationName);
       selectedWarehouse.value = null;
       selectedBin.value = null;
       availableMaterials.value = [];
@@ -349,7 +283,6 @@ const loadWarehouseAndBin = async (locationName) => {
 
     const warehouse = warehouses[0];
     selectedWarehouse.value = warehouse;
-    console.log('✅ Warehouse found:', warehouse.name, '(ID:', warehouse.id, ')');
 
     const binRes = await openbravoApi.get(
       '/org.openbravo.service.json.jsonrest/Locator',
@@ -363,19 +296,16 @@ const loadWarehouseAndBin = async (locationName) => {
 
     const bins = binRes?.data?.response?.data || [];
     if (!bins.length) {
-      console.warn('⚠️ Bin not found for warehouse:', warehouse.name);
       selectedBin.value = null;
       availableMaterials.value = [];
       return;
     }
 
     selectedBin.value = bins[0];
-    console.log('✅ Bin found:', bins[0].searchKey, '(ID:', bins[0].id, ')');
-
     await loadMaterialsByBin(bins[0].id);
 
   } catch (err) {
-    console.error('❌ Error loading warehouse/bin:', err.response?.data || err.message);
+    console.error('❌ Error loading warehouse/bin:', err);
     selectedWarehouse.value = null;
     selectedBin.value = null;
     availableMaterials.value = [];
@@ -383,7 +313,7 @@ const loadWarehouseAndBin = async (locationName) => {
 };
 
 // ======================
-// LOAD MATERIALS BY BIN
+// LOAD MATERIALS
 // ======================
 const loadMaterialsByBin = async (binId) => {
   if (!binId) {
@@ -393,8 +323,6 @@ const loadMaterialsByBin = async (binId) => {
 
   materialLoading.value = true;
   try {
-    console.log('📦 Loading materials for bin:', binId);
-
     const materialsRes = await openbravoApi.get(
       '/org.openbravo.service.json.jsonrest/MaterialMgmtStorageDetail',
       {
@@ -405,78 +333,22 @@ const loadMaterialsByBin = async (binId) => {
     );
 
     const rows = materialsRes?.data?.response?.data || [];
-    
-    if (rows.length > 0) {
-      console.log('📊 Full raw material data (first item):', JSON.stringify(rows[0], null, 2));
-    }
-    console.log('📊 Total materials found:', rows.length);
-
     availableMaterials.value = rows.map((r) => {
-      const productId = 
-        r.product?.id || 
-        r.product || 
-        r.m_Product_ID || 
-        r['product$id'] ||
-        r.productId;
-
-      const productName = 
-        r.product?.name || 
-        r['product$_identifier'] || 
-        r.product_name ||
-        r['product$name'] ||
-        r.productName ||
-        r._identifier ||
-        '(Tanpa Nama Produk)';
-      
-      const uomId = 
-        r.uOM?.id || 
-        r.uOM || 
-        r.c_UOM_ID || 
-        r['uOM$id'] ||
-        r.uomId;
-
-      const uomName = 
-        r.uOM?.name || 
-        r['uOM$_identifier'] || 
-        r.uom_name ||
-        r['uOM$name'] ||
-        r.uomName ||
-        'Unit';
-      
-      const stock = parseFloat(
-        r.quantityOnHand || 
-        r.qtyonhand || 
-        r.stock || 
-        r.qty ||
-        0
-      );
-
-      console.log('🔍 Mapped material:', {
-        productId,
-        productName,
-        uomId,
-        uomName,
-        stock
-      });
+      const productId = r.product?.id || r.product || r.m_Product_ID;
+      const productName = r.product?.name || r['product$_identifier'] || '(Tanpa Nama)';
+      const uomName = r.uOM?.name || r['uOM$_identifier'] || 'Unit';
+      const stock = parseFloat(r.quantityOnHand || 0);
 
       return {
         productId,
         material_name: productName,
-        uomId,
         uom: uomName,
         stock
       };
     });
 
-    console.log(`✅ Loaded ${availableMaterials.value.length} materials:`, availableMaterials.value);
-
-    if (availableMaterials.value.length === 0) {
-      console.warn('⚠️ No materials found with stock > 0 for this bin');
-    }
-
   } catch (err) {
-    console.error('❌ Error loading materials:', err.response?.data || err.message);
-    console.error('❌ Full error object:', err);
+    console.error('❌ Error loading materials:', err);
     availableMaterials.value = [];
   } finally {
     materialLoading.value = false;
@@ -484,51 +356,31 @@ const loadMaterialsByBin = async (binId) => {
 };
 
 // ======================
-// QR SCANNER FUNCTIONS
+// QR SCANNER
 // ======================
 const startScanner = async () => {
   showScanner.value = true;
   isScanning.value = true;
-
   await new Promise(resolve => setTimeout(resolve, 100));
 
   try {
-    const element = document.getElementById("qr-reader");
-    if (!element) {
-      console.error("Element qr-reader not found in DOM");
-      alert("Error: Scanner element not found");
-      stopScanner();
-      return;
-    }
-
     html5QrCode = new Html5Qrcode("qr-reader");
-
-    const config = { 
-      fps: 10, 
-      qrbox: { width: 250, height: 250 },
-      aspectRatio: 1.0
-    };
-
     await html5QrCode.start(
       { facingMode: "environment" },
-      config,
+      { fps: 10, qrbox: { width: 250, height: 250 } },
       onScanSuccess,
-      onScanError
+      () => {}
     );
   } catch (err) {
-    console.error("Error starting scanner:", err);
-    alert("Gagal membuka kamera. Pastikan izin kamera telah diberikan dan gunakan HTTPS atau localhost.");
+    console.error("Error scanner:", err);
+    alert("Gagal membuka kamera.");
     stopScanner();
   }
 };
 
 const onScanSuccess = async (decodedText) => {
-  console.log("📸 QR Code detected:", decodedText);
-
   try {
     const data = JSON.parse(decodedText);
-    console.log("✅ Parsed QR data:", data);
-
     const locationId = Number(data.location_id);
     const batchId = Number(data.batch_id);
 
@@ -536,87 +388,30 @@ const onScanSuccess = async (decodedText) => {
     selectedBatch.value = batchId;
 
     let locationItem = locations.value.find(l => Number(l.location_id) === locationId);
-    const locationName = locationItem?.location || "Lokasi tidak ditemukan";
-
-    let batchItem = batches.value.find(b => Number(b.batch_id) === batchId);
-
-    if (!batchItem) {
-      console.log("⏳ Fetching batch name from Supabase...");
-      const { data: batchData, error } = await supabase
-        .from("gh_batch")
-        .select("batch_id, batch_name, location_id, location")
-        .eq("batch_id", batchId)
-        .single();
-
-      if (error) {
-        console.error("❌ Gagal ambil batch dari Supabase:", error.message);
-      } else if (batchData) {
-        console.log("✅ Batch ditemukan di DB:", batchData);
-        batches.value.push(batchData);
-        batchItem = batchData;
-      }
-    }
-
-    const batchName = batchItem?.batch_name || "Batch tidak ditemukan";
-
-    alert(`✅ QR Code berhasil di-scan!\n📍 Lokasi: ${locationName}\n🏷️ Batch: ${batchName}`);
-
-    await loadWarehouseAndBin(locationName);
+    if (locationItem) await loadWarehouseAndBin(locationItem.location);
 
     stopScanner();
+    alert(`✅ Scan Berhasil: ${locationItem?.location}`);
   } catch (err) {
-    console.error("❌ Invalid QR data:", err);
-    alert("❌ QR Code tidak valid atau tidak sesuai format JSON!");
+    alert("❌ QR Code tidak valid!");
   }
-};
-
-const onScanError = (errorMessage) => {
-  // Tidak log setiap error untuk menghindari spam
 };
 
 const stopScanner = () => {
   if (html5QrCode && html5QrCode.isScanning) {
-    html5QrCode
-      .stop()
-      .then(() => {
-        console.log("Scanner stopped");
-        html5QrCode.clear();
-        html5QrCode = null;
-        showScanner.value = false;
-        isScanning.value = false;
-      })
-      .catch((err) => {
-        console.error("Error stopping scanner:", err);
-        showScanner.value = false;
-        isScanning.value = false;
-      });
-  } else {
-    showScanner.value = false;
-    isScanning.value = false;
+    html5QrCode.stop().then(() => {
+      html5QrCode.clear();
+      showScanner.value = false;
+      isScanning.value = false;
+    }).catch(() => {
+      showScanner.value = false;
+      isScanning.value = false;
+    });
   }
 };
 
 // ======================
-// TYPE DAMAGE FUNCTIONS
-// ======================
-function addTypeDamageRow() {
-  typeDamages.value.push({
-    id: Date.now(),
-    type_damage: "",
-    kuning: 0,
-    kutilang: 0,
-    busuk: 0
-  });
-}
-
-function removeTypeDamageRow(index) {
-  if (typeDamages.value.length > 1) {
-    typeDamages.value.splice(index, 1);
-  }
-}
-
-// ======================
-// FORM HANDLERS
+// FORM ACTIONS
 // ======================
 function addFormSection() {
   formSections.value.push({
@@ -630,9 +425,7 @@ function addFormSection() {
 }
 
 function removeFormSection(index) {
-  if (formSections.value.length > 1) {
-    formSections.value.splice(index, 1);
-  }
+  if (formSections.value.length > 1) formSections.value.splice(index, 1);
 }
 
 function addMaterialRow(i) {
@@ -656,13 +449,10 @@ function removeWorkerRow(sectionIndex, workerIndex) {
 }
 
 // ======================
-// VALIDATION FUNCTIONS
+// VALIDATION
 // ======================
 const validateMaterialStock = async () => {
-  if (!selectedLocation.value || !selectedDate.value) {
-    console.warn('⚠️ Location or date not selected');
-    return [];
-  }
+  if (!selectedLocation.value || !selectedDate.value) return [];
 
   const errors = [];
   const materialRequests = new Map();
@@ -684,97 +474,42 @@ const validateMaterialStock = async () => {
         
         const data = materialRequests.get(key);
         data.totalRequested += requestedQty;
-        data.sections.push({
-          sectionIndex: sectionIndex + 1,
-          matIndex,
-          qty: requestedQty
-        });
+        data.sections.push({ sectionIndex: sectionIndex + 1, qty: requestedQty });
       }
     });
   });
   
   const validationPromises = Array.from(materialRequests.entries()).map(async ([materialName, data]) => {
-    const selectedMaterial = availableMaterials.value.find(
-      (m) => m.material_name === materialName
-    );
-    
+    const selectedMaterial = availableMaterials.value.find(m => m.material_name === materialName);
     if (!selectedMaterial) return null;
     
     const stockFromOpenbravo = parseFloat(selectedMaterial.stock);
-    
-    const usedQty = await getUsedMaterialsByLocationAndDate(
-      selectedLocation.value,
-      selectedDate.value,
-      materialName
-    );
-    
+    const usedQty = await getUsedMaterialsByLocationAndDate(selectedLocation.value, selectedDate.value, materialName);
     const availableStock = stockFromOpenbravo - usedQty;
     
-    console.log(`🔍 Validating ${materialName}:`, {
-      totalRequested: data.totalRequested,
-      availableStock,
-      sections: data.sections.length
-    });
-    
     if (data.totalRequested > availableStock) {
-      return {
-        materialName: data.materialName,
-        totalRequested: data.totalRequested,
-        stockFromOpenbravo,
-        usedQty,
-        availableStock,
-        uom: data.uom,
-        sections: data.sections
-      };
+      return { ...data, stockFromOpenbravo, usedQty, availableStock };
     }
-    
     return null;
   });
   
   const results = await Promise.all(validationPromises);
-  
-  results.forEach(result => {
-    if (result) {
-      errors.push(result);
-    }
-  });
-  
-  console.log('✅ Validation completed:', errors.length === 0 ? 'All materials available' : `${errors.length} materials insufficient`);
-  
+  results.forEach(result => { if (result) errors.push(result); });
   return errors;
 };
 
 // ======================
-// SUBMIT TO DATABASE
+// SUBMIT PLANNING (UPDATED)
 // ======================
 const submitPlanning = async () => {
-  if (!selectedDate.value) {
-    alert("⚠️ Pilih tanggal terlebih dahulu!");
-    return;
-  }
-
-  if (!selectedLocation.value || !selectedBatch.value || !selectedPhase.value) {
-    alert("⚠️ Isi lokasi, batch, dan phase terlebih dahulu!");
+  if (!selectedDate.value || !selectedLocation.value || !selectedBatch.value || !selectedPhase.value) {
+    alert("⚠️ Lengkapi form terlebih dahulu!");
     return;
   }
 
   const stockErrors = await validateMaterialStock();
-  
   if (stockErrors.length > 0) {
-    let errorMessage = "❌ Stock material tidak mencukupi!\n\n";
-    
-    stockErrors.forEach((error, index) => {
-      errorMessage += `${index + 1}. Material: ${error.materialName}\n`;
-      errorMessage += `   TOTAL qty diminta (semua activity): ${formatNumber(error.totalRequested)} ${error.uom}\n`;
-      errorMessage += `   Stock Openbravo: ${formatNumber(error.stockFromOpenbravo)} ${error.uom}\n`;
-      errorMessage += `   Sudah digunakan: ${formatNumber(error.usedQty)} ${error.uom}\n`;
-      errorMessage += `   Stock tersedia: ${formatNumber(error.availableStock)} ${error.uom}\n`;
-      errorMessage += `   Digunakan di Activity: ${error.sections.map(s => `#${s.sectionIndex} (${formatNumber(s.qty)} ${error.uom})`).join(', ')}\n\n`;
-    });
-    
-    errorMessage += "Anda akan diarahkan ke halaman Good Movement untuk melakukan transfer stock.";
-    
-    alert(errorMessage);
+    alert("❌ Stock material tidak mencukupi! Silakan lakukan Good Movement.");
     router.push('/goodmovement');
     return;
   }
@@ -785,18 +520,26 @@ const submitPlanning = async () => {
   try {
     console.log("📤 Menyimpan planning...");
 
-    const reportDate = selectedDate.value;
-    console.log("📅 Tanggal yang dipilih:", reportDate);
+    // 1. GET FLOW ID 'PLANNING_FLOW'
+    const { data: flowData, error: flowErr } = await supabase
+      .from('gh_approval_flow')
+      .select('flow_id, first_level, last_level')
+      .eq('code_name', 'PLANNING_FLOW')
+      .single();
 
+    if (flowErr || !flowData) throw new Error("Flow approval 'PLANNING_FLOW' tidak ditemukan.");
+
+    const reportDate = selectedDate.value;
     const reportPayload = {
       planning_date: reportDate,
       location_id: Number(selectedLocation.value),
       batch_id: Number(selectedBatch.value),
       phase_plan: selectedPhase.value,
-      created_by: "manager",
-      status: "onReview"
+      created_by: authStore.user?.username || "user",
+      status: "onReview" // Status awal onReview
     };
 
+    // 2. INSERT Planning Report
     const { data: reportData, error: reportErr } = await supabase
       .from("gh_planning_report")
       .insert([reportPayload])
@@ -804,22 +547,13 @@ const submitPlanning = async () => {
       .single();
 
     if (reportErr) throw reportErr;
-
     const planning_id = reportData.planning_id;
-    console.log("🟩 Planning report created:", planning_id);
-    console.log("📅 Report date saved:", reportData.planning_date);
 
+    // 3. INSERT Activities & Materials
     for (let i = 0; i < formSections.value.length; i++) {
       const section = formSections.value[i];
-
-      const selectedAct = potatoActivities.value.find(
-        (a) => a.activity_id == section.activity_id
-      );
-
-      const manpowerTotal = section.workers.reduce(
-        (sum, w) => sum + (parseInt(w.qty) || 0),
-        0
-      );
+      const selectedAct = potatoActivities.value.find(a => a.activity_id == section.activity_id);
+      const manpowerTotal = section.workers.reduce((sum, w) => sum + (parseInt(w.qty) || 0), 0);
 
       const activityPayload = {
         planning_id,
@@ -837,48 +571,79 @@ const submitPlanning = async () => {
 
       if (actErr) throw actErr;
 
-      const activity_id = actData.activity_id;
-      console.log("🟩 Activity created:", activity_id);
-
-      const validMaterials = section.materials.filter(
-        (m) => m.material_name && m.qty && parseFloat(m.qty) > 0
-      );
-
+      const validMaterials = section.materials.filter(m => m.material_name && m.qty > 0);
       if (validMaterials.length > 0) {
-        const materialPayloads = validMaterials.map((m) => ({
+        const materialPayloads = validMaterials.map(m => ({
           planning_id,
-          activity_id,
+          activity_id: actData.activity_id,
           material_name: m.material_name,
           qty: parseFloat(m.qty),
           uom: m.uom || null,
         }));
 
-        const { error: matErr } = await supabase
-          .from("gh_planning_material")
-          .insert(materialPayloads);
-
-        if (matErr) throw matErr;
-
-        console.log("📦 Materials inserted:", materialPayloads.length);
+        await supabase.from("gh_planning_material").insert(materialPayloads);
       }
     }
 
-    const historyPayload = {
-      planning_id,
-      changed_by: "manager",
-      changes: JSON.stringify({
-        action: "create_planning",
-        planning_date: reportDate,
-        status: "onReview",
-        ...reportPayload
-      }),
-    };
+    // 4. INSERT Approval Record (Start at First Level which is 2)
+    const { data: recordData, error: recordErr } = await supabase
+      .from('gh_approve_record')
+      .insert({
+        flow_id: flowData.flow_id,
+        reference_type: 'gh_planning',
+        reference_id: planning_id,
+        current_level_order: flowData.first_level, // Starts at 2
+        overall_status: 'onReview',
+        submitted_by: authStore.user?.user_id,
+        submitted_at: new Date().toISOString()
+      })
+      .select()
+      .single();
 
-    await supabase.from("gh_planning_history").insert([historyPayload]);
-    console.log("📝 History saved.");
+    if (recordErr) throw recordErr;
 
-    alert("✅ Planning berhasil disimpan!");
+    // 5. INSERT Approval Level Statuses (Only for existing levels in flow)
+    const { data: flowLevels } = await supabase
+      .from('gh_approval_flow_level')
+      .select('*')
+      .eq('flow_id', flowData.flow_id);
+
+    // Loop from first_level (2) to last_level (2)
+    const levelStatuses = [];
+    for (let i = flowData.first_level; i <= flowData.last_level; i++) {
+        const levelDetail = flowLevels.find(l => l.level_order === i);
+        if (levelDetail) {
+             levelStatuses.push({
+                record_id: recordData.record_id,
+                level_order: i,
+                level_name: levelDetail.level_name,
+                status: 'pending',
+                flow_level_id: levelDetail.flow_level_id
+            });
+        }
+    }
+
+    await supabase.from('gh_approval_level_status').insert(levelStatuses);
+
+    // 6. UPDATE Planning with approval_record_id
+    await supabase
+      .from('gh_planning_report')
+      .update({ approval_record_id: recordData.record_id })
+      .eq('planning_id', planning_id);
+
+    // 7. INSERT History
+    await supabase.from("gh_approval_history").insert({
+        record_id: recordData.record_id,
+        flow_id: flowData.flow_id,
+        user_id: authStore.user?.user_id,
+        level_order: 1, // Created by Level 1 / Staff
+        action: 'submitted',
+        comment: 'Planning submitted for approval to Level 2'
+    });
+
+    alert("✅ Planning berhasil disimpan dan dikirim ke Manager (Level 2)!");
     resetForm();
+    router.push('/dashboard');
     
   } catch (err) {
     console.error("❌ Error:", err);
@@ -888,9 +653,6 @@ const submitPlanning = async () => {
   }
 };
 
-// ======================
-// RESET FORM
-// ======================
 function resetForm() {
   selectedLocation.value = "";
   selectedBatch.value = "";
@@ -898,55 +660,32 @@ function resetForm() {
   selectedWarehouse.value = null;
   selectedBin.value = null;
   availableMaterials.value = [];
-  
-  typeDamages.value = [
-    {
-      id: Date.now(),
-      type_damage: "",
-      kuning: 0,
-      kutilang: 0,
-      busuk: 0
-    }
-  ];
-  
-  formSections.value = [
-    {
-      id: Date.now(),
-      phase_plan: "",
-      activity_id: "",
-      coa: "",
-      materials: [{ material_name: "", qty: "", uom: "" }],
-      workers: [{ qty: "" }],
-    },
-  ];
+  formSections.value = [{
+    id: Date.now(),
+    phase_plan: "",
+    activity_id: "",
+    coa: "",
+    materials: [{ material_name: "", qty: "", uom: "" }],
+    workers: [{ qty: "" }],
+  }];
   selectedDate.value = new Date().toISOString().split("T")[0];
 }
 
-// Helper functions
-function getLocationName(locationId) {
-  const location = locations.value.find(l => l.location_id == locationId);
-  return location ? location.location : "";
-}
-
-function getBatchName(batchId) {
-  const batch = batches.value.find(b => b.batch_id == batchId);
-  return batch ? batch.batch_name : "";
-}
-
-// ======================
-// WATCHERS - AFTER ALL REFS ARE DECLARED
-// ======================
+// Watchers
 watch(selectedLocation, async (loc) => {
   formData.value.location_id = loc;
   formData.value.batch_id = ""; 
   phaseList.value = [];
   selectedBatch.value = "";
   clearMaterialCache();
+  if (loc) {
+    const l = locations.value.find(x => x.location_id == loc);
+    if(l) loadWarehouseAndBin(l.location);
+  }
 });
 
 watch(selectedBatch, async (batch) => {
   formData.value.batch_id = batch;
-
   if (batch) {
     phaseList.value = await batchPhaseStore.fetchPhasesForBatch(batch);
   } else {
@@ -955,114 +694,56 @@ watch(selectedBatch, async (batch) => {
 });
 
 watch(selectedPhase, (newPhase) => {
-  formSections.value.forEach(section => {
-    section.phase_plan = newPhase;
+  formSections.value.forEach(section => { section.phase_plan = newPhase; });
+});
+
+watch(formSections, (sections) => {
+  sections.forEach((s) => {
+    const selected = potatoActivities.value.find(a => a.activity_id == s.activity_id);
+    s.coa = selected ? selected.CoA_code : "";
   });
-});
+}, { deep: true });
 
-watch(
-  formSections,
-  (sections) => {
-    sections.forEach((s) => {
-      const selected = potatoActivities.value.find(
-        (a) => a.activity_id == s.activity_id
-      );
-      s.coa = selected ? selected.CoA_code : "";
+watch(formSections, (sections) => {
+  sections.forEach((section) => {
+    section.materials.forEach((material) => {
+      if (material.material_name) {
+        const selectedMaterial = availableMaterials.value.find(m => m.material_name === material.material_name);
+        if (selectedMaterial) material.uom = selectedMaterial.uom || "";
+      }
     });
-  },
-  { deep: true }
-);
+  });
+}, { deep: true });
 
-watch(
-  formSections,
-  (sections) => {
-    sections.forEach((section) => {
-      section.materials.forEach((material) => {
-        if (material.material_name) {
-          const selectedMaterial = availableMaterials.value.find(
-            (m) => m.material_name === material.material_name
-          );
-          
-          if (selectedMaterial) {
-            material.uom = selectedMaterial.uom || "";
-          }
-        } else {
-          material.uom = "";
-        }
-      });
-    });
-  },
-  { deep: true }
-);
-
-watch(
-  () => formSections.value.flatMap(s => 
-    s.materials.map(m => ({ name: m.material_name, qty: m.qty, uom: m.uom }))
-  ),
-  async () => {
-    if (window.materialUpdateTimeout) {
-      clearTimeout(window.materialUpdateTimeout);
-    }
-    
-    window.materialUpdateTimeout = setTimeout(async () => {
-      await updateAllMaterialDisplay();
-    }, 300);
-  },
-  { deep: true }
-);
-
-watch(selectedLocation, async (newVal) => {
-  if (!newVal) return;
-
-  const loc = locations.value.find(l => l.location_id == newVal);
-  if (!loc) return;
-
-  await loadWarehouseAndBin(loc.location);
-});
+watch(() => formSections.value.flatMap(s => s.materials.map(m => ({ name: m.material_name, qty: m.qty }))), async () => {
+    if (window.materialUpdateTimeout) clearTimeout(window.materialUpdateTimeout);
+    window.materialUpdateTimeout = setTimeout(async () => { await updateAllMaterialDisplay(); }, 300);
+  }, { deep: true });
 
 watch(selectedDate, () => {
   clearMaterialCache();
   setTimeout(() => updateAllMaterialDisplay(), 500);
 });
 
-watch(availableMaterials, (newMaterials) => {
-  if (newMaterials.length > 0) {
-    console.log('✅ Materials loaded, triggering display update...');
-    clearMaterialCache();
-    setTimeout(() => updateAllMaterialDisplay(), 500);
-  }
-});
-
-// ======================
-// LIFECYCLE HOOKS
-// ======================
+// Lifecycle
 onMounted(async () => {
-  console.log("🚀 Memuat data awal...");
   selectedDate.value = new Date().toISOString().split("T")[0];
-
   try {
     await Promise.all([
       locationStore.fetchAll(),
       batchStore.getBatches(),
       potatoActivityStore.fetchAll(),
     ]);
-
-    console.log("✅ Data berhasil dimuat");
-    console.log("Activities:", potatoActivities.value);
   } catch (error) {
-    console.error("❌ Gagal memuat data:", error);
-    alert("Gagal memuat data. Silakan refresh halaman.");
+    console.error("Gagal memuat data:", error);
   }
 });
 
-onUnmounted(() => {
-  stopScanner();
-});
+onUnmounted(() => { stopScanner(); });
 </script>
 
 <template>
   <div class="min-h-screen bg-gradient-to-br from-gray-50 to-white">
-    <!-- Header Bar -->
     <div class="bg-white border-b border-gray-200 shadow-sm sticky top-0 z-40">
       <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-5">
         <div class="flex items-center gap-4">
@@ -1087,15 +768,12 @@ onUnmounted(() => {
       </div>
     </div>
 
-    <!-- Main Content -->
     <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
       
-      <!-- Date, Phase, Location & Batch Section -->
       <div class="mb-8">
         <h2 class="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-3">Basic Information</h2>
         <div class="bg-white rounded-2xl border-2 border-gray-100 shadow-sm hover:shadow-lg transition-all p-6">
           <div class="grid grid-cols-1 md:grid-cols-4 gap-5">
-            <!-- Date Picker -->
             <div class="flex flex-col">
               <label class="text-sm font-semibold text-gray-700 mb-2 flex items-center gap-2 h-6">
                 <svg class="w-4 h-4 text-[#0071f3]" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512" fill="currentColor">
@@ -1110,7 +788,6 @@ onUnmounted(() => {
               />
             </div>
 
-            <!-- Phase -->
             <div class="flex flex-col">
               <label class="text-sm font-semibold text-gray-700 mb-2 flex items-center gap-2 h-6">
                 <span class="text-lg leading-none">🌱</span>
@@ -1124,7 +801,6 @@ onUnmounted(() => {
               </select>
             </div>
 
-            <!-- Location -->
             <div class="flex flex-col">
               <label class="text-sm font-semibold text-gray-700 mb-2 flex items-center gap-2 h-6">
                 <span class="text-lg leading-none">📍</span>
@@ -1146,7 +822,6 @@ onUnmounted(() => {
               </select>
             </div>
 
-            <!-- Batch -->
             <div class="flex flex-col">
               <label class="text-sm font-semibold text-gray-700 mb-2 flex items-center gap-2 h-6">
                 <span class="text-lg leading-none">🏷️</span>
@@ -1175,7 +850,6 @@ onUnmounted(() => {
         </div>
       </div>
 
-      <!-- Form Sections -->
       <div class="mb-8">
         <h2 class="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-3">Activity Details</h2>
         <div class="space-y-6">
@@ -1184,7 +858,6 @@ onUnmounted(() => {
             :key="section.id"
             class="group relative bg-white rounded-2xl border-2 border-gray-100 hover:border-[#0071f3] shadow-sm hover:shadow-xl transition-all p-6"
           >
-            <!-- Delete Button -->
             <button
               @click="removeFormSection(index)"
               v-if="formSections.length > 1"
@@ -1196,7 +869,6 @@ onUnmounted(() => {
               </svg>
             </button>
 
-            <!-- Activity Header -->
             <div class="flex items-center gap-3 mb-6 pb-4 border-b-2 border-gray-100">
               <div class="w-10 h-10 bg-gradient-to-br from-[#0071f3] to-[#8FABD4] rounded-lg flex items-center justify-center text-white font-bold">
                 {{ index + 1 }}
@@ -1207,7 +879,6 @@ onUnmounted(() => {
               </span>
             </div>
 
-            <!-- Activity & CoA -->
             <div class="grid grid-cols-1 md:grid-cols-2 gap-5 mb-6">
               <div class="flex flex-col">
                 <label class="text-sm font-semibold text-gray-700 mb-2">Select Activity</label>
@@ -1238,7 +909,6 @@ onUnmounted(() => {
               </div>
             </div>
 
-            <!-- Materials Section -->
             <div class="mb-6 bg-gray-50 rounded-xl p-5">
               <div class="flex justify-between items-center mb-4">
                 <h4 class="text-base font-bold text-gray-900 flex items-center gap-2">
@@ -1252,7 +922,6 @@ onUnmounted(() => {
                   :key="matIndex"
                   class="flex flex-col gap-3 bg-white rounded-lg p-4 border border-gray-200"
                 >
-                  <!-- Material Name -->
                   <div class="flex flex-col">
                     <label class="text-xs font-semibold text-gray-600 mb-2">Material Name</label>
                     <select
@@ -1272,7 +941,6 @@ onUnmounted(() => {
                       </option>
                     </select>
                     
-                    <!-- Stock Info Display -->
                     <div v-if="material.material_name" class="mt-2 text-xs">
                       <div class="bg-blue-50 border border-blue-200 rounded-lg p-2 space-y-1">
                         <div class="flex justify-between">
@@ -1295,7 +963,6 @@ onUnmounted(() => {
                   </div>
 
                   <div class="flex gap-3 items-end">
-                    <!-- Qty -->
                     <div class="flex-1 flex flex-col">
                       <label class="text-xs font-semibold text-gray-600 mb-2">Qty</label>
                       <input
@@ -1307,7 +974,6 @@ onUnmounted(() => {
                       />
                     </div>
 
-                    <!-- Unit -->
                     <div class="flex-1 flex flex-col">
                       <label class="text-xs font-semibold text-gray-600 mb-2">Unit</label>
                       <input
@@ -1318,7 +984,6 @@ onUnmounted(() => {
                       />
                     </div>
 
-                    <!-- Delete Button -->
                     <button
                       @click="removeMaterialRow(index, matIndex)"
                       v-if="section.materials.length > 1"
@@ -1330,7 +995,6 @@ onUnmounted(() => {
                 </div>
               </div>
 
-              <!-- Add Material Button -->
               <button
                 @click="addMaterialRow(index)"
                 class="w-full mt-3 bg-gradient-to-r from-[#0071f3] to-[#0060d1] hover:from-[#0060d1] hover:to-[#0050b1] text-white font-semibold px-4 py-2.5 rounded-lg transition shadow-md hover:shadow-lg text-sm"
@@ -1339,7 +1003,6 @@ onUnmounted(() => {
               </button>
             </div>
 
-            <!-- Workers Section -->
             <div class="bg-gray-50 rounded-xl p-5">
               <div class="flex justify-between items-center mb-4">
                 <h4 class="text-base font-bold text-gray-900 flex items-center gap-2">
@@ -1377,7 +1040,6 @@ onUnmounted(() => {
         </div>
       </div>
 
-      <!-- Add Activity Button -->
       <div class="flex justify-center mb-8">
         <button
           @click="addFormSection"
@@ -1390,7 +1052,6 @@ onUnmounted(() => {
         </button>
       </div>
 
-      <!-- Submit Button -->
       <div class="flex justify-center mb-8">
         <button
           @click.prevent="submitPlanning"
@@ -1404,7 +1065,6 @@ onUnmounted(() => {
       </div>
     </div>
 
-    <!-- Footer -->
     <footer class="text-center py-10 mt-8 border-t border-gray-200">
       <div class="flex items-center justify-center gap-2 mb-2">
         <span class="text-2xl">🌱</span>
@@ -1421,11 +1081,9 @@ input[type="number"]::-webkit-outer-spin-button {
   -webkit-appearance: none;
   margin: 0;
 }
-
 input[type="number"] {
   -moz-appearance: textfield;
 }
-
 select {
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3E%3Cpath stroke='%236b7280' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.5' d='m6 8 4 4 4-4'/%3E%3C/svg%3E");
   background-position: right 0.75rem center;

@@ -1,5 +1,5 @@
 <script setup>
-import { ref, onMounted, watch, onUnmounted, computed } from "vue";
+import { ref, onMounted, watch, onUnmounted, computed, nextTick, onBeforeUnmount } from "vue";
 import { supabase } from "@/lib/supabase.js";
 import { Html5Qrcode } from "html5-qrcode";
 import openbravoApi from '@/lib/openbravo'
@@ -14,6 +14,7 @@ import { useActivityStore } from "@/stores/activity";
 import { useTypeDamageStore } from "@/stores/typeDamage";
 import { useBatchPhaseStore } from "@/stores/batchPhase";
 import { useAuthStore } from "@/stores/auth";
+import { useRouter } from 'vue-router';
 
 const locationStore = useLocationStore();
 const batchStore = useBatchStore();
@@ -24,6 +25,7 @@ const activityStore = useActivityStore();
 const typeDamageStore = useTypeDamageStore();
 const batchPhaseStore = useBatchPhaseStore();
 const authStore = useAuthStore();
+const router = useRouter();
 
 const APPROVAL_FLOW_CODE = ref('activity_report');
 const flowId = ref(null);
@@ -38,6 +40,52 @@ const formData = ref({ batch_id: "", phase_id: "" });
 const planningData = ref(null);
 const loadingPlanning = ref(false);
 const showPlanningSection = ref(false);
+
+// --- Environment Log State ---
+const envLogId = ref(null);
+const createSession = (time) => ({
+  time, temp: '', humid: '', co2: '',
+  img_temp: null, img_humid: null, img_co2: null
+});
+
+const getInitialEnvData = () => ({
+  morning: createSession('07:00'),
+  noon: createSession('12:00'),
+  afternoon: createSession('16:00'),
+  night: createSession('20:00')
+});
+
+const envLogData = ref(getInitialEnvData());
+const loadingEnv = ref(false);
+
+// ✅ FIX 1: Hapus Icon/Emoticon agar lebih profesional
+const sessionLabels = {
+  morning: { label: 'Pagi', color: 'orange' },
+  noon: { label: 'Siang', color: 'yellow' },
+  afternoon: { label: 'Sore', color: 'indigo' },
+  night: { label: 'Malam', color: 'slate' }
+};
+
+const paramLabels = {
+  temp: { label: 'Suhu', unit: '°C' },
+  humid: { label: 'Kelembapan', unit: '%' },
+  co2: { label: 'CO2', unit: 'PPM' }
+};
+
+// State Upload & Kamera Environment
+const showSelectionModal = ref(false);
+const showCameraModal = ref(false);
+const isUploadingEnv = ref(false);
+const activeField = ref({ session: null, type: null });
+const fileInputEnv = ref(null);
+
+const videoElement = ref(null);
+const canvasElement = ref(null);
+const mediaStream = ref(null);
+const facingMode = ref('environment');
+const hasFlash = ref(false);
+const isFlashOn = ref(false);
+
 const typeDamages = ref([{ id: Date.now(), type_damage: '', kuning: 0, kutilang: 0, busuk: 0 }]);
 const availableMaterials = ref([]);
 const materialLoading = ref(false);
@@ -65,11 +113,170 @@ const loadApprovalFlowInfo = async () => {
     if (error) throw error;
     flowId.value = data.flow_id;
     flowLastLevel.value = data.last_level;
-    console.log(`✅ Approval Flow Info loaded: ID=${flowId.value}, LastLevel=${flowLastLevel.value}`);
   } catch (err) {
     console.error('❌ Error loading approval flow info:', err);
-    alert('Gagal memuat konfigurasi Approval Flow. Harap hubungi Admin.');
   }
+};
+
+// --- Fetch Environment Log Function ---
+const fetchEnvironmentLog = async () => {
+  if (!selectedLocation.value || !selectedDate.value) {
+    resetEnvData();
+    return;
+  }
+  loadingEnv.value = true;
+  try {
+    const { data } = await supabase.from('gh_environment_log')
+      .select('*')
+      .eq('log_date', selectedDate.value)
+      .eq('location_id', selectedLocation.value)
+      .maybeSingle();
+
+    if (data) {
+      envLogId.value = data.env_id;
+      const sessions = ['morning', 'noon', 'afternoon', 'night'];
+      sessions.forEach(key => {
+        if(data[`time_${key}`]) envLogData.value[key].time = data[`time_${key}`];
+        envLogData.value[key].temp = data[`temp_${key}`] || '';
+        envLogData.value[key].img_temp = data[`img_temp_${key}`] || null;
+        
+        envLogData.value[key].humid = data[`humid_${key}`] || '';
+        envLogData.value[key].img_humid = data[`img_humid_${key}`] || null;
+        
+        envLogData.value[key].co2 = data[`co2_${key}`] || '';
+        envLogData.value[key].img_co2 = data[`img_co2_${key}`] || null;
+      });
+    } else {
+      resetEnvData();
+    }
+  } catch (err) {
+    console.error("Error fetching env log:", err);
+  } finally {
+    loadingEnv.value = false;
+  }
+};
+
+const resetEnvData = () => {
+  envLogId.value = null;
+  envLogData.value = getInitialEnvData();
+};
+
+// === ENVIRONMENT UPLOAD & CAMERA LOGIC ===
+const openUploadSelector = (session, type) => {
+  if (!selectedLocation.value || !selectedDate.value) return alert("Pilih Tanggal & Lokasi dulu!");
+  activeField.value = { session, type };
+  showSelectionModal.value = true;
+};
+
+const handleEnvFileUpload = async (file) => {
+  if (!file) return;
+  isUploadingEnv.value = true;
+  showSelectionModal.value = false;
+  showCameraModal.value = false;
+
+  try {
+    const { session, type } = activeField.value;
+    const bucket = 'gh_environment_condition';
+    const ext = file.name.split('.').pop() || 'jpg';
+    const timestamp = Date.now();
+    
+    // ✅ FIX 2: Storage path menggunakan folder Tanggal
+    // Path: environment/2025-12-08/LocationID_Session_Type_Timestamp.jpg
+    const folderDate = selectedDate.value;
+    const path = `environment/${folderDate}/${selectedLocation.value}_${session}_${type}_${timestamp}.${ext}`;
+
+    const oldUrl = envLogData.value[session][`img_${type}`];
+    if (oldUrl) {
+      try {
+        const oldPathMatch = oldUrl.match(/environment\/(.+)$/);
+        if (oldPathMatch) {
+          await supabase.storage.from(bucket).remove([oldPathMatch[0]]);
+        }
+      } catch (e) { console.log('Could not remove old file:', e); }
+    }
+
+    const { data: uploadData, error } = await supabase.storage.from(bucket).upload(path, file, { 
+      cacheControl: '3600',
+      upsert: false 
+    });
+    
+    if (error) throw new Error(error.message || 'Upload gagal');
+
+    const { data } = supabase.storage.from(bucket).getPublicUrl(path);
+    envLogData.value[session][`img_${type}`] = data.publicUrl;
+    
+    alert('✅ Foto berhasil diupload!');
+
+  } catch (err) {
+    console.error('Error detail:', err);
+    alert("❌ Gagal upload: " + err.message);
+  } finally {
+    isUploadingEnv.value = false;
+    stopCamera();
+  }
+};
+
+const onEnvFileSelected = (e) => {
+  if (e.target.files.length > 0) handleEnvFileUpload(e.target.files[0]);
+};
+
+const triggerEnvFileInput = () => {
+  if (fileInputEnv.value) fileInputEnv.value.click();
+};
+
+const openCamera = async () => {
+  showSelectionModal.value = false;
+  showCameraModal.value = true;
+  await nextTick();
+  startCamera();
+};
+
+const startCamera = async () => {
+  if (mediaStream.value) stopCamera();
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ 
+      video: { facingMode: facingMode.value, width: { ideal: 1280 }, height: { ideal: 720 } } 
+    });
+    mediaStream.value = stream;
+    if (videoElement.value) videoElement.value.srcObject = stream;
+    const track = stream.getVideoTracks()[0];
+    const capabilities = track.getCapabilities ? track.getCapabilities() : {};
+    hasFlash.value = !!capabilities.torch;
+  } catch (err) {
+    alert("Gagal akses kamera.");
+    showCameraModal.value = false;
+  }
+};
+
+const stopCamera = () => {
+  if (mediaStream.value) {
+    mediaStream.value.getTracks().forEach(t => t.stop());
+    mediaStream.value = null;
+  }
+};
+
+const switchCamera = () => {
+  facingMode.value = facingMode.value === 'environment' ? 'user' : 'environment';
+  startCamera();
+};
+
+const takePhoto = () => {
+  const video = videoElement.value;
+  const canvas = canvasElement.value;
+  if (!video || !canvas) return;
+
+  canvas.width = video.videoWidth;
+  canvas.height = video.videoHeight;
+  const ctx = canvas.getContext('2d');
+  if (facingMode.value === 'user') {
+    ctx.translate(canvas.width, 0);
+    ctx.scale(-1, 1);
+  }
+  ctx.drawImage(video, 0, 0);
+  canvas.toBlob(blob => {
+    const file = new File([blob], `cam_${Date.now()}.jpg`, { type: 'image/jpeg' });
+    handleEnvFileUpload(file);
+  }, 'image/jpeg', 0.8);
 };
 
 const fetchPlanningData = async () => {
@@ -235,13 +442,11 @@ function removeWorkerRow(sectionIndex, workerIndex) { if (formSections.value[sec
 const handleTypeDamageImageUpload = (event) => {
   const { recordId, allImages } = event;
   typeDamageImages.value[recordId] = allImages || [];
-  console.log('✅ Type Damage images:', recordId, allImages.length);
 };
 
 const handleActivityImageUpload = (event) => {
   const { recordId, allImages } = event;
   activityImages.value[recordId] = allImages || [];
-  console.log('✅ Activity images:', recordId, allImages.length);
 };
 
 const handleImageDelete = async (event, type) => {
@@ -282,6 +487,7 @@ const submitActivityReport = async () => {
     }
   }
 
+  // Material Validation
   const allMaterials = [];
   for (const section of formSections.value) {
     for (const mat of section.materials) {
@@ -307,6 +513,41 @@ const submitActivityReport = async () => {
 
   isSubmitting.value = true;
   try {
+    // -----------------------------------------------------
+    // 0. HANDLE ENVIRONMENT LOG
+    // -----------------------------------------------------
+    const hasEnvData = Object.values(envLogData.value).some(s => 
+      s.temp || s.humid || s.co2 || s.img_temp || s.img_humid || s.img_co2
+    );
+
+    if (hasEnvData) {
+        const envPayload = {
+            log_date: selectedDate.value,
+            location_id: Number(selectedLocation.value),
+            created_by: authStore.user.user_id
+        };
+        const sessions = ['morning', 'noon', 'afternoon', 'night'];
+        sessions.forEach(s => {
+            envPayload[`time_${s}`] = envLogData.value[s].time;
+            
+            envPayload[`temp_${s}`] = envLogData.value[s].temp || null;
+            envPayload[`img_temp_${s}`] = envLogData.value[s].img_temp || null;
+            
+            envPayload[`humid_${s}`] = envLogData.value[s].humid || null;
+            envPayload[`img_humid_${s}`] = envLogData.value[s].img_humid || null;
+            
+            envPayload[`co2_${s}`] = envLogData.value[s].co2 || null;
+            envPayload[`img_co2_${s}`] = envLogData.value[s].img_co2 || null;
+        });
+
+        const envQuery = envLogId.value 
+            ? supabase.from('gh_environment_log').update(envPayload).eq('env_id', envLogId.value)
+            : supabase.from('gh_environment_log').insert([envPayload]);
+        
+        const { error: envError } = await envQuery;
+        if(envError) throw new Error("Gagal menyimpan Environment Log: " + envError.message);
+    }
+
     // 1. Create gh_report
     const reportPayload = {
       batch_id: Number(selectedBatch.value),
@@ -319,7 +560,6 @@ const submitActivityReport = async () => {
     const { data: reportData, error: reportErr } = await supabase.from('gh_report').insert([reportPayload]).select().single();
     if (reportErr) throw reportErr;
     const report_id = reportData.report_id;
-    console.log("✅ Report created:", report_id);
 
     // 1.1 Approval Record
     const currentUser = authStore.user.user_id;
@@ -446,6 +686,7 @@ function resetForm() {
   typeDamageImages.value = {};
   activityImages.value = {};
   uploadingImages.value = {};
+  resetEnvData();
 }
 
 function getLocationName(locationId) {
@@ -464,7 +705,14 @@ function formatDate(dateString) {
   return date.toLocaleDateString('id-ID', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
 }
 
-watch([selectedLocation, selectedBatch, selectedDate], () => { fetchPlanningData(); });
+// Watchers
+watch([selectedLocation, selectedBatch, selectedDate], () => { 
+  fetchPlanningData(); 
+});
+
+watch([selectedLocation, selectedDate], () => {
+    fetchEnvironmentLog();
+});
 
 watch(selectedBatch, async (batch) => {
   formData.value.batch_id = batch;
@@ -522,7 +770,8 @@ onMounted(async () => {
   }
 });
 
-onUnmounted(() => { stopScanner(); });
+onUnmounted(() => { stopScanner(); stopCamera(); });
+onBeforeUnmount(() => stopCamera());
 </script>
 
 <template>
@@ -665,6 +914,79 @@ onUnmounted(() => { stopScanner(); });
             </div>
           </div>
         </div>
+      </div>
+
+      <div v-if="selectedLocation" class="mb-8">
+        <h2 class="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-3 flex items-center gap-2">
+          <span class="text-lg">🌡️</span>
+          Environment Log (Kondisi Lingkungan)
+        </h2>
+        
+        <div v-if="loadingEnv" class="py-10 text-center text-gray-500 bg-white rounded-2xl border-2 border-gray-100">Sedang memuat data lingkungan...</div>
+        
+        <div v-else class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
+            <div v-for="(sessionData, sessionKey) in envLogData" :key="sessionKey" 
+                 class="bg-white rounded-xl border shadow-sm flex flex-col h-full overflow-hidden"
+                 :class="{
+                    'border-orange-200': sessionKey === 'morning',
+                    'border-yellow-200': sessionKey === 'noon',
+                    'border-indigo-200': sessionKey === 'afternoon',
+                    'border-slate-200': sessionKey === 'night'
+                 }">
+              
+              <div class="p-3 border-b flex justify-between items-center"
+                   :class="{
+                     'bg-orange-50': sessionKey === 'morning',
+                     'bg-yellow-50': sessionKey === 'noon',
+                     'bg-indigo-50': sessionKey === 'afternoon',
+                     'bg-slate-50': sessionKey === 'night',
+                   }">
+                <div class="flex items-center gap-2 font-bold capitalize"
+                     :class="{
+                       'text-orange-700': sessionKey === 'morning',
+                       'text-yellow-700': sessionKey === 'noon',
+                       'text-indigo-700': sessionKey === 'afternoon',
+                       'text-slate-700': sessionKey === 'night',
+                     }">
+                   {{ sessionLabels[sessionKey].label }}
+                </div>
+                <div class="text-right">
+                    <input type="time" v-model="sessionData.time" class="bg-white border rounded text-xs p-1 w-20 text-center cursor-pointer hover:border-blue-500">
+                </div>
+              </div>
+
+              <div class="p-4 space-y-4 flex-1">
+                <div v-for="(label, type) in paramLabels" :key="type" class="flex flex-col gap-1">
+                   <div class="flex justify-between items-end">
+                       <label class="text-[11px] font-bold text-gray-500 uppercase tracking-wide">{{ label.label }}</label>
+                       <span v-if="sessionData[`img_${type}`]" class="text-[10px] text-green-600 font-bold flex items-center gap-1 bg-green-50 px-1 rounded">
+                         ✓ Ada
+                       </span>
+                   </div>
+                   
+                   <div class="flex gap-2 items-center">
+                     <div class="relative flex-1">
+                        <input type="number" step="0.1" v-model="sessionData[type]" 
+                               class="w-full border border-gray-300 p-2.5 rounded-lg text-sm font-medium focus:ring-2 focus:ring-blue-500 outline-none h-[44px]"
+                               placeholder="0">
+                        <span class="absolute right-3 top-2.5 text-gray-400 text-xs">{{ label.unit }}</span>
+                     </div>
+                     
+                     <button 
+                        @click="openUploadSelector(sessionKey, type)"
+                        class="w-[44px] h-[44px] flex-shrink-0 rounded-lg border flex items-center justify-center transition overflow-hidden shadow-sm hover:shadow-md"
+                        :class="sessionData[`img_${type}`] ? 'border-green-300 bg-white ring-2 ring-green-100' : 'bg-gray-50 border-gray-300 hover:border-blue-400 hover:text-blue-500 text-gray-400'"
+                        title="Upload Bukti Foto"
+                     >
+                        <img v-if="sessionData[`img_${type}`]" :src="sessionData[`img_${type}`]" class="w-full h-full object-cover">
+                        <svg v-else class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M15 13a3 3 0 11-6 0 3 3 0 016 0z"></path></svg>
+                     </button>
+                   </div>
+                </div>
+              </div>
+            </div>
+        </div>
+        <p class="text-xs text-gray-400 mt-3 text-right">*Data lingkungan akan disimpan bersamaan saat tombol Submit Report ditekan.</p>
       </div>
 
       <div v-if="showPlanningSection && planningData" class="mb-8">
@@ -874,17 +1196,6 @@ onUnmounted(() => { stopScanner(); });
               </div>
             </div>
           </div>
-        </div>
-        <div class="flex justify-center mt-6">
-          <button
-            @click="addTypeDamageRow"
-            class="bg-white hover:bg-gray-50 text-gray-700 font-semibold px-6 py-3 rounded-xl border-2 border-gray-200 hover:border-red-500 shadow-sm hover:shadow-lg transition-all flex items-center gap-2"
-          >
-            <svg class="w-5 h-5 text-red-500" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512" fill="currentColor">
-              <path d="M256 80c0-17.7-14.3-32-32-32s-32 14.3-32 32l0 144L48 224c-17.7 0-32 14.3-32 32s14.3 32 32 32l144 0 0 144c0 17.7 14.3 32 32 32s32-14.3 32-32l0-144 144 0c17.7 0 32-14.3 32-32s-14.3-32-32-32l-144 0 0-144z"/>
-            </svg>
-            Tambah Jenis Kerusakan
-          </button>
         </div>
       </div>
 
@@ -1176,6 +1487,52 @@ onUnmounted(() => { stopScanner(); });
         </div>
       </div>
     </div>
+
+    <div v-if="showSelectionModal" class="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm" @click.self="showSelectionModal = false">
+      <div class="bg-white w-full max-w-sm rounded-2xl p-6 shadow-2xl relative animate-fade-in">
+        <button @click="showSelectionModal = false" class="absolute top-4 right-4 text-gray-400 hover:text-gray-600 transition">✕</button>
+        <h3 class="font-bold text-gray-900 mb-6 text-center text-lg">Upload Bukti Foto</h3>
+        
+        <div class="space-y-3">
+          <button @click="openCamera" class="w-full flex items-center justify-center gap-3 bg-blue-600 text-white py-3.5 rounded-xl font-semibold hover:bg-blue-700 transition shadow-md">
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z" /><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 13a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
+            Ambil Foto (Kamera)
+          </button>
+          <button @click="triggerEnvFileInput" class="w-full flex items-center justify-center gap-3 bg-gray-100 text-gray-700 py-3.5 rounded-xl font-semibold hover:bg-gray-200 border border-gray-200 transition">
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>
+            Pilih dari Galeri
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <div v-if="showCameraModal" class="fixed inset-0 bg-black z-[110] flex flex-col">
+       <div class="absolute top-0 left-0 right-0 flex justify-between items-center p-4 z-30">
+          <button @click="showCameraModal=false; stopCamera()" class="text-white bg-black/50 px-4 py-2 rounded-full backdrop-blur font-medium text-sm shadow-lg">Batal</button>
+          <button @click="switchCamera" class="text-white bg-black/50 p-2 rounded-full backdrop-blur shadow-lg">
+             <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>
+          </button>
+       </div>
+       <div class="flex-1 relative flex items-center justify-center bg-black overflow-hidden">
+          <div class="relative w-full max-w-[100vh] mx-auto" style="aspect-ratio: 3/4;">
+            <video ref="videoElement" autoplay playsinline class="absolute inset-0 w-full h-full object-cover"></video>
+          </div>
+          <canvas ref="canvasElement" class="hidden"></canvas>
+       </div>
+       <div class="absolute bottom-0 left-0 right-0 p-8 flex justify-center bg-gradient-to-t from-black/80 to-transparent items-center gap-8 z-30">
+          <button @click="takePhoto" class="w-20 h-20 rounded-full border-4 border-white bg-white/20 hover:bg-white/40 transition flex items-center justify-center shadow-lg">
+             <div class="w-16 h-16 bg-white rounded-full"></div>
+          </button>
+       </div>
+    </div>
+
+    <input type="file" ref="fileInputEnv" class="hidden" accept="image/*" @change="onEnvFileSelected">
+
+    <div v-if="isUploadingEnv" class="fixed inset-0 bg-black/60 backdrop-blur-sm z-[120] flex items-center justify-center text-white font-bold flex-col gap-3">
+      <div class="animate-spin w-12 h-12 border-4 border-white border-t-transparent rounded-full"></div>
+      <p>Mengunggah Foto...</p>
+    </div>
+
   </div>
 </template>
 
@@ -1233,4 +1590,7 @@ select {
 .animate-pulse {
   animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
 }
+
+.animate-fade-in { animation: fadeIn 0.2s ease-out; }
+@keyframes fadeIn { from { opacity: 0; transform: scale(0.95); } to { opacity: 1; transform: scale(1); } }
 </style>

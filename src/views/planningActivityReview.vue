@@ -1,11 +1,10 @@
 <script setup>
 import { ref, onMounted, computed } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
-import { useAuthStore } from '../stores/auth'
-import { useBatchStore } from '../stores/batch'
-import { useLocationStore } from '../stores/location'
-import { supabase } from '../lib/supabase'
-import openbravoApi from '@/lib/openbravo'
+import { useAuthStore } from '@/stores/auth'
+import { useBatchStore } from '@/stores/batch'
+import { useLocationStore } from '@/stores/location'
+import { supabase } from '@/lib/supabase'
 
 const router = useRouter()
 const route = useRoute()
@@ -16,122 +15,34 @@ const locationStore = useLocationStore()
 const report_id = ref(route.params.planning_id || null)
 const sourcePage = ref(route.query.from || '/planningReportList')
 
-// State untuk approval
+// State
 const approvalProgress = ref([])
 const currentUserLevel = ref(null) 
 const canApproveCurrentLevel = ref(false)
-
 const loading = ref(true)
 const processing = ref(false)
 const error = ref(null)
-
 const phaseInfo = ref(null)
 const currentReport = ref(null)
 
-const revisionModal = ref({
+// Modal State (Untuk Revisi Langsung)
+const editModal = ref({
   show: false,
+  activities: [], // Data editable clone
   notes: ''
 })
 
-const warehouseInfo = ref({
-  warehouse: null,
-  bin: null,
-  location_name: null
-})
-
-const loadPhaseInfo = async (phaseId) => {
-  if (!phaseId) return null;
-  
-  try {
-    const { data, error } = await supabase
-      .from('gh_phase')
-      .select('phase_name')
-      .eq('phase_id', phaseId)
-      .single();
-    
-    if (error) throw error;
-    return data?.phase_name || 'Unknown Phase';
-  } catch (err) {
-    console.error('Error loading phase:', err);
-    return 'Unknown Phase';
-  }
-};
-
-// Helper: Get all materials from all activities for Openbravo
-const getAllMaterialsForMovement = computed(() => {
-  if (!currentReport.value?.activities) return [];
-
-  return currentReport.value.activities.reduce((allMaterials, activity) => {
-    if (activity.materials && activity.materials.length > 0) {
-      activity.materials.forEach(mat => {
-        allMaterials.push({
-          material_name: mat.material_name,
-          qty: parseFloat(mat.qty) || 0,
-          uom: mat.uom,
-          unit_price: parseFloat(mat.unit_price) || 0,
-          total_price: parseFloat(mat.total_price) || 0,
-          activity_name: activity.act_name
-        });
-      });
-    }
-    return allMaterials;
-  }, []);
-});
-
-const getTotalMaterialCost = () => {
-  if (!currentReport.value?.activities) return 0
-  
-  return currentReport.value.activities.reduce((sum, activity) => {
-    if (!activity.materials) return sum
-    const activityTotal = activity.materials.reduce((matSum, mat) => {
-      return matSum + (Number(mat.total_price) || 0)
-    }, 0)
-    return sum + activityTotal
-  }, 0)
-}
-
-const formatNumber = (value) => {
-  if (!value && value !== 0) return '0'
-  return Number(value).toLocaleString('id-ID', {
-    minimumFractionDigits: 0,
-    maximumFractionDigits: 2
-  })
-}
-
-const formatCurrency = (value) => {
-  if (!value && value !== 0) return 'Rp 0'
-  return 'Rp ' + Number(value).toLocaleString('id-ID', {
-    minimumFractionDigits: 0,
-    maximumFractionDigits: 2
-  })
-}
-
-const calculateActivityTotal = (materials) => {
-  if (!materials || materials.length === 0) return 0
-  return materials.reduce((sum, mat) => sum + (Number(mat.total_price) || 0), 0)
-}
-
-const reportTotalCost = computed(() => {
-  if (!currentReport.value?.activities) return 0
-  
-  return currentReport.value.activities.reduce((sum, activity) => {
-    const activityTotal = calculateActivityTotal(activity.materials || [])
-    return sum + activityTotal
-  }, 0)
-})
-
+// === LOAD DATA ===
 onMounted(async () => {
   if (!authStore.isLoggedIn) {
     router.push('/')
     return
   }
-
   if (!report_id.value) {
-    alert('⚠️ Report ID tidak ditemukan')
+    alert('⚠️ Planning ID tidak ditemukan')
     router.push(sourcePage.value)
     return
   }
-
   await loadData()
 })
 
@@ -139,18 +50,14 @@ const loadData = async () => {
   try {
     loading.value = true;
     
-    // 1. Load data master (Batch & Location)
     await Promise.all([
       batchStore.getBatches(),
       locationStore.fetchAll()
     ]);
 
-    console.log('🔍 Fetching Planning ID:', report_id.value);
-
-    // 2. ✅ PERBAIKAN: Query ke tabel 'gh_planning', bukan 'gh_report'
-    // Sesuaikan relasi join dengan struktur tabel planning Anda (gh_planning_activity, dll)
+    // Query ke gh_planning_report
     const { data: planning, error: fetchError } = await supabase
-      .from('gh_planning_report') // 👈 Ubah dari gh_report ke gh_planning
+      .from('gh_planning_report')
       .select(`
         *,
         activities:gh_planning_activity(
@@ -158,332 +65,100 @@ const loadData = async () => {
           materials:gh_planning_material(*) 
         )
       `)
-      .eq('planning_id', report_id.value) // 👈 Ubah filter ke planning_id
-      .maybeSingle(); // 👈 Gunakan maybeSingle() agar tidak error merah jika data kosong
+      .eq('planning_id', report_id.value)
+      .maybeSingle();
     
     if (fetchError) throw fetchError;
-    
-    if (!planning) {
-      throw new Error(`Data Planning dengan ID ${report_id.value} tidak ditemukan.`);
+    if (!planning) throw new Error(`Data Planning #${report_id.value} tidak ditemukan.`);
+
+    // Sorting activities & materials agar urutan konsisten
+    if (planning.activities) {
+      planning.activities.sort((a, b) => a.activity_id - b.activity_id);
+      planning.activities.forEach(act => {
+        if (act.materials) act.materials.sort((a, b) => a.material_id - b.material_id);
+      });
     }
 
-    // Mapping data agar struktur variabel 'currentReport' tetap jalan di template
-    // Kita samakan nama fieldnya dengan yang dipakai di template (report_id, report_status, dll)
+    // Mapping Data
     currentReport.value = {
       ...planning,
-      report_id: planning.planning_id,       // Mapping ID
-      report_status: planning.status,        // Mapping Status (biasanya di planning kolomnya 'status')
-      report_date: planning.planning_date,   // Mapping Tanggal
-      approval_record_id: planning.approval_record_id || null // Pastikan kolom ini ada di tabel gh_planning
+      report_id: planning.planning_id,
+      report_status: planning.status,
+      report_date: planning.planning_date,
+      approval_record_id: planning.approval_record_id
     };
 
-    console.log('✅ Loaded planning:', currentReport.value);
-    
-    // Load Phase Info (jika ada kolom phase_plan yang berupa ID)
-    // Catatan: Di data SQL sebelumnya phase_plan kadang string 'Planlet', kadang ID '23'.
+    // Load Phase Name
     if (planning.phase_plan && !isNaN(planning.phase_plan)) {
-      phaseInfo.value = await loadPhaseInfo(planning.phase_plan);
+      const { data } = await supabase.from('gh_phase').select('phase_name').eq('phase_id', planning.phase_plan).single();
+      phaseInfo.value = data?.phase_name || 'Unknown Phase';
     } else {
-      phaseInfo.value = planning.phase_plan || 'N/A';
+      phaseInfo.value = planning.phase_plan || '-';
     }
     
-    // Load Approval jika ada record ID
+    // Load Approval Flow
     if (planning.approval_record_id) {
         await loadApprovalProgress();
-    }
-    
-    // Load Warehouse info untuk Openbravo (jika location ada)
-    if (planning.location_id) {
-      await loadWarehouseAndBin(planning.location_id);
     }
     
   } catch (err) {
     console.error('❌ Error loading data:', err);
     error.value = err.message;
-    // Jangan redirect paksa agar kita bisa baca errornya di layar
-    // router.push(sourcePage.value); 
   } finally {
     loading.value = false;
   }
 };
 
-const loadWarehouseAndBin = async (locationId) => {
-  try {
-    const location = locationStore.locations.find(l => l.location_id == locationId)
-    if (!location) {
-      console.warn('⚠️ Location not found:', locationId)
-      return
-    }
-
-    const locationName = location.location
-    warehouseInfo.value.location_name = locationName
-    
-    console.log('🏢 Loading warehouse for location:', locationName)
-
-    const warehouseRes = await openbravoApi.get(
-      '/org.openbravo.service.json.jsonrest/Warehouse',
-      { params: { _where: `name='${locationName}'` } }
-    )
-
-    const warehouses = warehouseRes?.data?.response?.data || []
-    if (!warehouses.length) {
-      console.warn('⚠️ Warehouse not found for location:', locationName)
-      return
-    }
-
-    const warehouse = warehouses[0]
-    warehouseInfo.value.warehouse = warehouse
-    console.log('✅ Warehouse found:', warehouse.name)
-
-    const binRes = await openbravoApi.get(
-      '/org.openbravo.service.json.jsonrest/Locator',
-      { params: { _where: `M_Warehouse_ID='${warehouse.id}'` } }
-    )
-
-    const bins = binRes?.data?.response?.data || []
-    if (!bins.length) {
-      console.warn('⚠️ Bin not found for warehouse:', warehouse.name)
-      return
-    }
-
-    warehouseInfo.value.bin = bins[0]
-    console.log('✅ Bin found:', bins[0].name)
-
-  } catch (err) {
-    console.error('❌ Error loading warehouse/bin:', err)
-  }
-}
-
-// ✅ CREATE INTERNAL CONSUMPTION (MOVEMENT) DI OPENBRAVO
-const createInternalConsumption = async (materials) => {
-  if (!materials || materials.length === 0) {
-    console.log('ℹ️ No materials to process');
-    return { success: true, movementId: 'NO_MATERIALS', successCount: 0, totalMaterials: 0 };
-  }
-
-  if (!warehouseInfo.value.warehouse || !warehouseInfo.value.bin) {
-    throw new Error('Warehouse/Bin information not available');
-  }
-
-  try {
-    console.log(`📤 Creating Internal Consumption for ${materials.length} materials...`);
-    
-    const warehouse = warehouseInfo.value.warehouse;
-    const bin = warehouseInfo.value.bin;
-    const documentNo = `IC-${currentReport.value.report_id}-${Date.now()}`;
-    
-    // 1. Get Organization
-    const orgRes = await openbravoApi.get(
-      '/org.openbravo.service.json.jsonrest/Organization',
-      { params: { _where: `name='${warehouse.organization$_identifier}'` } }
-    );
-    const org = orgRes?.data?.response?.data?.[0];
-    if (!org) throw new Error('Organization not found');
-
-    console.log('✅ Organization found:', org.name);
-
-    // 2. Create Movement Header
-    const movementHeader = {
-      organization: org.id,
-      client: org.client,
-      warehouse: warehouse.id,
-      movementType: 'M-',
-      movementDate: new Date().toISOString().split('T')[0],
-      documentNo: documentNo,
-      description: `Internal Consumption for Report #${currentReport.value.report_id}`,
-      posted: 'N'
-    };
-
-    const headerResponse = await openbravoApi.post(
-      '/org.openbravo.service.json.jsonrest/MaterialMgmtMaterialMovement',
-      { data: movementHeader }
-    );
-
-    const movementId = headerResponse?.data?.response?.data?.[0]?.id;
-    if (!movementId) throw new Error('Failed to create movement header');
-
-    console.log(`✅ Movement header created: ${movementId}`);
-
-    // 3. Get all products in one request (optimization)
-    const productRes = await openbravoApi.get(
-      '/org.openbravo.service.json.jsonrest/Product',
-      {
-        params: {
-          _selectedProperties: 'id,_identifier,name',
-          _maxResults: 1000
-        }
-      }
-    );
-
-    const allProducts = productRes?.data?.response?.data || [];
-    console.log(`📦 Loaded ${allProducts.length} products from Openbravo`);
-
-    // 4. Create Movement Lines
-    let successCount = 0;
-    const errors = [];
-
-    for (const mat of materials) {
-      try {
-        // Find product by material name (case-insensitive, trimmed)
-        const product = allProducts.find(p => 
-          p._identifier?.toLowerCase().trim() === mat.material_name?.toLowerCase().trim() ||
-          p.name?.toLowerCase().trim() === mat.material_name?.toLowerCase().trim()
-        );
-
-        if (!product) {
-          console.warn(`⚠️ Product not found in Openbravo: ${mat.material_name}`);
-          errors.push(`Product not found: ${mat.material_name}`);
-          continue;
-        }
-
-        // Create movement line with negative quantity for consumption
-        const lineData = {
-          organization: org.id,
-          client: org.client,
-          movement: movementId,
-          product: product.id,
-          movementQuantity: -Math.abs(parseFloat(mat.qty)), // Negative for consumption
-          uOM: mat.uom || 'EA',
-          storageBin: bin.id,
-          description: `${mat.material_name} for ${mat.activity_name || 'Activity'}`
-        };
-
-        await openbravoApi.post(
-          '/org.openbravo.service.json.jsonrest/MaterialMgmtMovementLine',
-          { data: lineData }
-        );
-
-        successCount++;
-        console.log(`✅ Line created for: ${mat.material_name} (${mat.qty} ${mat.uom})`);
-        
-      } catch (lineErr) {
-        console.error(`❌ Failed to create line for ${mat.material_name}:`, lineErr);
-        errors.push(`${mat.material_name}: ${lineErr.message}`);
-      }
-    }
-
-    console.log(`📊 Created ${successCount}/${materials.length} movement lines`);
-
-    // 5. Process/Post Movement
-    if (successCount > 0) {
-      try {
-        await openbravoApi.post(
-          `/org.openbravo.service.json.jsonrest/MaterialMgmtMaterialMovement/${movementId}/process`,
-          {}
-        );
-        console.log('✅ Movement processed (posted) successfully');
-      } catch (processErr) {
-        console.warn('⚠️ Movement created but failed to process (post):', processErr.message);
-        // Don't throw - movement is created, just not posted
-      }
-    }
-
-    return {
-      success: successCount > 0,
-      movementId: documentNo,
-      successCount,
-      totalMaterials: materials.length,
-      errors: errors.length > 0 ? errors.join('; ') : null
-    };
-
-  } catch (err) {
-    console.error('❌ Error creating internal consumption:', err);
-    return {
-      success: false,
-      movementId: null,
-      successCount: 0,
-      totalMaterials: materials.length,
-      errors: err.message
-    };
-  }
-};
-
 const loadApprovalProgress = async () => {
-  if (!currentReport.value?.approval_record_id) {
-    console.log('⚠️ No approval record found');
-    canApproveCurrentLevel.value = false;
-    currentUserLevel.value = { level_order: 0, level_name: 'Staff/No Approval Flow', is_final_level: false };
-    return;
-  }
+  if (!currentReport.value?.approval_record_id) return;
 
   try {
-    console.log('📊 Loading approval progress for record:', currentReport.value.approval_record_id);
-
-    const { data: recordData, error: recordErr } = await supabase
+    const { data: recordData } = await supabase
       .from('gh_approve_record')
-      .select(`
-        current_level_order, 
-        overall_status, 
-        flow_id,
-        gh_approval_flow!inner(
-          last_level,
-          first_level
-        )
-      `)
+      .select(`current_level_order, overall_status, flow_id, gh_approval_flow!inner(last_level, first_level)`)
       .eq('record_id', currentReport.value.approval_record_id)
       .single();
 
-    if (recordErr) throw recordErr;
+    if (!recordData) return;
 
-    const currentLevelOrder = recordData?.current_level_order || 1;
-    const lastLevel = recordData.gh_approval_flow?.last_level;
-    
-    const { data: levelStatuses, error: statusErr } = await supabase
+    // Fetch Level Statuses
+    const { data: levelStatuses } = await supabase
       .from('gh_approval_level_status')
-      .select(`
-        level_status_id,
-        level_order,
-        level_name,
-        status,
-        approved_by,
-        approved_at,
-        revision_notes,
-        revision_requested_by,
-        revision_requested_at
-      `)
+      .select(`*`)
       .eq('record_id', currentReport.value.approval_record_id)
       .order('level_order', { ascending: true });
 
-    if (statusErr) throw statusErr;
-
-    const approverIds = [
+    // Fetch User Names
+    const userIds = [
       ...levelStatuses.map(s => s.approved_by),
       ...levelStatuses.map(s => s.revision_requested_by)
     ].filter(Boolean);
 
-    let approverNames = {};
-    if (approverIds.length > 0) {
-      const { data: users } = await supabase
-        .from('user')
-        .select('user_id, username, email')
-        .in('user_id', approverIds);
-      
-      if (users) {
-        approverNames = users.reduce((acc, user) => {
-          acc[user.user_id] = user.username || user.email;
-          return acc;
-        }, {});
-      }
+    let userMap = {};
+    if (userIds.length > 0) {
+      const { data: users } = await supabase.from('user').select('user_id, username').in('user_id', userIds);
+      if (users) userMap = Object.fromEntries(users.map(u => [u.user_id, u.username]));
     }
 
     approvalProgress.value = levelStatuses.map(level => ({
       ...level,
-      approver_name: level.approved_by ? approverNames[level.approved_by] : null,
-      revisor_name: level.revision_requested_by ? approverNames[level.revision_requested_by] : null,
-      is_final_level: level.level_order === lastLevel,
+      approver_name: userMap[level.approved_by],
+      revisor_name: userMap[level.revision_requested_by],
+      is_final_level: level.level_order === recordData.gh_approval_flow.last_level,
       level_status: level.status
     }));
 
+    // Check Access Permission
     const { data: userLevel } = await supabase
       .from('gh_user_approval_level')
-      .select('level_order, flow_id')
+      .select('level_order')
       .eq('user_id', authStore.user.user_id)
       .eq('flow_id', recordData.flow_id)
-      .eq('level_order', currentLevelOrder)
+      .eq('level_order', recordData.current_level_order)
       .eq('is_active', true)
       .maybeSingle();
 
-    const currentLevelStatus = levelStatuses.find(s => s.level_order === currentLevelOrder);
+    const currentLevelStatus = levelStatuses.find(s => s.level_order === recordData.current_level_order);
     
     canApproveCurrentLevel.value = 
       !!userLevel && 
@@ -491,884 +166,400 @@ const loadApprovalProgress = async () => {
       recordData.overall_status === 'onReview';
     
     currentUserLevel.value = {
-      level_order: currentLevelOrder,
-      level_name: currentLevelStatus?.level_name || `Level ${currentLevelOrder}`,
-      is_final_level: currentLevelOrder === lastLevel,
+      level_order: recordData.current_level_order,
+      level_name: currentLevelStatus?.level_name || `Level ${recordData.current_level_order}`,
+      is_final_level: recordData.current_level_order === recordData.gh_approval_flow.last_level,
     };
     
     currentReport.value.report_status = recordData.overall_status;
     
-    console.log('🔐 Can approve current level:', canApproveCurrentLevel.value);
-    console.log('📍 Current level:', currentUserLevel.value);
-    
   } catch (err) {
-    console.error('❌ Error loading approval progress:', err);
-    canApproveCurrentLevel.value = false;
-    currentUserLevel.value = { level_order: 1, level_name: 'Error/Unknown', is_final_level: false };
+    console.error('❌ Error approval progress:', err);
   }
 };
 
-// Helper functions
-const getBatchName = (batchId) => {
-  const batch = batchStore.batches.find(b => b.batch_id == batchId)
-  return batch?.batch_name || `Batch ${batchId}`
-}
-
-const getLocationName = (locationId) => {
-  const location = locationStore.locations.find(l => l.location_id == locationId)
-  return location?.location || `Location ${locationId}`
-}
-
-const formatDate = (dateStr) => {
-  if (!dateStr) return '-'
-  const date = new Date(dateStr)
-  return date.toLocaleDateString('id-ID', { 
-    day: '2-digit', 
-    month: 'long', 
-    year: 'numeric' 
-  })
-}
-
-const formatDateTime = (dateStr) => {
-  if (!dateStr) return '-'
-  const date = new Date(dateStr)
-  return date.toLocaleString('id-ID', { 
-    day: '2-digit', 
-    month: 'long', 
-    year: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit'
-  })
-}
+// === HELPER FUNCTIONS ===
+const getBatchName = (id) => batchStore.batches.find(b => b.batch_id == id)?.batch_name || `Batch ${id}`
+const getLocationName = (id) => locationStore.locations.find(l => l.location_id == id)?.location || `Location ${id}`
+const formatDate = (str) => str ? new Date(str).toLocaleDateString('id-ID', { day: '2-digit', month: 'long', year: 'numeric' }) : '-'
+const formatDateTime = (str) => str ? new Date(str).toLocaleString('id-ID', { day: '2-digit', month: 'short', hour: '2-digit', minute:'2-digit' }) : '-'
+const formatNumber = (n) => Number(n).toLocaleString('id-ID', { maximumFractionDigits: 2 })
 
 const reportInfo = computed(() => {
   if (!currentReport.value) return null;
-  
-  const report = currentReport.value;
-  
   return {
-    report_id: report.report_id,
-    location_id: report.location_id,
-    location_name: getLocationName(report.location_id),
-    batch_id: report.batch_id,
-    batch_name: getBatchName(report.batch_id),
-    report_date: report.report_date,
-    report_status: report.report_status,
-    phase_id: report.phase_id,
-    phase_name: phaseInfo.value || 'Unknown Phase', 
-    totalTypeDamages: report.type_damages?.length || 0,
-    totalActivities: report.activities?.length || 0,
-    current_level_order: currentUserLevel.value?.level_order || 1,
-    current_level_name: currentUserLevel.value?.level_name || 'Level 1',
-    can_approve: canApproveCurrentLevel.value,
-    is_final_level: currentUserLevel.value?.is_final_level || false,
+    ...currentReport.value,
+    location_name: getLocationName(currentReport.value.location_id),
+    batch_name: getBatchName(currentReport.value.batch_id),
+    phase_name: phaseInfo.value,
+    can_approve: canApproveCurrentLevel.value
   };
 });
 
-// ✅ APPROVE CURRENT LEVEL - Satu tombol untuk semua
-const approveCurrentLevel = async () => {
-  if (!canApproveCurrentLevel.value) {
-    alert('⚠️ Anda tidak memiliki akses untuk approve di level ini');
-    return;
-  }
-
-  if (!currentUserLevel.value) {
-    alert('⚠️ Level approval tidak ditemukan');
-    return;
-  }
-
-  const levelName = currentUserLevel.value.level_name;
-  const isFinalLevel = currentUserLevel.value.is_final_level;
-  
-  if (!confirm(`✅ Approve report ini untuk level "${levelName}"?\n\n${isFinalLevel ? '⚠️ FINAL LEVEL: Stok material akan dikurangi di Openbravo!' : 'Report akan dilanjutkan ke level berikutnya.'}`)) {
-    return;
-  }
-
-  try {
-    processing.value = true;
-    
-    const currentLevelOrder = currentUserLevel.value.level_order;
-    const username = authStore.user?.username || authStore.user?.email || 'Admin';
-    let movementResult = { success: true, movementId: 'N/A' };
-
-    // ✅ PENGURANGAN STOK HANYA DI FINAL LEVEL
-    // Di dalam approveCurrentLevel, bagian FINAL LEVEL:
-    if (isFinalLevel) {
-        console.log('🔄 FINAL LEVEL: Processing stock reduction...');
-        
-        // Validasi warehouse/bin
-        if (!warehouseInfo.value.warehouse || !warehouseInfo.value.bin) {
-            throw new Error('❌ Informasi Warehouse/Bin Openbravo tidak lengkap. Tidak dapat mengurangi stok.');
-        }
-
-        const materials = getAllMaterialsForMovement.value;
-        
-        if (materials.length > 0) {
-            console.log(`📦 Processing ${materials.length} materials for stock reduction...`);
-            
-            movementResult = await createInternalConsumption(materials);
-
-            if (!movementResult.success) {
-                // Jangan lempar error langsung, beri pilihan
-                const confirmProceed = confirm(
-                    `⚠️ Gagal memproses sebagian/semua material di Openbravo:\n\n${movementResult.errors}\n\n` +
-                    `Berhasil: ${movementResult.successCount}/${movementResult.totalMaterials}\n\n` +
-                    `Tetap lanjutkan approval?`
-                );
-                
-                if (!confirmProceed) {
-                    throw new Error('Approval dibatalkan oleh user');
-                }
-            } else {
-                console.log(`✅ Internal Consumption created: ${movementResult.movementId}`);
-            }
-            
-            // Update Openbravo Document ID di semua aktivitas
-            if (movementResult.movementId && movementResult.movementId !== 'NO_MATERIALS') {
-                const { error: updateActErr } = await supabase
-                    .from('gh_activity')
-                    .update({ openbravo_movement_id: movementResult.movementId })
-                    .eq('report_id', currentReport.value.report_id);
-                
-                if (updateActErr) {
-                    console.error('❌ Failed to update openbravo_movement_id:', updateActErr);
-                } else {
-                    console.log('✅ Updated openbravo_movement_id for all activities');
-                }
-            }
-        } else {
-            console.log('ℹ️ No materials to process in final level');
-        }
-    }
-
-    // 2. Update level status jadi 'approved'
-    const { error: updateLevelErr } = await supabase
-      .from('gh_approval_level_status')
-      .update({
-        status: 'approved',
-        approved_by: authStore.user.user_id,
-        approved_at: new Date().toISOString()
-      })
-      .eq('record_id', currentReport.value.approval_record_id)
-      .eq('level_order', currentLevelOrder);
-
-    if (updateLevelErr) throw updateLevelErr;
-
-    // 3. Insert history
-    const { data: flowDataHistory } = await supabase
-      .from('gh_approve_record')
-      .select('flow_id')
-      .eq('record_id', currentReport.value.approval_record_id)
-      .single();
-    
-    const { error: historyErr } = await supabase
-      .from('gh_approval_history')
-      .insert({
-        record_id: currentReport.value.approval_record_id,
-        flow_id: flowDataHistory.flow_id,
-        user_id: authStore.user.user_id,
-        level_order: currentLevelOrder,
-        level_name: levelName,
-        action: 'approved',
-        comment: `Approved by ${username} at level ${levelName}`
-      });
-
-    if (historyErr) throw historyErr;
-
-    // 4. Update approve_record
-    if (isFinalLevel) {
-      const { error: recordErr } = await supabase
-        .from('gh_approve_record')
-        .update({
-          overall_status: 'approved',
-          completed_at: new Date().toISOString()
-        })
-        .eq('record_id', currentReport.value.approval_record_id);
-
-      if (recordErr) throw recordErr;
-
-      const { error: reportErr } = await supabase
-        .from('gh_report')
-        .update({ report_status: 'approved' })
-        .eq('report_id', currentReport.value.report_id);
-
-      if (reportErr) throw reportErr;
-
-    } else {
-      const { error: recordErr } = await supabase
-        .from('gh_approve_record')
-        .update({
-          current_level_order: currentLevelOrder + 1
-        })
-        .eq('record_id', currentReport.value.approval_record_id);
-
-      if (recordErr) throw recordErr;
-    }
-
-    console.log('✅ Level approved');
-
-    await loadData();
-
-    if (isFinalLevel) {
-      alert(`✅ Report berhasil disetujui di level terakhir!\n\n✅ FULLY APPROVED\n📦 Movement ID: ${movementResult.movementId}\n📊 Materials processed: ${movementResult.successCount}/${movementResult.totalMaterials}`);
-    } else {
-      alert(`✅ Report berhasil disetujui untuk level "${levelName}"!\n\nReport akan dilanjutkan ke level berikutnya.`);
-    }
-    
-    router.push(sourcePage.value);
-    
-  } catch (err) {
-    console.error('❌ Error approving level:', err);
-    alert('❌ Gagal approve: ' + err.message);
-  } finally {
-    processing.value = false;
-  }
-};
-
-// ✅ REQUEST REVISION
-const requestRevisionForLevel = async () => {
-  if (!canApproveCurrentLevel.value) {
-    alert('⚠️ Anda tidak memiliki akses untuk request revision di level ini');
-    return;
-  }
-
-  if (!revisionModal.value.notes || revisionModal.value.notes.trim().length < 10) {
-    alert('⚠️ Catatan revisi minimal 10 karakter');
-    return;
-  }
-
-  if (!confirm('🔄 Kirim permintaan revisi report?\n\nReport akan dikembalikan ke staff untuk diperbaiki.')) {
-    return;
-  }
-
-  try {
-    processing.value = true;
-    
-    const currentLevel = currentUserLevel.value;
-    if (!currentLevel) throw new Error('Current approval level not found.');
-    
-    const username = authStore.user?.username || authStore.user?.email || 'Admin';
-    
-    const { error: updateLevelErr } = await supabase
-      .from('gh_approval_level_status')
-      .update({
-        status: 'needRevision',
-        revision_notes: revisionModal.value.notes,
-        revision_requested_by: authStore.user.user_id,
-        revision_requested_at: new Date().toISOString()
-      })
-      .eq('record_id', currentReport.value.approval_record_id)
-      .eq('level_order', currentLevel.level_order);
-
-    if (updateLevelErr) throw updateLevelErr;
-
-    const { data: flowDataHistory } = await supabase
-      .from('gh_approve_record')
-      .select('flow_id')
-      .eq('record_id', currentReport.value.approval_record_id)
-      .single();
-
-    const { error: historyErr } = await supabase
-      .from('gh_approval_history')
-      .insert({
-        record_id: currentReport.value.approval_record_id,
-        flow_id: flowDataHistory.flow_id,
-        user_id: authStore.user.user_id,
-        level_order: currentLevel.level_order,
-        level_name: currentLevel.level_name,
-        action: 'revision_requested',
-        comment: revisionModal.value.notes
-      });
-
-    if (historyErr) throw historyErr;
-
-    const { error: recordErr } = await supabase
-      .from('gh_approve_record')
-      .update({
-        overall_status: 'needRevision',
-        current_level_order: 1
-      })
-      .eq('record_id', currentReport.value.approval_record_id);
-
-    if (recordErr) throw recordErr;
-
-    const { error: resetErr } = await supabase
-      .from('gh_approval_level_status')
-      .update({
-        status: 'pending',
-        approved_by: null,
-        approved_at: null,
-        revision_notes: null,
-        revision_requested_by: null,
-        revision_requested_at: null
-      })
-      .eq('record_id', currentReport.value.approval_record_id)
-      .neq('level_order', currentLevel.level_order);
-
-    if (resetErr) throw resetErr;
-
-    const { error: reportErr } = await supabase
-      .from('gh_report')
-      .update({ report_status: 'needRevision' })
-      .eq('report_id', currentReport.value.report_id);
-
-    if (reportErr) throw reportErr;
-    
-    await loadData();
-    closeRevisionModal();
-    
-    alert('✅ Permintaan revisi berhasil dikirim! Status report dikembalikan ke needRevision.');
-    router.push(sourcePage.value);
-    
-  } catch (err) {
-    console.error('❌ Error requesting revision:', err);
-    alert('❌ Gagal mengirim revisi: ' + err.message);
-  } finally {
-    processing.value = false;
-  }
-};
-
-const openRevisionModal = () => {
-  if (!canApproveCurrentLevel.value) {
-    alert('⚠️ Anda tidak memiliki akses untuk melakukan aksi ini di level saat ini.');
-    return;
-  }
-  
-  revisionModal.value = {
-    show: true,
-    notes: ''
-  }
-}
-
-const closeRevisionModal = () => {
-  revisionModal.value = {
-    show: false,
-    notes: ''
-  }
-}
-
 const getStatusBadge = (status) => {
   const badges = {
-    'onReview': {
-      text: '⏳ Review',
-      class: 'bg-yellow-100 text-yellow-800 border-yellow-200'
-    },
-    'needRevision': {
-      text: '🔄 Revision',
-      class: 'bg-red-100 text-red-800 border-red-200'
-    },
-    'approved': {
-      text: '✅ Approved',
-      class: 'bg-green-100 text-green-800 border-green-200'
-    }
+    'onReview': { text: '⏳ Review', class: 'bg-yellow-100 text-yellow-800 border-yellow-200' },
+    'needRevision': { text: '🔄 Revision', class: 'bg-red-100 text-red-800 border-red-200' },
+    'approved': { text: '✅ Approved', class: 'bg-green-100 text-green-800 border-green-200' },
+    'draft': { text: '📝 Draft', class: 'bg-gray-100 text-gray-800 border-gray-200' }
   }
-  return badges[status || 'onReview'] || badges['onReview']
+  return badges[status] || badges['draft']
 }
+
+// === ACTIONS ===
+
+// 1. APPROVE & FINALIZE (Level 2 - Final)
+const approveAndFinalize = async () => {
+  if (!confirm(`✅ Approve & Finalize Planning ini?\n\nStatus akan berubah menjadi APPROVED dan proses selesai.`)) return;
+
+  try {
+    processing.value = true;
+    const lvl = currentUserLevel.value;
+    const recordId = currentReport.value.approval_record_id;
+    const username = authStore.user.username || authStore.user.email || 'User';
+
+    // 1. Update Table Level Status
+    await supabase.from('gh_approval_level_status').update({
+      status: 'approved',
+      approved_by: authStore.user.user_id,
+      approved_at: new Date().toISOString()
+    }).eq('record_id', recordId).eq('level_order', lvl.level_order);
+
+    // 2. Insert History
+    await supabase.from('gh_approval_history').insert({
+      record_id: recordId,
+      user_id: authStore.user.user_id,
+      level_order: lvl.level_order,
+      level_name: lvl.level_name,
+      action: 'approved',
+      comment: `Approved & Finalized by ${username}`
+    });
+
+    // 3. Update Record Global
+    await supabase.from('gh_approve_record').update({
+      overall_status: 'approved',
+      completed_at: new Date().toISOString()
+    }).eq('record_id', recordId);
+
+    // 4. Update Report Status
+    await supabase.from('gh_planning_report')
+      .update({ status: 'approved' })
+      .eq('planning_id', currentReport.value.report_id);
+
+    alert('✅ Planning berhasil di-approve!');
+    router.push(sourcePage.value);
+
+  } catch (err) {
+    console.error(err);
+    alert('Gagal approve: ' + err.message);
+  } finally {
+    processing.value = false;
+  }
+};
+
+// 2. MODAL LOGIC (DIRECT REVISION)
+const openEditModal = () => {
+  // Deep clone activities to avoid direct mutation
+  editModal.value = {
+    show: true,
+    activities: JSON.parse(JSON.stringify(currentReport.value.activities || [])),
+    notes: ''
+  }
+}
+
+const closeEditModal = () => {
+  editModal.value = { show: false, activities: [], notes: '' }
+}
+
+const saveDirectRevision = async () => {
+  const notes = editModal.value.notes.trim();
+  if (!notes || notes.length < 5) {
+    alert('⚠️ Mohon tuliskan alasan koreksi/revisi (min 5 karakter).');
+    return;
+  }
+
+  if (!confirm('🔄 Simpan perubahan data? Koreksi akan langsung diterapkan.')) return;
+
+  try {
+    processing.value = true;
+    const username = authStore.user.username || authStore.user.email;
+
+    // 1. Update Data (Activity & Materials)
+    for (const act of editModal.value.activities) {
+        // Update Activity (Manpower)
+        await supabase.from('gh_planning_activity')
+            .update({ manpower: act.manpower })
+            .eq('activity_id', act.activity_id);
+        
+        // Update Materials (Qty)
+        if (act.materials && act.materials.length > 0) {
+            for (const mat of act.materials) {
+                await supabase.from('gh_planning_material')
+                    .update({ qty: mat.qty })
+                    .eq('material_id', mat.material_id);
+            }
+        }
+    }
+
+    // 2. Insert History Log (Catat bahwa Manager melakukan koreksi)
+    // Kita gunakan action 'revision_requested' tapi tanpa mengubah status flow, 
+    // atau gunakan action custom jika ada enum, tapi aman pakai comment jelas.
+    const lvl = currentUserLevel.value;
+    await supabase.from('gh_approval_history').insert({
+      record_id: currentReport.value.approval_record_id,
+      user_id: authStore.user.user_id,
+      level_order: lvl.level_order,
+      level_name: lvl.level_name,
+      action: 'revision_requested', // Atau 'submitted' jika dianggap koreksi
+      comment: `[DIRECT CORRECTION] ${notes}. Data updated directly by Manager.`
+    });
+
+    alert('✅ Data berhasil dikoreksi.');
+    closeEditModal();
+    await loadData(); // Reload data UI
+
+  } catch (err) {
+    console.error(err);
+    alert('Gagal menyimpan koreksi: ' + err.message);
+  } finally {
+    processing.value = false;
+  }
+};
+
 </script>
 
 <template>
-  <div class="min-h-screen bg-gradient-to-br from-gray-50 to-white">
-    <div class="bg-white border-b border-gray-200 shadow-sm sticky top-0 z-40">
-      <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-5">
-        <div class="flex items-center justify-between gap-4">
-          <div class="flex items-center gap-4">
-            <button
-              @click="() => router.push(sourcePage)"
-              class="flex items-center justify-center w-10 h-10 bg-gray-100 hover:bg-gray-200 rounded-lg transition"
-            >
-              <svg class="w-5 h-5 text-gray-700" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512" fill="currentColor">
+  <div class="min-h-screen bg-gray-50 pb-24"> <div class="bg-white border-b sticky top-0 z-30 shadow-sm">
+      <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 flex justify-between items-center">
+        <div class="flex items-center gap-4">
+          <button @click="router.push(sourcePage)" class="p-2 bg-gray-100 hover:bg-gray-200 rounded-lg transition">
+             <svg class="w-5 h-5 text-gray-700" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512" fill="currentColor">
                 <path d="M9.4 233.4c-12.5 12.5-12.5 32.8 0 45.3l160 160c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L109.2 288 416 288c17.7 0 32-14.3 32-32s-14.3-32-32-32l-306.7 0L214.6 118.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0l-160 160z"/>
-              </svg>
-            </button>
-            <div>
-              <h1 class="text-2xl font-bold text-gray-900 flex items-center gap-3">
-                <span class="w-10 h-10 bg-gradient-to-br from-yellow-400 to-yellow-500 rounded-lg flex items-center justify-center text-white text-lg">
-                  ⏳
-                </span>
-                Review Activity Report
-              </h1>
-              <p class="text-sm text-gray-500 mt-1">Report ID: #{{ report_id }}</p>
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
-
-    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-      
-      <div v-if="loading" class="flex items-center justify-center py-20">
-        <div class="text-center">
-          <div class="inline-block w-12 h-12 border-4 border-[#0071f3] border-t-transparent rounded-full animate-spin"></div>
-          <p class="mt-4 text-gray-600 font-semibold">Memuat data laporan...</p>
-        </div>
-      </div>
-
-      <div v-else-if="error" class="bg-red-50 border-2 border-red-200 rounded-2xl p-6 mb-6">
-        <div class="flex items-center gap-3">
-          <span class="text-3xl">❌</span>
+            </svg>
+          </button>
           <div>
-            <p class="font-bold text-red-900">Terjadi Kesalahan</p>
-            <p class="text-sm text-red-700 mt-1">{{ error }}</p>
+            <h1 class="text-xl font-bold text-gray-900 flex items-center gap-2">
+              <span class="text-2xl">📋</span>
+              Review Planning #{{ report_id }}
+            </h1>
           </div>
+        </div>
+        <div v-if="currentReport">
+           <span :class="getStatusBadge(currentReport.report_status).class" class="px-3 py-1 rounded-full text-sm font-bold border animate-pulse">
+             {{ getStatusBadge(currentReport.report_status).text }}
+           </span>
         </div>
       </div>
+    </div>
 
-      <template v-else-if="reportInfo && currentReport">
-        
-        <div class="mb-6">
-          <div class="bg-gradient-to-r from-blue-50 to-indigo-50 border-2 border-blue-200 rounded-2xl p-6">
-            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
-              <div>
-                <p class="text-sm text-gray-600 font-semibold mb-1">📍 Lokasi</p>
-                <p class="text-lg font-bold text-gray-900">{{ reportInfo.location_name }}</p>
-              </div>
-              <div>
-                <p class="text-sm text-gray-600 font-semibold mb-1">🏷️ Batch</p>
-                <p class="text-lg font-bold text-gray-900">{{ reportInfo.batch_name }}</p>
-              </div>
-              <div>
-                <p class="text-sm text-gray-600 font-semibold mb-1">🌱 Fase</p>
-                <p class="text-lg font-bold text-gray-900">{{ reportInfo?.phase_name || '-' }}</p>
-              </div>
-              <div>
-                <p class="text-sm text-gray-600 font-semibold mb-1">📅 Tanggal</p>
-                <p class="text-lg font-bold text-gray-900">{{ formatDate(reportInfo.report_date) }}</p>
-              </div>
-              <div>
-                <p class="text-sm text-gray-600 font-semibold mb-1">📊 Status</p>
-                <span 
-                  :class="getStatusBadge(reportInfo.report_status).class"
-                  class="inline-block px-3 py-1 rounded-lg font-bold text-xs border-2"
-                >
-                  {{ getStatusBadge(reportInfo.report_status).text }}
-                </span>
-              </div>
-            </div>
-            
-            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mt-4 pt-4 border-t-2 border-blue-200">
-              <div class="bg-white rounded-lg p-4">
-                <p class="text-sm text-gray-600 font-semibold mb-2">🌾 Kerusakan Tanaman</p>
-                <div class="flex items-center gap-3">
-                  <span class="text-2xl font-bold text-gray-900">{{ reportInfo.totalTypeDamages }}</span>
-                  <span class="text-sm text-gray-500">item(s)</span>
-                </div>
-              </div>
-              <div class="bg-white rounded-lg p-4">
-                <p class="text-sm text-gray-600 font-semibold mb-2">⚙️ Aktivitas</p>
-                <div class="flex items-center gap-3">
-                  <span class="text-2xl font-bold text-gray-900">{{ reportInfo.totalActivities }}</span>
-                  <span class="text-sm text-gray-500">item(s)</span>
-                </div>
-              </div>
-              <div class="bg-gradient-to-br from-green-50 to-emerald-50 rounded-lg p-4 border-2 border-green-200">
-                <p class="text-sm text-green-600 font-semibold mb-2">💰 Total Material Cost</p>
-                <div class="flex items-center gap-2">
-                  <span class="text-2xl font-bold text-green-700">
-                    {{ formatCurrency(getTotalMaterialCost()) }}
-                  </span>
-                </div>
-              </div>
-            </div>
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-6" v-if="currentReport">
 
-            <div v-if="reportInfo.report_status === 'needRevision'" class="mt-4 pt-4 border-t-2 border-blue-200">
-              <div class="bg-red-50 border-2 border-red-200 rounded-lg p-4">
-                <p class="text-sm font-bold text-red-900 mb-2 flex items-center gap-2">
-                  <span class="text-lg">🔄</span>
-                  Catatan Revisi Report
-                </p>
-                <p class="text-sm text-red-900 whitespace-pre-wrap">
-                  {{ approvalProgress.find(p => p.level_status === 'needRevision')?.revision_notes || 'Revisi diminta.' }}
-                </p>
-                <p class="text-xs text-red-600 mt-2">
-                  Requested by: {{ approvalProgress.find(p => p.level_status === 'needRevision')?.revisor_name || 'System' }} 
-                  • {{ formatDateTime(approvalProgress.find(p => p.level_status === 'needRevision')?.revision_requested_at) }}
-                </p>
-              </div>
-            </div>
-
-            <div v-if="reportInfo.report_status === 'approved'" class="mt-4 pt-4 border-t-2 border-blue-200">
-              <div class="bg-green-50 border-2 border-green-200 rounded-lg p-4">
-                <p class="text-sm font-bold text-green-900 mb-2 flex items-center gap-2">
-                  <span class="text-lg">✅</span>
-                  Report Fully Approved
-                </p>
-                <p class="text-sm text-green-900">
-                  Approved by: {{ approvalProgress.find(p => p.is_final_level)?.approver_name || 'System' }} 
-                  • {{ formatDateTime(approvalProgress.find(p => p.is_final_level)?.approved_at) }}
-                </p>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <div v-if="approvalProgress.length > 0" class="mb-6">
-          <h2 class="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-3">
-            📊 Approval Progress
-          </h2>
-          <div class="bg-white rounded-2xl border-2 border-gray-100 shadow-sm p-6">
-            <div class="space-y-3">
-              <div
-                v-for="level in approvalProgress"
-                :key="level.level_status_id"
-                class="flex items-center gap-4 p-4 rounded-lg"
-                :class="{
-                  'bg-green-50 border-2 border-green-200': level.level_status === 'approved',
-                  'bg-yellow-50 border-2 border-yellow-200': level.level_status === 'pending' && level.level_order === currentUserLevel?.level_order,
-                  'bg-red-50 border-2 border-red-200': level.level_status === 'needRevision',
-                  'bg-gray-50 border-2 border-gray-200': level.level_status === 'pending' && level.level_order !== currentUserLevel?.level_order,
-                }"
-              >
-                <div class="w-10 h-10 rounded-full flex items-center justify-center font-bold text-white"
-                    :class="{
-                      'bg-green-500': level.level_status === 'approved',
-                      'bg-blue-500': level.level_status === 'pending' && level.level_order === currentUserLevel?.level_order,
-                      'bg-red-500': level.level_status === 'needRevision',
-                      'bg-gray-400': level.level_status === 'pending' && level.level_order !== currentUserLevel?.level_order
-                    }">
-                  {{ level.level_order }}
-                </div>
-
-                <div class="flex-1">
-                  <p class="font-bold text-gray-900">{{ level.level_name || currentUserLevel?.level_name || `Level ${level.level_order}` }}</p>
-                  <p class="text-sm text-gray-600">
-                    <span v-if="level.level_status === 'approved'">
-                      ✅ Approved by {{ level.approver_name || 'Admin' }}
-                    </span>
-                    <span v-else-if="level.level_status === 'needRevision'">
-                      🔄 Revision requested by {{ level.revisor_name || 'Admin' }}
-                    </span>
-                    <span v-else-if="level.level_order === currentUserLevel?.level_order">
-                      ⏳ Menunggu approval Anda
-                    </span>
-                    <span v-else>
-                      ⏸️ Pending
-                    </span>
-                  </p>
-                  <p v-if="level.approved_at" class="text-xs text-gray-500">
-                    {{ formatDateTime(level.approved_at) }}
-                  </p>
-                   <div v-if="level.revision_notes && level.level_status === 'needRevision'" class="mt-2 bg-red-100 p-2 rounded-lg">
-                    <p class="text-xs font-semibold text-red-700">Catatan Revisi:</p>
-                    <p class="text-xs text-red-800">{{ level.revision_notes }}</p>
-                  </div>
-                </div>
-
-                <span
-                  class="px-3 py-1 rounded-lg font-bold text-xs border-2 whitespace-nowrap"
-                  :class="{
-                    'bg-green-100 text-green-800 border-green-200': level.status === 'approved',
-                    'bg-yellow-100 text-yellow-800 border-yellow-200': level.status === 'pending' && level.level_order === currentUserLevel?.level_order,
-                    'bg-red-100 text-red-800 border-red-200': level.status === 'needRevision',
-                    'bg-gray-100 text-gray-800 border-gray-200': level.status === 'pending' && level.level_order !== currentUserLevel?.level_order,
-                  }">
-                  {{ level.status === 'approved' ? '✅ Approved' : level.status === 'needRevision' ? '🔄 Revision' : '⏳ Pending' }}
-                </span>
-              </div>
-            </div>
-
-            <div v-if="canApproveCurrentLevel && currentUserLevel && reportInfo.report_status !== 'approved'" class="mt-6 pt-6 border-t-2 border-gray-100">
-              <div class="flex flex-col sm:flex-row gap-3">
-                <button
-                  @click="approveCurrentLevel"
-                  :disabled="processing"
-                  class="flex-1 bg-green-500 hover:bg-green-600 text-white font-bold py-3 rounded-xl transition disabled:opacity-50"
-                >
-                  ✅ Approve Level {{ currentUserLevel.level_order }} ({{ currentUserLevel.is_final_level ? 'Final Approval & Stock' : 'Lanjutkan' }})
-                </button>
-                <button
-                  @click="openRevisionModal('level', null)"
-                  :disabled="processing"
-                  class="flex-1 bg-red-500 hover:bg-red-600 text-white font-bold py-3 rounded-xl transition disabled:opacity-50"
-                >
-                  🔄 Request Revision Report
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <div class="bg-white rounded-2xl border-2 border-gray-100 shadow-sm overflow-hidden">
-          <div class="bg-gradient-to-r from-gray-50 to-white p-5 border-b-2 border-gray-100">
-            <div class="flex items-center gap-3">
-              <div class="w-10 h-10 bg-gradient-to-br from-[#0071f3] to-[#8FABD4] rounded-lg flex items-center justify-center text-white font-bold text-lg">
-                #
-              </div>
-              <div>
-                <p class="text-sm text-gray-500 font-semibold">Report ID</p>
-                <p class="text-lg font-bold text-gray-900">#{{ currentReport.report_id }}</p>
-              </div>
-            </div>
-          </div>
-
-          <div class="p-6 space-y-6">
-            
-            <div v-if="currentReport.type_damages && currentReport.type_damages.length > 0">
-              <h4 class="text-lg font-bold text-gray-900 mb-4 flex items-center gap-2">
-                <span class="text-2xl">🌾</span>
-                Kerusakan Tanaman ({{ currentReport.type_damages.length }})
-              </h4>
-              <div class="space-y-3">
-                <div
-                  v-for="damage in currentReport.type_damages"
-                  :key="damage.typedamage_id"
-                  class="bg-gray-50 rounded-xl p-5 border-2 border-gray-200"
-                >
-                  <div class="flex items-start justify-between gap-4 mb-4">
-                    <div class="flex-1">
-                      <p class="font-bold text-gray-900 text-lg mb-3">{{ damage.type_damage || 'Kerusakan' }}</p>
-                      <div class="grid grid-cols-3 gap-3">
-                        <div class="bg-white rounded-lg p-3">
-                          <p class="text-xs text-gray-500 font-semibold mb-1">🟡 Kuning</p>
-                          <p class="text-2xl font-bold text-gray-900">{{ damage.kuning || 0 }}</p>
-                        </div>
-                        <div class="bg-white rounded-lg p-3">
-                          <p class="text-xs text-gray-500 font-semibold mb-1">🟠 Kutilang</p>
-                          <p class="text-2xl font-bold text-gray-900">{{ damage.kutilang || 0 }}</p>
-                        </div>
-                        <div class="bg-white rounded-lg p-3">
-                          <p class="text-xs text-gray-500 font-semibold mb-1">🔴 Busuk</p>
-                          <p class="text-2xl font-bold text-gray-900">{{ damage.busuk || 0 }}</p>
-                        </div>
-                      </div>
-                    </div>
-                    
-                    <div class="flex flex-col items-end gap-2">
-                      <span 
-                        :class="getStatusBadge(currentReport.report_status).class"
-                        class="px-3 py-1 rounded-lg font-bold text-xs border-2 whitespace-nowrap"
-                      >
-                        {{ getStatusBadge(currentReport.report_status).text }} (Item)
-                      </span>
-                      
-                      </div>
-                  </div>
-                  
-                  </div>
-              </div>
-            </div>
-
-            <div v-if="currentReport.activities && currentReport.activities.length > 0">
-              <h4 class="text-lg font-bold text-gray-900 mb-4 flex items-center gap-2">
-                <span class="text-2xl">⚙️</span>
-                Aktivitas ({{ currentReport.activities.length }})
-              </h4>
-              <div class="space-y-4">
-                <div
-                  v-for="activity in currentReport.activities"
-                  :key="activity.activity_id"
-                  class="bg-gray-50 rounded-xl p-5 border-2 border-gray-200"
-                >
-                  <div class="flex items-start justify-between gap-4 mb-4">
-                    <div class="flex-1">
-                      <p class="font-bold text-gray-900 text-lg mb-3">{{ activity.act_name }}</p>
-                      <div class="grid grid-cols-2 md:grid-cols-3 gap-3 mb-4">
-                        <div class="bg-white rounded-lg p-3">
-                          <p class="text-xs text-gray-500 font-semibold mb-1">CoA</p>
-                          <p class="text-sm font-medium text-gray-900">{{ activity.CoA || '-' }}</p>
-                        </div>
-                        <div class="bg-white rounded-lg p-3">
-                          <p class="text-xs text-gray-500 font-semibold mb-1">👷 Manpower</p>
-                          <p class="text-sm font-medium text-gray-900">{{ activity.manpower || 0 }} pekerja</p>
-                        </div>
-                        <div class="bg-gradient-to-br from-green-50 to-emerald-50 rounded-lg p-3 border-2 border-green-200">
-                          <p class="text-xs text-green-600 font-semibold mb-1">💰 Material Cost</p>
-                          <p class="text-base font-bold text-green-700">
-                            {{ formatCurrency(calculateActivityTotal(activity.materials || [])) }}
-                          </p>
-  </div>
-                      </div>
-
-                      <div v-if="activity.materials && activity.materials.length > 0" class="bg-white rounded-lg p-4">
-                        <p class="text-sm font-bold text-gray-700 mb-3 flex items-center gap-2">
-                          <span class="text-base">📦</span>
-                          Materials ({{ activity.materials.length }})
-                        </p>
-                        
-                        <div class="overflow-x-auto">
-                          <table class="w-full text-sm">
-                            <thead>
-                              <tr class="border-b-2 border-gray-200">
-                                <th class="text-left py-2 px-3 font-semibold text-gray-600">Material</th>
-                                <th class="text-right py-2 px-3 font-semibold text-gray-600">Qty</th>
-                                <th class="text-right py-2 px-3 font-semibold text-gray-600">UOM</th>
-                                <th class="text-right py-2 px-3 font-semibold text-gray-600">Unit Price</th>
-                                <th class="text-right py-2 px-3 font-semibold text-gray-600">Total</th>
-                              </tr>
-                            </thead>
-                            <tbody>
-                              <tr
-                                v-for="material in activity.materials"
-                                :key="material.material_used_id"
-                                class="border-b border-gray-100 hover:bg-blue-50 transition"
-                              >
-                                <td class="py-2 px-3 font-medium text-gray-900">
-                                  {{ material.material_name }}
-                                </td>
-                                <td class="py-2 px-3 text-right font-semibold text-gray-900">
-                                  {{ formatNumber(material.qty) }}
-                                </td>
-                                <td class="py-2 px-3 text-right text-gray-600">
-                                  {{ material.uom }}
-                                </td>
-                                <td class="py-2 px-3 text-right text-gray-700">
-                                  {{ formatCurrency(material.unit_price || 0) }}
-                                </td>
-                                <td class="py-2 px-3 text-right font-bold text-blue-700">
-                                  {{ formatCurrency(material.total_price || 0) }}
-                                </td>
-                              </tr>
-                            </tbody>
-                            <tfoot>
-                              <tr class="border-t-2 border-gray-300 bg-gray-50">
-                                <td colspan="4" class="py-3 px-3 text-right font-bold text-gray-700">
-                                  Grand Total:
-                                </td>
-                                <td class="py-3 px-3 text-right font-bold text-green-700 text-base">
-                                  {{ formatCurrency(calculateActivityTotal(activity.materials)) }}
-                                </td>
-                              </tr>
-                            </tfoot>
-                          </table>
-                        </div>
-                      </div>
-                    </div>
-                    
-                    <div class="flex flex-col items-end gap-2">
-                      <span 
-                        :class="getStatusBadge(currentReport.report_status).class"
-                        class="px-3 py-1 rounded-lg font-bold text-xs border-2 whitespace-nowrap"
-                      >
-                        {{ getStatusBadge(currentReport.report_status).text }} (Item)
-                      </span>
-                      
-                      </div>
-                  </div>
-
-                  <div v-if="activity.openbravo_movement_id" class="mt-3 bg-green-50 border-2 border-green-200 rounded-lg p-3">
-                    <p class="text-xs text-green-600 font-semibold mb-1">Openbravo Movement</p>
-                    <p class="text-sm text-green-900">Document ID: {{ activity.openbravo_movement_id }}</p>
-                  </div>
-                  
-                  </div>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <div class="bg-blue-50 border-2 border-blue-200 rounded-2xl p-5 mt-6">
+      <div class="bg-white rounded-xl border border-gray-200 p-6 shadow-sm">
+        <div class="grid grid-cols-2 md:grid-cols-4 gap-6">
           <div class="flex items-start gap-3">
-            <span class="text-2xl">💡</span>
+            <span class="text-2xl">📅</span>
+            <div><p class="text-xs text-gray-500 font-bold mb-1">TANGGAL</p><p class="font-medium text-gray-900">{{ formatDate(reportInfo.report_date) }}</p></div>
+          </div>
+          <div class="flex items-start gap-3">
+            <span class="text-2xl">🌱</span>
+            <div><p class="text-xs text-gray-500 font-bold mb-1">FASE</p><p class="font-medium text-gray-900">{{ reportInfo.phase_name }}</p></div>
+          </div>
+          <div class="flex items-start gap-3">
+            <span class="text-2xl">🏷️</span>
+            <div><p class="text-xs text-gray-500 font-bold mb-1">BATCH</p><p class="font-medium text-gray-900">{{ reportInfo.batch_name }}</p></div>
+          </div>
+          <div class="flex items-start gap-3">
+            <span class="text-2xl">📍</span>
+            <div><p class="text-xs text-gray-500 font-bold mb-1">LOKASI</p><p class="font-medium text-gray-900">{{ reportInfo.location_name }}</p></div>
+          </div>
+        </div>
+      </div>
+
+      <div v-if="approvalProgress.length" class="bg-white rounded-xl border border-gray-200 p-6 shadow-sm">
+        <h3 class="font-bold text-gray-800 mb-4 flex items-center gap-2"><span class="text-xl">📊</span> Approval Progress</h3>
+        <div class="space-y-3">
+          <div v-for="level in approvalProgress" :key="level.level_order"
+               class="flex items-center gap-4 p-3 rounded-lg border transition-all duration-200"
+               :class="{
+                 'bg-green-50 border-green-200': level.level_status === 'approved',
+                 'bg-blue-50 border-blue-300 shadow-sm': level.level_status === 'pending' && level.level_order === currentUserLevel?.level_order,
+                 'bg-red-50 border-red-200': level.level_status === 'needRevision',
+                 'bg-gray-50 border-gray-200': level.level_status === 'pending' && level.level_order !== currentUserLevel?.level_order
+               }">
+            <div class="w-10 h-10 rounded-full flex flex-shrink-0 items-center justify-center font-bold text-white"
+                 :class="{
+                   'bg-green-500': level.level_status === 'approved',
+                   'bg-blue-500 ring-4 ring-blue-100': level.level_status === 'pending' && level.level_order === currentUserLevel?.level_order,
+                   'bg-red-500': level.level_status === 'needRevision',
+                   'bg-gray-300': level.level_status === 'pending' && level.level_order !== currentUserLevel?.level_order
+                 }">
+              {{ level.level_order }}
+            </div>
             <div class="flex-1">
-              <p class="font-bold text-blue-900 mb-2">Cara Review (Approval Level)</p>
-              <ul class="text-sm text-blue-800 space-y-1">
-                <li>• **Approval Global:** Report disetujui per **level** (bukan per item). Setelah tombol "Approve Level" ditekan, report akan lanjut ke level berikutnya.</li>
-                <li>• **Pengurangan Stok:** Stok material di Openbravo **hanya akan dikurangi** secara otomatis saat report disetujui di **Level Final** (terakhir).</li>
-                <li>• **Revisi:** Gunakan "Request Revision Report" untuk mengembalikan seluruh laporan ke Staff.</li>
-              </ul>
+              <div class="flex justify-between items-start">
+                <div>
+                  <p class="font-bold text-gray-900">{{ level.level_name }}</p>
+                  <p class="text-sm text-gray-600 mt-0.5">
+                    <span v-if="level.level_status === 'approved'">✅ Approved by {{ level.approver_name || 'Unknown' }}</span>
+                    <span v-else-if="level.level_status === 'needRevision'">🔄 Revision requested by {{ level.revisor_name || 'Unknown' }}</span>
+                    <span v-else-if="level.level_order === currentUserLevel?.level_order" class="text-blue-600 font-medium">⏳ Menunggu Approval Anda</span>
+                    <span v-else>⏳ Pending</span>
+                  </p>
+                </div>
+                <div class="text-xs text-gray-500 text-right" v-if="level.approved_at || level.revision_requested_at">
+                  <p>{{ formatDateTime(level.approved_at || level.revision_requested_at) }}</p>
+                </div>
+              </div>
             </div>
           </div>
         </div>
+      </div>
 
-      </template>
+      <div class="bg-white rounded-xl border border-gray-200 p-6 shadow-sm">
+        <h3 class="font-bold text-gray-800 mb-4 flex items-center gap-2"><span class="text-xl">⚙️</span> Planned Activities ({{ currentReport.activities.length }})</h3>
 
-      <footer class="text-center py-10 mt-8 border-t border-gray-200">
-        <div class="flex items-center justify-center gap-2 mb-2">
-          <span class="text-2xl">🌱</span>
-          <p class="text-gray-400 font-bold text-sm">GREENHOUSE</p>
+        <div class="grid gap-4">
+          <div v-for="(act, index) in currentReport.activities" :key="act.activity_id" class="border border-gray-200 rounded-xl overflow-hidden">
+            <div class="bg-gray-50 p-4 flex items-start gap-3 border-b border-gray-200">
+              <div class="w-8 h-8 bg-blue-100 text-blue-700 rounded-lg flex items-center justify-center font-bold text-sm">{{ index + 1 }}</div>
+              <div>
+                 <h4 class="font-bold text-gray-900 text-lg">{{ act.act_name }}</h4>
+                 <div class="flex gap-4 text-sm text-gray-600 mt-1">
+                    <span class="flex items-center gap-1">👥 Workers: <b>{{ act.manpower }}</b></span>
+                    <span class="text-gray-300">|</span>
+                    <span class="flex items-center gap-1">🔢 CoA: <b>{{ act.coa || '-' }}</b></span>
+                  </div>
+              </div>
+            </div>
+
+            <div class="p-4">
+               <p class="text-sm font-bold text-gray-700 mb-2 flex items-center gap-1">📦 Materials Used</p>
+               <div v-if="act.materials?.length" class="border rounded-lg overflow-hidden">
+                  <table class="w-full text-sm text-left">
+                    <thead class="bg-gray-100 text-gray-600">
+                      <tr>
+                        <th class="p-3 font-semibold">Material Name</th>
+                        <th class="p-3 text-right font-semibold">Qty</th>
+                        <th class="p-3 text-center font-semibold">Unit</th>
+                      </tr>
+                    </thead>
+                    <tbody class="divide-y">
+                      <tr v-for="mat in act.materials" :key="mat.material_id" class="hover:bg-gray-50">
+                        <td class="p-3 font-medium text-gray-900">{{ mat.material_name }}</td>
+                        <td class="p-3 text-right font-bold text-blue-600">{{ formatNumber(mat.qty) }}</td>
+                        <td class="p-3 text-center text-gray-500">{{ mat.uom }}</td>
+                      </tr>
+                    </tbody>
+                  </table>
+               </div>
+               <div v-else class="text-sm text-gray-400 italic p-2 bg-gray-50 rounded border border-dashed text-center">
+                 Tidak ada material yang digunakan untuk aktivitas ini.
+               </div>
+            </div>
+          </div>
         </div>
-        <p class="text-gray-400 text-xs">© 2025 All Rights Reserved</p>
-      </footer>
+      </div>
+
     </div>
 
-    <div v-if="revisionModal.show" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-      <div class="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl animate-fade-in">
-        <div class="flex items-center justify-between mb-4">
-          <h3 class="text-xl font-bold text-gray-900 flex items-center gap-2">
-            <span class="text-2xl">🔄</span>
-            Request Revision
-          </h3>
-          <button 
-            @click="closeRevisionModal" 
-            class="text-gray-400 hover:text-gray-600 transition"
-            :disabled="processing"
-          >
-            <svg class="w-6 h-6" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 384 512" fill="currentColor">
-              <path d="M342.6 150.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0L192 210.7 86.6 105.4c-12.5-12.5-32.8-12.5-45.3 0s-12.5 32.8 0 45.3L146.7 256 41.4 361.4c-12.5 12.5-12.5 32.8 0 45.3s32.8 12.5 45.3 0L192 301.3 297.4 406.6c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L237.3 256 342.6 150.6z"/>
-            </svg>
-          </button>
-        </div>
-        
-        <div class="mb-6">
-          <label class="block text-sm font-semibold text-gray-700 mb-2">
-            Item Type
-          </label>
-          <div class="px-4 py-3 border-2 border-gray-200 rounded-xl bg-gray-50 text-gray-700 font-medium">
-            <template>
-              📋 Seluruh Report (Level {{ currentUserLevel?.level_order }})
-            </template>
-          </div>
-        </div>
+    <div v-if="loading" class="fixed inset-0 bg-white/80 z-50 flex items-center justify-center backdrop-blur-sm">
+      <div class="flex flex-col items-center">
+        <div class="animate-spin w-10 h-10 border-4 border-blue-600 border-t-transparent rounded-full mb-3"></div>
+        <p class="text-gray-600 font-medium">Memuat Data...</p>
+      </div>
+    </div>
 
-        <div class="mb-6">
-          <label class="block text-sm font-semibold text-gray-700 mb-2">
-            Catatan Revisi <span class="text-red-500">*</span>
-          </label>
-          <textarea
-            v-model="revisionModal.notes"
-            rows="6"
-            placeholder="Tuliskan dengan jelas apa yang perlu diperbaiki...&#10;&#10;Contoh untuk kerusakan:&#10;- Data kuning perlu diverifikasi ulang&#10;- Jumlah busuk tidak sesuai dengan kondisi aktual"
-            class="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:border-[#0071f3] focus:outline-none transition resize-none"
-            :disabled="processing"
-          ></textarea>
-          <p class="text-xs text-gray-500 mt-2">
-            Minimal 10 karakter. Berikan penjelasan yang detail.
-          </p>
-          <div class="mt-3 flex items-center gap-2 text-sm">
-            <span class="font-semibold" :class="revisionModal.notes.trim().length < 10 ? 'text-red-600' : 'text-green-600'">
-              {{ revisionModal.notes.trim().length }} / 10
-            </span>
-            <span class="text-gray-500">karakter</span>
-          </div>
-        </div>
+    <div v-if="reportInfo?.can_approve && reportInfo.report_status !== 'approved'" 
+         class="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 p-4 z-40 shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.1)]">
+      <div class="max-w-7xl mx-auto flex justify-center gap-4">
 
-        <div class="flex gap-3">
-          <button
-            @click="closeRevisionModal"
-            :disabled="processing"
-            class="flex-1 px-4 py-3 bg-gray-100 hover:bg-gray-200 text-gray-700 font-semibold rounded-xl transition disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            Batal
-          </button>
-          <button
-            @click="handleRevision"
-            :disabled="!revisionModal.notes.trim() || revisionModal.notes.trim().length < 10 || processing"
-            class="flex-1 px-4 py-3 bg-gradient-to-r from-red-500 to-red-600 hover:from-red-600 hover:to-red-700 text-white font-semibold rounded-xl transition disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
-          >
-            <svg v-if="processing" class="w-5 h-5 animate-spin" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-              <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-              <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-            </svg>
-            <span>{{ processing ? 'Mengirim...' : 'Kirim Revisi' }}</span>
-          </button>
+        <button @click="openEditModal" :disabled="processing"
+                class="px-6 py-3 bg-blue-100 text-blue-700 font-bold rounded-xl hover:bg-blue-200 transition-colors flex items-center gap-2 disabled:opacity-50">
+          <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+            <path d="M13.586 3.586a2 2 0 112.828 2.828l-.793.793-2.828-2.828.793-.793zM11.379 5.793L3 14.172V17h2.828l8.38-8.379-2.83-2.828z" />
+          </svg>
+          <span>Koreksi Data</span>
+        </button>
+
+        <button @click="approveAndFinalize" :disabled="processing"
+                class="px-8 py-3 bg-green-600 text-white font-bold rounded-xl hover:bg-green-700 transition-colors flex items-center gap-2 shadow-md hover:shadow-lg disabled:opacity-50 disabled:cursor-not-allowed">
+          <svg v-if="!processing" class="w-5 h-5" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512" fill="currentColor">
+              <path d="M438.6 105.4c12.5 12.5 12.5 32.8 0 45.3l-256 256c-12.5 12.5-32.8 12.5-45.3 0l-128-128c-12.5-12.5-12.5-32.8 0-45.3s32.8-12.5 45.3 0L160 338.7 393.4 105.4c12.5-12.5 32.8-12.5 45.3 0z"/>
+          </svg>
+          <svg v-else class="animate-spin h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+          </svg>
+          <span>{{ processing ? 'Processing...' : 'Approve & Finalize' }}</span>
+        </button>
+
+      </div>
+    </div>
+
+    <div v-if="editModal.show" class="fixed inset-0 z-[60] overflow-y-auto" aria-labelledby="modal-title" role="dialog" aria-modal="true">
+      <div class="flex items-end justify-center min-h-screen pt-4 px-4 pb-20 text-center sm:block sm:p-0">
+        <div class="fixed inset-0 bg-gray-500 bg-opacity-75 transition-opacity animate-fade-in" aria-hidden="true" @click="!processing && closeEditModal()"></div>
+
+        <span class="hidden sm:inline-block sm:align-middle sm:h-screen" aria-hidden="true">&#8203;</span>
+        <div class="relative inline-block align-bottom bg-white rounded-2xl text-left overflow-hidden shadow-xl transform transition-all sm:my-8 sm:align-middle sm:max-w-2xl w-full animate-scale-in">
+
+          <div class="bg-white px-4 pt-5 pb-4 sm:p-6">
+            <h3 class="text-xl font-bold text-gray-900 mb-4 flex items-center gap-2">
+              <span class="text-blue-600">✏️</span> Koreksi Data Planning
+            </h3>
+            
+            <div class="max-h-[60vh] overflow-y-auto pr-2 space-y-6">
+              <div v-for="(act, idx) in editModal.activities" :key="act.activity_id" class="border rounded-xl p-4 bg-gray-50">
+                <div class="flex justify-between items-center mb-3">
+                  <h4 class="font-bold text-gray-800">#{{ idx + 1 }} {{ act.act_name }}</h4>
+                </div>
+                
+                <div class="mb-4">
+                  <label class="block text-xs font-bold text-gray-500 mb-1">Total Workers</label>
+                  <input type="text" v-model="act.manpower" class="w-full border border-gray-300 rounded-lg p-2 text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none">
+                </div>
+
+                <div v-if="act.materials && act.materials.length">
+                  <p class="text-xs font-bold text-gray-500 mb-2">Materials</p>
+                  <div v-for="mat in act.materials" :key="mat.material_id" class="flex items-center gap-3 mb-2">
+                    <span class="flex-1 text-sm text-gray-700 bg-white p-2 border rounded">{{ mat.material_name }}</span>
+                    <div class="w-24">
+                      <input type="number" v-model="mat.qty" class="w-full border border-gray-300 rounded-lg p-2 text-sm text-right focus:ring-2 focus:ring-blue-500 focus:outline-none" placeholder="Qty">
+                    </div>
+                    <span class="w-12 text-xs text-gray-500">{{ mat.uom }}</span>
+                  </div>
+                </div>
+                <div v-else class="text-xs text-gray-400 italic">No materials.</div>
+              </div>
+            </div>
+
+            <div class="mt-4 pt-4 border-t">
+              <label class="block text-sm font-bold text-gray-700 mb-2">Catatan Koreksi (Wajib)</label>
+              <textarea v-model="editModal.notes" rows="2" class="w-full border border-gray-300 rounded-lg p-2 text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none" placeholder="Alasan perubahan data..."></textarea>
+            </div>
+          </div>
+
+          <div class="bg-gray-100 px-4 py-3 sm:px-6 sm:flex sm:flex-row-reverse gap-2">
+            <button type="button" @click="saveDirectRevision" :disabled="processing"
+                    class="w-full inline-flex justify-center rounded-xl border border-transparent shadow-sm px-4 py-2 bg-blue-600 text-base font-medium text-white hover:bg-blue-700 focus:outline-none sm:ml-3 sm:w-auto sm:text-sm disabled:opacity-50">
+              <span v-if="processing">Saving...</span>
+              <span v-else>Simpan Koreksi</span>
+            </button>
+            <button type="button" @click="closeEditModal" :disabled="processing"
+                    class="mt-3 w-full inline-flex justify-center rounded-xl border border-gray-300 shadow-sm px-4 py-2 bg-white text-base font-medium text-gray-700 hover:bg-gray-50 focus:outline-none sm:mt-0 sm:ml-3 sm:w-auto sm:text-sm">
+              Batal
+            </button>
+          </div>
         </div>
       </div>
     </div>
+
   </div>
 </template>
 
 <style scoped>
-@keyframes fade-in {
-  from {
-    opacity: 0;
-    transform: scale(0.95);
-  }
-  to {
-    opacity: 1;
-    transform: scale(1);
-  }
-}
-
-.animate-fade-in {
-  animation: fade-in 0.2s ease-out;
-}
+@keyframes fade-in { from { opacity: 0; } to { opacity: 1; } }
+@keyframes scale-in { from { opacity: 0; transform: scale(0.95); } to { opacity: 1; transform: scale(1); } }
+.animate-fade-in { animation: fade-in 0.2s ease-out; }
+.animate-scale-in { animation: scale-in 0.2s ease-out; }
 </style>

@@ -640,6 +640,13 @@ const getBatchCount = (locationId) => {
           >
             🚚 Perpindahan Barang
           </router-link>
+          <router-link
+            to="/environment-log-list" 
+            class="bg-white hover:bg-gray-50 text-gray-700 font-medium px-5 py-3 rounded-xl transition-all text-sm border-2 border-gray-200 hover:border-teal-500 shadow-sm hover:shadow inline-flex items-center gap-2"
+          >
+            <span class="text-lg">🌡️</span> 
+            Environment Log
+          </router-link>
         </div>
       </div>
 

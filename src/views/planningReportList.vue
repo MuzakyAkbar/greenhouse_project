@@ -26,12 +26,66 @@ const filterDateProduction = ref('')
 const filterDateDamage = ref('') // Filter khusus Damage
 const isRefreshing = ref(false)
 
+// ✅ NEW: Status Filters
+const filterStatusActivity = ref('All')
+const filterStatusPlanning = ref('All')
+const filterStatusProduction = ref('All')
+const filterStatusDamage = ref('All')
+
 // ✅ Ref untuk Approval Map dan Repair
 const approvalRecordMap = ref({})
 const repairRequestsRaw = ref([]) 
+const currentUserApprovalLevel = ref(null) // NEW: Menyimpan level user yang login
+
+// Daftar Status untuk Dropdown (Dipertahankan)
+const statusOptions = [
+    { value: 'All', label: 'Semua Status' },
+    { value: 'onReview', label: '⏳ Waiting Review' },
+    { value: 'needRevision', label: '🔄 Need Revision' },
+    { value: 'approved', label: '✅ Approved' }
+];
+
+// Daftar Status Khusus untuk Production (Dipertahankan)
+const statusOptionsProduction = [
+    ...statusOptions.slice(0, 2), // All, onReview
+    { value: 'needRevisionOrRevision', label: '🔄 Need Revision' }, // Gabungan
+    statusOptions[3] // Approved
+];
+
+// Daftar Status Khusus untuk Damage (Dipertahankan)
+const statusOptionsDamage = [
+    { value: 'All', label: 'Semua Status' },
+    { value: 'onReviewOrWaitingOrPending', label: '⏳ Waiting Review' }, // Gabungan
+    { value: 'needRevision', label: '🔄 Need Revision' },
+    { value: 'approved', label: '✅ Approved' }
+];
+
+// ✅ NEW: Load Approval Level User
+const loadCurrentUserApprovalLevel = async () => {
+    if (!authStore.user?.user_id) return;
+    
+    try {
+        // Ambil level terendah (order tertinggi) yang dimiliki user untuk flow manapun
+        const { data } = await supabase
+            .from('gh_user_approval_level')
+            .select('level_order')
+            .eq('user_id', authStore.user.user_id)
+            .eq('is_active', true)
+            .order('level_order', { ascending: true }) // Ambil level paling rendah (order 1, 2, dst)
+            .limit(1);
+
+        // Jika user memiliki level, set levelnya. Jika tidak, set ke null (atau 0 jika perlu)
+        currentUserApprovalLevel.value = data?.[0]?.level_order || null;
+        console.log('✅ User Approval Level:', currentUserApprovalLevel.value);
+    } catch (error) {
+        console.error('❌ Error loading user approval level:', error);
+        currentUserApprovalLevel.value = null;
+    }
+};
+
 
 // ✅ FUNGSI: Memuat semua level dan status dari gh_approve_record
-// Dimodifikasi untuk menerima prodRecordIds DAN damageRecordIds
+// Modifikasi: Mengambil current_level_order untuk filtering
 const loadAllApprovalRecords = async (prodRecordIds = [], damageRecordIds = []) => {
   const activityRecordIds = [...new Set(activityReportStore.reports.map(r => r.approval_record_id).filter(Boolean))];
   const allRecordIds = [...new Set([...activityRecordIds, ...prodRecordIds, ...damageRecordIds])];
@@ -105,6 +159,8 @@ const fetchRepairRequests = async () => {
 const refreshData = async () => {
   isRefreshing.value = true
   try {
+    await loadCurrentUserApprovalLevel(); // NEW: Load level user dulu
+
     await Promise.all([
       activityReportStore.fetchAll(),
       planningStore.fetchAll(),
@@ -163,9 +219,9 @@ watch(
 const getBatchName = (batchId) => batchStore.batches.find(b => b.batch_id === batchId)?.batch_name || `Batch ${batchId}`
 const getLocationName = (locationId) => locationStore.locations.find(l => l.location_id === locationId)?.location || `Location ${locationId}`
 
-// ================= COMPUTED PROPERTIES =================
+// ================= COMPUTED PROPERTIES (DENGAN FILTER STATUS) =================
 
-// 1. Activity Reports
+// 1. Activity Reports (Logic Filtering Data Dipertahankan)
 const activityReports = computed(() => {
   let reports = activityReportStore.reports.map(report => {
     const recordInfo = report.approval_record_id ? approvalRecordMap.value[report.approval_record_id] : null;
@@ -189,11 +245,16 @@ const activityReports = computed(() => {
     reports = reports.filter(r => r.report_date === filterDate.value);
   }
 
+  // Filter Status
+  if (filterStatusActivity.value !== 'All') {
+      reports = reports.filter(r => r.report_status === filterStatusActivity.value);
+  }
+
   reports.sort((a, b) => new Date(b.report_date) - new Date(a.report_date));
   return reports;
 });
 
-// 2. Planning Reports
+// 2. Planning Reports (Logic Filtering Data Dipertahankan)
 const planningReports = computed(() => {
   let plannings = planningStore.plannings.map(planning => ({
     planning_id: String(planning.planning_id),
@@ -210,11 +271,17 @@ const planningReports = computed(() => {
   if (filterDatePlanning.value) {
     plannings = plannings.filter(p => p.planning_date === filterDatePlanning.value)
   }
+  
+  // Filter Status
+  if (filterStatusPlanning.value !== 'All') {
+      plannings = plannings.filter(p => p.status === filterStatusPlanning.value);
+  }
+  
   plannings.sort((a, b) => Number(b.planning_id) - Number(a.planning_id))
   return plannings
 })
 
-// 3. Production Reports
+// 3. Production Reports (Logic Filtering Data Dipertahankan)
 const productionReports = computed(() => {
   const groupedMap = new Map()
   const allItems = [
@@ -255,14 +322,26 @@ const productionReports = computed(() => {
   });
 
   let result = Array.from(groupedMap.values())
+  
   if (filterDateProduction.value) {
     result = result.filter(r => r.date === filterDateProduction.value)
   }
+  
+  // Filter Status
+  if (filterStatusProduction.value !== 'All') {
+      result = result.filter(r => {
+          if (filterStatusProduction.value === 'needRevisionOrRevision') {
+              return r.status === 'needRevision' || r.status === 'revision';
+          }
+          return r.status === filterStatusProduction.value;
+      });
+  }
+  
   result.sort((a, b) => new Date(b.date) - new Date(a.date))
   return result
 })
 
-// 4. Damage / Repair Reports (Logic asli dipertahankan)
+// 4. Damage / Repair Reports (Logic Filtering Data Dipertahankan)
 const repairRequests = computed(() => {
   let list = repairRequestsRaw.value.map(item => {
     const recordInfo = item.approval_record_id ? approvalRecordMap.value[item.approval_record_id] : null;
@@ -279,11 +358,103 @@ const repairRequests = computed(() => {
   if (filterDateDamage.value) {
     list = list.filter(item => item.repair_date === filterDateDamage.value);
   }
+  
+  // Filter Status
+  if (filterStatusDamage.value !== 'All') {
+      list = list.filter(d => {
+          if (filterStatusDamage.value === 'onReviewOrWaitingOrPending') {
+              return d.status === 'onReview' || d.status === 'Waiting' || d.status === 'pending';
+          }
+          return d.status === filterStatusDamage.value;
+      });
+  }
+  
   return list;
 })
 
-// ================= EVENT HANDLERS =================
+// ✅ NEW: Hitung jumlah laporan/planning yang perlu di-review (HANYA UNTUK USER INI)
+const pendingApprovalCount = computed(() => {
+    const userLevel = currentUserApprovalLevel.value;
+    if (!userLevel) {
+        return { activity: 0, planning: 0, production: 0, damage: 0, total: 0 };
+    }
 
+    const isPendingAndNeedsUserReview = (recordId, overallStatus) => {
+        const record = approvalRecordMap.value[recordId];
+        if (!record) {
+             // Untuk Planning, yang tidak punya approval_record_id, statusnya adalah 'onReview'
+             // Kita asumsikan planning tanpa record ID (draft) tidak perlu review di sini.
+             return false;
+        }
+        
+        // 1. Status harus 'onReview'
+        const statusIsOnReview = overallStatus === 'onReview';
+        
+        // 2. Level saat ini harus sama dengan level user yang login
+        const needsUserLevelReview = record.current_level === userLevel;
+        
+        return statusIsOnReview && needsUserLevelReview;
+    };
+    
+    // --- 1. Activity Reports ---
+    const activityPending = activityReportStore.reports.filter(r => {
+        const status = approvalRecordMap.value[r.approval_record_id]?.overall_status || r.report_status;
+        
+        // Cek apakah perlu direvisi OLEH STAFF (status needRevision, tanpa melihat level)
+        if (status === 'needRevision') return true; 
+        
+        // Cek apakah perlu di-review OLEH APPROVER (user yang login)
+        return isPendingAndNeedsUserReview(r.approval_record_id, status);
+    }).length;
+
+    // --- 2. Planning Reports (Planning memiliki status 'onReview' tanpa approval record sampai disubmit) ---
+    // Di sini kita asumsikan Planning (gh_planning_report) yang berstatus 'onReview' dan memiliki approval_record_id
+    const planningPending = planningStore.plannings.filter(p => {
+        const recordId = p.approval_record_id;
+        const status = p.status;
+        
+        // Planning hanya punya status 'onReview'
+        return isPendingAndNeedsUserReview(recordId, status);
+    }).length;
+
+    // --- 3. Production Reports ---
+    const productionPending = productionReports.value.filter(p => {
+        const status = p.status;
+        
+        // Cek apakah perlu direvisi OLEH STAFF (status needRevision/revision, tanpa melihat level)
+        if (status === 'needRevision' || status === 'revision') return true; 
+        
+        // Cek apakah perlu di-review OLEH APPROVER
+        return isPendingAndNeedsUserReview(p.record_id, status);
+    }).length;
+
+    // --- 4. Damage / Repair Reports ---
+    const damagePending = repairRequestsRaw.value.filter(d => {
+        const recordId = d.approval_record_id;
+        const status = approvalRecordMap.value[recordId]?.overall_status || d.status;
+        
+        // Cek apakah perlu direvisi OLEH STAFF (status needRevision, tanpa melihat level)
+        if (status === 'needRevision') return true; 
+        
+        // Status 'onReview', 'Waiting', 'pending' dianggap sebagai 'onReview' untuk filtering
+        const simplifiedStatus = (status === 'Waiting' || status === 'pending') ? 'onReview' : status;
+        
+        // Cek apakah perlu di-review OLEH APPROVER
+        return isPendingAndNeedsUserReview(recordId, simplifiedStatus);
+    }).length;
+
+
+    return {
+        activity: activityPending,
+        planning: planningPending,
+        production: productionPending,
+        damage: damagePending,
+        total: activityPending + planningPending + productionPending + damagePending
+    };
+});
+
+// ================= EVENT HANDLERS (Dipertahankan) =================
+// ... (Bagian ini tidak diubah) ...
 const handleReportClick = (report) => {
   let routeName = 'reportActivityReview'
   if (report.report_status === 'needRevision') routeName = 'reportActivityEdit'
@@ -291,11 +462,9 @@ const handleReportClick = (report) => {
   router.push({ name: routeName, params: { report_id: report.report_id } })
 }
 
-// planningReportList.vue (Baris 242)
 const handlePlanningClick = (planning) => {
   let routeName = 'planningActivityReview'
   if (planning.status === 'approved') routeName = 'planningActivityView'
-  // 👇 Di sini kamu mengirim 'planning_id'
   router.push({ name: routeName, params: { planning_id: planning.planning_id } })
 }
 
@@ -306,7 +475,6 @@ const handleProductionClick = (item) => {
   router.push({ name: routeName, params: { record_id: String(item.record_id) } });
 }
 
-// ✅ Handle Repair Click (Logic asli)
 const handleRepairClick = (item) => {
    if (!item) return
    if (!item.approval_record_id) {
@@ -323,7 +491,7 @@ const handleRepairClick = (item) => {
    }
 }
 
-// Helpers Styles
+// Helpers Styles (Dipertahankan)
 const getPlanningStatusText = (status) => status === 'approved' ? '✅ Approved' : '⏳ Waiting Review'
 const getPlanningStatusColorClass = (status) => status === 'approved' ? 'bg-green-100 text-green-800' : 'bg-yellow-100 text-yellow-800'
 
@@ -376,18 +544,42 @@ const getCurrentTime = () => new Date().toLocaleTimeString('id-ID')
           </div>
 
           <div class="hidden md:flex gap-3">
-            <button @click="selectedReport = 'activity'" :class="selectedReport === 'activity' ? 'bg-gradient-to-r from-[#0071f3] to-[#0060d1] text-white shadow-md' : 'bg-white text-gray-700 border-2 border-gray-200 hover:border-[#0071f3]'" class="px-5 py-2.5 rounded-lg font-semibold transition-all text-sm hover:shadow">📋 Activity</button>
-            <button @click="selectedReport = 'planning'" :class="selectedReport === 'planning' ? 'bg-gradient-to-r from-[#0071f3] to-[#0060d1] text-white shadow-md' : 'bg-white text-gray-700 border-2 border-gray-200 hover:border-[#0071f3]'" class="px-5 py-2.5 rounded-lg font-semibold transition-all text-sm hover:shadow">📅 Planning</button>
-            <button @click="selectedReport = 'production'" :class="selectedReport === 'production' ? 'bg-gradient-to-r from-[#0071f3] to-[#0060d1] text-white shadow-md' : 'bg-white text-gray-700 border-2 border-gray-200 hover:border-[#0071f3]'" class="px-5 py-2.5 rounded-lg font-semibold transition-all text-sm hover:shadow">📈 Production</button>
-            <button @click="selectedReport = 'damage'" :class="selectedReport === 'damage' ? 'bg-gradient-to-r from-[#0071f3] to-[#0060d1] text-white shadow-md' : 'bg-white text-gray-700 border-2 border-gray-200 hover:border-[#0071f3]'" class="px-5 py-2.5 rounded-lg font-semibold transition-all text-sm hover:shadow">🌱 Damage</button>
+            <button @click="selectedReport = 'activity'" :class="selectedReport === 'activity' ? 'bg-gradient-to-r from-[#0071f3] to-[#0060d1] text-white shadow-md' : 'bg-white text-gray-700 border-2 border-gray-200 hover:border-[#0071f3]'" class="px-5 py-2.5 rounded-lg font-semibold transition-all text-sm hover:shadow relative">
+                📋 Activity
+                <span v-if="pendingApprovalCount.activity > 0" class="absolute top-[-5px] right-[-5px] w-5 h-5 bg-red-500 text-white rounded-full flex items-center justify-center text-xs font-bold">{{ pendingApprovalCount.activity }}</span>
+            </button>
+            <button @click="selectedReport = 'planning'" :class="selectedReport === 'planning' ? 'bg-gradient-to-r from-[#0071f3] to-[#0060d1] text-white shadow-md' : 'bg-white text-gray-700 border-2 border-gray-200 hover:border-[#0071f3]'" class="px-5 py-2.5 rounded-lg font-semibold transition-all text-sm hover:shadow relative">
+                📅 Planning
+                <span v-if="pendingApprovalCount.planning > 0" class="absolute top-[-5px] right-[-5px] w-5 h-5 bg-red-500 text-white rounded-full flex items-center justify-center text-xs font-bold">{{ pendingApprovalCount.planning }}</span>
+            </button>
+            <button @click="selectedReport = 'production'" :class="selectedReport === 'production' ? 'bg-gradient-to-r from-[#0071f3] to-[#0060d1] text-white shadow-md' : 'bg-white text-gray-700 border-2 border-gray-200 hover:border-[#0071f3]'" class="px-5 py-2.5 rounded-lg font-semibold transition-all text-sm hover:shadow relative">
+                📈 Production
+                <span v-if="pendingApprovalCount.production > 0" class="absolute top-[-5px] right-[-5px] w-5 h-5 bg-red-500 text-white rounded-full flex items-center justify-center text-xs font-bold">{{ pendingApprovalCount.production }}</span>
+            </button>
+            <button @click="selectedReport = 'damage'" :class="selectedReport === 'damage' ? 'bg-gradient-to-r from-[#0071f3] to-[#0060d1] text-white shadow-md' : 'bg-white text-gray-700 border-2 border-gray-200 hover:border-[#0071f3]'" class="px-5 py-2.5 rounded-lg font-semibold transition-all text-sm hover:shadow relative">
+                🌱 Damage
+                <span v-if="pendingApprovalCount.damage > 0" class="absolute top-[-5px] right-[-5px] w-5 h-5 bg-red-500 text-white rounded-full flex items-center justify-center text-xs font-bold">{{ pendingApprovalCount.damage }}</span>
+            </button>
           </div>
         </div>
 
         <div class="flex md:hidden gap-2 mt-4 overflow-x-auto pb-2 scrollbar-hide">
-          <button @click="selectedReport = 'activity'" :class="selectedReport === 'activity' ? 'bg-gradient-to-r from-[#0071f3] to-[#0060d1] text-white shadow-md' : 'bg-white text-gray-700 border-2 border-gray-200'" class="flex-shrink-0 px-4 py-2.5 rounded-lg font-semibold transition-all text-sm">📋 Activity</button>
-          <button @click="selectedReport = 'planning'" :class="selectedReport === 'planning' ? 'bg-gradient-to-r from-[#0071f3] to-[#0060d1] text-white shadow-md' : 'bg-white text-gray-700 border-2 border-gray-200'" class="flex-shrink-0 px-4 py-2.5 rounded-lg font-semibold transition-all text-sm">📅 Planning</button>
-          <button @click="selectedReport = 'production'" :class="selectedReport === 'production' ? 'bg-gradient-to-r from-[#0071f3] to-[#0060d1] text-white shadow-md' : 'bg-white text-gray-700 border-2 border-gray-200'" class="flex-shrink-0 px-4 py-2.5 rounded-lg font-semibold transition-all text-sm">📈 Production</button>
-          <button @click="selectedReport = 'damage'" :class="selectedReport === 'damage' ? 'bg-gradient-to-r from-[#0071f3] to-[#0060d1] text-white shadow-md' : 'bg-white text-gray-700 border-2 border-gray-200'" class="flex-shrink-0 px-4 py-2.5 rounded-lg font-semibold transition-all text-sm">🌱 Damage</button>
+          <button @click="selectedReport = 'activity'" :class="selectedReport === 'activity' ? 'bg-gradient-to-r from-[#0071f3] to-[#0060d1] text-white shadow-md' : 'bg-white text-gray-700 border-2 border-gray-200'" class="flex-shrink-0 px-4 py-2.5 rounded-lg font-semibold transition-all text-sm relative">
+              📋 Activity
+              <span v-if="pendingApprovalCount.activity > 0" class="absolute top-[-5px] right-[-5px] w-5 h-5 bg-red-500 text-white rounded-full flex items-center justify-center text-xs font-bold">{{ pendingApprovalCount.activity }}</span>
+          </button>
+          <button @click="selectedReport = 'planning'" :class="selectedReport === 'planning' ? 'bg-gradient-to-r from-[#0071f3] to-[#0060d1] text-white shadow-md' : 'bg-white text-gray-700 border-2 border-gray-200'" class="flex-shrink-0 px-4 py-2.5 rounded-lg font-semibold transition-all text-sm relative">
+              📅 Planning
+              <span v-if="pendingApprovalCount.planning > 0" class="absolute top-[-5px] right-[-5px] w-5 h-5 bg-red-500 text-white rounded-full flex items-center justify-center text-xs font-bold">{{ pendingApprovalCount.planning }}</span>
+          </button>
+          <button @click="selectedReport = 'production'" :class="selectedReport === 'production' ? 'bg-gradient-to-r from-[#0071f3] to-[#0060d1] text-white shadow-md' : 'bg-white text-gray-700 border-2 border-gray-200'" class="flex-shrink-0 px-4 py-2.5 rounded-lg font-semibold transition-all text-sm relative">
+              📈 Production
+              <span v-if="pendingApprovalCount.production > 0" class="absolute top-[-5px] right-[-5px] w-5 h-5 bg-red-500 text-white rounded-full flex items-center justify-center text-xs font-bold">{{ pendingApprovalCount.production }}</span>
+          </button>
+          <button @click="selectedReport = 'damage'" :class="selectedReport === 'damage' ? 'bg-gradient-to-r from-[#0071f3] to-[#0060d1] text-white shadow-md' : 'bg-white text-gray-700 border-2 border-gray-200'" class="flex-shrink-0 px-4 py-2.5 rounded-lg font-semibold transition-all text-sm relative">
+              🌱 Damage
+              <span v-if="pendingApprovalCount.damage > 0" class="absolute top-[-5px] right-[-5px] w-5 h-5 bg-red-500 text-white rounded-full flex items-center justify-center text-xs font-bold">{{ pendingApprovalCount.damage }}</span>
+          </button>
         </div>
       </div>
     </div>
@@ -407,11 +599,17 @@ const getCurrentTime = () => new Date().toLocaleTimeString('id-ID')
           <div class="bg-white rounded-2xl border-2 border-gray-100 shadow-sm p-5">
             <div class="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
               <div class="flex items-center gap-3 flex-wrap">
-                <label class="text-sm font-semibold text-gray-700">Filter Tanggal:</label>
+                <label class="text-sm font-semibold text-gray-700">Tanggal:</label>
                 <div class="flex items-center gap-2 px-4 py-2 border-2 border-[#0071f3] rounded-lg bg-gray-50">
                   <svg class="w-5 h-5 text-[#0071f3]" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512" fill="currentColor"><path d="M128 0c17.7 0 32 14.3 32 32l0 32 128 0 0-32c0-17.7 14.3-32 32-32s32 14.3 32 32l0 32 48 0c26.5 0 48 21.5 48 48l0 48L0 160l0-48C0 85.5 21.5 64 48 64l48 0 0-32c0-17.7 14.3-32 32-32zM0 192l448 0 0 272c0 26.5-21.5 48-48 48L48 512c-26.5 0-48-21.5-48-48L0 192z"/></svg>
                   <input type="date" v-model="filterDate" class="outline-none text-gray-700 bg-transparent font-medium" />
                 </div>
+                
+                <label class="text-sm font-semibold text-gray-700">Status:</label>
+                <select v-model="filterStatusActivity" class="px-4 py-2 border-2 border-[#0071f3] rounded-lg bg-gray-50 outline-none cursor-pointer text-gray-700 font-medium">
+                    <option v-for="option in statusOptions" :key="option.value" :value="option.value">{{ option.label }}</option>
+                </select>
+                
                 <button @click="refreshData" :disabled="isRefreshing" class="px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg transition flex items-center gap-2 font-semibold disabled:opacity-50 disabled:cursor-not-allowed">
                   <svg class="w-5 h-5" :class="{ 'animate-spin': isRefreshing }" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" fill="currentColor"><path d="M142.9 142.9c-17.5 17.5-30.1 38-37.8 59.8c-5.9 16.7-24.2 25.4-40.8 19.5s-25.4-24.2-19.5-40.8C55.6 150.7 73.2 122 97.6 97.6c87.2-87.2 228.3-87.5 315.8-1L455 55c6.9-6.9 17.2-8.9 26.2-5.2s14.8 12.5 14.8 22.2l0 128c0 13.3-10.7 24-24 24l-8.4 0c0 0 0 0 0 0L344 224c-9.7 0-18.5-5.8-22.2-14.8s-1.7-19.3 5.2-26.2l41.1-41.1c-62.6-61.5-163.1-61.2-225.3 1zM16 312c0-13.3 10.7-24 24-24l7.6 0 .7 0L168 288c9.7 0 18.5 5.8 22.2 14.8s1.7 19.3-5.2 26.2l-41.1 41.1c62.6 61.5 163.1 61.2 225.3-1c17.5-17.5 30.1-38 37.8-59.8c5.9-16.7 24.2-25.4 40.8-19.5s25.4 24.2 19.5 40.8c-10.8 30.6-28.4 59.3-52.9 83.8c-87.2 87.2-228.3 87.5-315.8 1L57 457c-6.9 6.9-17.2 8.9-26.2 5.2S16 449.7 16 440l0-119.6 0-.7 0-7.6z"/></svg>
                   {{ isRefreshing ? 'Refreshing...' : 'Refresh' }}
@@ -421,6 +619,10 @@ const getCurrentTime = () => new Date().toLocaleTimeString('id-ID')
                 <svg class="w-5 h-5" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512" fill="currentColor"><path d="M256 80c0-17.7-14.3-32-32-32s-32 14.3-32 32l0 144L48 224c-17.7 0-32 14.3-32 32s14.3 32 32 32l144 0 0 144c0 17.7 14.3 32 32 32s32-14.3 32-32l0-144 144 0c17.7 0 32-14.3 32-32s-14.3-32-32-32l-144 0 0-144z"/></svg>
                 Tambah Laporan Baru
               </RouterLink>
+            </div>
+            <div v-if="pendingApprovalCount.activity > 0" class="mt-4 p-3 bg-red-50 border border-red-200 rounded-lg flex items-center gap-3">
+                <svg class="w-6 h-6 text-red-500 flex-shrink-0" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" fill="currentColor"><path d="M256 32c142.2 0 256 114.6 256 256c0 142.2-114.6 256-256 256C114.6 512 0 397.4 0 256C0 114.6 114.6 32 256 32zm0 88c-13.3 0-24 10.7-24 24l0 128c0 13.3 10.7 24 24 24s24-10.7 24-24l0-128c0-13.3-10.7-24-24-24zm32 216a32 32 0 1 0-64 0 32 32 0 1 0 64 0z"/></svg>
+                <p class="text-sm font-semibold text-red-700">Terdapat **{{ pendingApprovalCount.activity }}** Laporan Aktivitas yang perlu di-*review* atau direvisi!</p>
             </div>
           </div>
         </div>
@@ -482,11 +684,17 @@ const getCurrentTime = () => new Date().toLocaleTimeString('id-ID')
           <div class="bg-white rounded-2xl border-2 border-gray-100 shadow-sm p-5">
             <div class="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
               <div class="flex items-center gap-3 flex-wrap">
-                 <label class="text-sm font-semibold text-gray-700">Filter Tanggal:</label>
+                 <label class="text-sm font-semibold text-gray-700">Tanggal:</label>
                  <div class="flex items-center gap-2 px-4 py-2 border-2 border-[#0071f3] rounded-lg bg-gray-50">
                     <svg class="w-5 h-5 text-[#0071f3]" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512" fill="currentColor"><path d="M128 0c17.7 0 32 14.3 32 32l0 32 128 0 0-32c0-17.7 14.3-32 32-32s32 14.3 32 32l0 32 48 0c26.5 0 48 21.5 48 48l0 48L0 160l0-48C0 85.5 21.5 64 48 64l48 0 0-32c0-17.7 14.3-32 32-32zM0 192l448 0 0 272c0 26.5-21.5 48-48 48L48 512c-26.5 0-48-21.5-48-48L0 192z"/></svg>
                     <input type="date" v-model="filterDatePlanning" class="outline-none text-gray-700 bg-transparent font-medium"/>
                  </div>
+                 
+                 <label class="text-sm font-semibold text-gray-700">Status:</label>
+                 <select v-model="filterStatusPlanning" class="px-4 py-2 border-2 border-[#0071f3] rounded-lg bg-gray-50 outline-none cursor-pointer text-gray-700 font-medium">
+                     <option v-for="option in statusOptions" :key="option.value" :value="option.value">{{ option.label }}</option>
+                 </select>
+                 
                  <button @click="refreshData" :disabled="isRefreshing" class="px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg transition flex items-center gap-2 font-semibold disabled:opacity-50 disabled:cursor-not-allowed">
                     <svg class="w-5 h-5" :class="{ 'animate-spin': isRefreshing }" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" fill="currentColor"><path d="M142.9 142.9c-17.5 17.5-30.1 38-37.8 59.8c-5.9 16.7-24.2 25.4-40.8 19.5s-25.4-24.2-19.5-40.8C55.6 150.7 73.2 122 97.6 97.6c87.2-87.2 228.3-87.5 315.8-1L455 55c6.9-6.9 17.2-8.9 26.2-5.2s14.8 12.5 14.8 22.2l0 128c0 13.3-10.7 24-24 24l-8.4 0c0 0 0 0 0 0L344 224c-9.7 0-18.5-5.8-22.2-14.8s-1.7-19.3 5.2-26.2l41.1-41.1c-62.6-61.5-163.1-61.2-225.3 1zM16 312c0-13.3 10.7-24 24-24l7.6 0 .7 0L168 288c9.7 0 18.5 5.8 22.2 14.8s1.7 19.3-5.2 26.2l-41.1 41.1c62.6 61.5 163.1 61.2 225.3-1c17.5-17.5 30.1-38 37.8-59.8c5.9-16.7 24.2-25.4 40.8-19.5s25.4 24.2 19.5 40.8c-10.8 30.6-28.4 59.3-52.9 83.8c-87.2 87.2-228.3 87.5-315.8 1L57 457c-6.9 6.9-17.2 8.9-26.2 5.2S16 449.7 16 440l0-119.6 0-.7 0-7.6z"/></svg>
                     {{ isRefreshing ? 'Refreshing...' : 'Refresh' }}
@@ -496,6 +704,10 @@ const getCurrentTime = () => new Date().toLocaleTimeString('id-ID')
                  <svg class="w-5 h-5" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512" fill="currentColor"><path d="M256 80c0-17.7-14.3-32-32-32s-32 14.3-32 32l0 144L48 224c-17.7 0-32 14.3-32 32s14.3 32 32 32l144 0 0 144c0 17.7 14.3 32 32 32s32-14.3 32-32l0-144 144 0c17.7 0 32-14.3 32-32s-14.3-32-32-32l-144 0 0-144z"/></svg>
                  Tambah Planning Baru
               </RouterLink>
+            </div>
+             <div v-if="pendingApprovalCount.planning > 0" class="mt-4 p-3 bg-red-50 border border-red-200 rounded-lg flex items-center gap-3">
+                <svg class="w-6 h-6 text-red-500 flex-shrink-0" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" fill="currentColor"><path d="M256 32c142.2 0 256 114.6 256 256c0 142.2-114.6 256-256 256C114.6 512 0 397.4 0 256C0 114.6 114.6 32 256 32zm0 88c-13.3 0-24 10.7-24 24l0 128c0 13.3 10.7 24 24 24s24-10.7 24-24l0-128c0-13.3-10.7-24-24-24zm32 216a32 32 0 1 0-64 0 32 32 0 1 0 64 0z"/></svg>
+                <p class="text-sm font-semibold text-red-700">Terdapat **{{ pendingApprovalCount.planning }}** Planning yang perlu di-*review*!</p>
             </div>
           </div>
         </div>
@@ -558,12 +770,21 @@ const getCurrentTime = () => new Date().toLocaleTimeString('id-ID')
            <h2 class="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-3">Filter</h2>
            <div class="bg-white rounded-2xl border-2 border-gray-100 shadow-sm p-5">
              <div class="flex items-center gap-3 flex-wrap">
-               <label class="text-sm font-semibold text-gray-700">Filter Tanggal:</label>
+               <label class="text-sm font-semibold text-gray-700">Tanggal:</label>
                <div class="flex items-center gap-2 px-4 py-2 border-2 border-[#0071f3] rounded-lg bg-gray-50">
                    <svg class="w-5 h-5 text-[#0071f3]" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512" fill="currentColor"><path d="M128 0c17.7 0 32 14.3 32 32l0 32 128 0 0-32c0-17.7 14.3-32 32-32s32 14.3 32 32l0 32 48 0c26.5 0 48 21.5 48 48l0 48L0 160l0-48C0 85.5 21.5 64 48 64l48 0 0-32c0-17.7 14.3-32 32-32zM0 192l448 0 0 272c0 26.5-21.5 48-48 48L48 512c-26.5 0-48-21.5-48-48L0 192z"/></svg>
                    <input type="date" v-model="filterDateProduction" class="outline-none text-gray-700 bg-transparent font-medium"/>
                </div>
+               
+               <label class="text-sm font-semibold text-gray-700">Status:</label>
+               <select v-model="filterStatusProduction" class="px-4 py-2 border-2 border-[#0071f3] rounded-lg bg-gray-50 outline-none cursor-pointer text-gray-700 font-medium">
+                   <option v-for="option in statusOptionsProduction" :key="option.value" :value="option.value">{{ option.label }}</option>
+               </select>
              </div>
+             <div v-if="pendingApprovalCount.production > 0" class="mt-4 p-3 bg-red-50 border border-red-200 rounded-lg flex items-center gap-3">
+                <svg class="w-6 h-6 text-red-500 flex-shrink-0" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" fill="currentColor"><path d="M256 32c142.2 0 256 114.6 256 256c0 142.2-114.6 256-256 256C114.6 512 0 397.4 0 256C0 114.6 114.6 32 256 32zm0 88c-13.3 0-24 10.7-24 24l0 128c0 13.3 10.7 24 24 24s24-10.7 24-24l0-128c0-13.3-10.7-24-24-24zm32 216a32 32 0 1 0-64 0 32 32 0 1 0 64 0z"/></svg>
+                <p class="text-sm font-semibold text-red-700">Terdapat **{{ pendingApprovalCount.production }}** Laporan Produksi & Penjualan yang perlu di-*review* atau direvisi!</p>
+            </div>
            </div>
         </div>
 
@@ -632,15 +853,25 @@ const getCurrentTime = () => new Date().toLocaleTimeString('id-ID')
           <h2 class="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-3">Filter Repair Requests</h2>
           <div class="bg-white rounded-2xl border-2 border-gray-100 shadow-sm p-5">
             <div class="flex items-center gap-3 flex-wrap">
-              <label class="text-sm font-semibold text-gray-700">Filter Tanggal:</label>
+              <label class="text-sm font-semibold text-gray-700">Tanggal:</label>
               <div class="flex items-center gap-2 px-4 py-2 border-2 border-[#0071f3] rounded-lg bg-gray-50">
                 <svg class="w-5 h-5 text-[#0071f3]" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512" fill="currentColor"><path d="M128 0c17.7 0 32 14.3 32 32l0 32 128 0 0-32c0-17.7 14.3-32 32-32s32 14.3 32 32l0 32 48 0c26.5 0 48 21.5 48 48l0 48L0 160l0-48C0 85.5 21.5 64 48 64l48 0 0-32c0-17.7 14.3-32 32-32zM0 192l448 0 0 272c0 26.5-21.5 48-48 48L48 512c-26.5 0-48-21.5-48-48L0 192z"/></svg>
                 <input type="date" v-model="filterDateDamage" class="outline-none text-gray-700 bg-transparent font-medium" />
               </div>
+              
+              <label class="text-sm font-semibold text-gray-700">Status:</label>
+              <select v-model="filterStatusDamage" class="px-4 py-2 border-2 border-[#0071f3] rounded-lg bg-gray-50 outline-none cursor-pointer text-gray-700 font-medium">
+                  <option v-for="option in statusOptionsDamage" :key="option.value" :value="option.value">{{ option.label }}</option>
+              </select>
+              
               <button @click="refreshData" class="px-4 py-2 bg-gray-100 hover:bg-gray-200 rounded-lg text-sm font-bold flex items-center gap-2 text-gray-700">
                   <svg class="w-5 h-5" :class="{ 'animate-spin': isRefreshing }" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" fill="currentColor"><path d="M142.9 142.9c-17.5 17.5-30.1 38-37.8 59.8c-5.9 16.7-24.2 25.4-40.8 19.5s-25.4-24.2-19.5-40.8C55.6 150.7 73.2 122 97.6 97.6c87.2-87.2 228.3-87.5 315.8-1L455 55c6.9-6.9 17.2-8.9 26.2-5.2s14.8 12.5 14.8 22.2l0 128c0 13.3-10.7 24-24 24l-8.4 0c0 0 0 0 0 0L344 224c-9.7 0-18.5-5.8-22.2-14.8s-1.7-19.3 5.2-26.2l41.1-41.1c-62.6-61.5-163.1-61.2-225.3 1zM16 312c0-13.3 10.7-24 24-24l7.6 0 .7 0L168 288c9.7 0 18.5 5.8 22.2 14.8s1.7 19.3-5.2 26.2l-41.1 41.1c62.6 61.5 163.1 61.2 225.3-1c17.5-17.5 30.1-38 37.8-59.8c5.9-16.7 24.2-25.4 40.8-19.5s25.4 24.2 19.5 40.8c-10.8 30.6-28.4 59.3-52.9 83.8c-87.2 87.2-228.3 87.5-315.8 1L57 457c-6.9 6.9-17.2 8.9-26.2 5.2S16 449.7 16 440l0-119.6 0-.7 0-7.6z"/></svg>
                   Refresh
               </button>
+            </div>
+             <div v-if="pendingApprovalCount.damage > 0" class="mt-4 p-3 bg-red-50 border border-red-200 rounded-lg flex items-center gap-3">
+                <svg class="w-6 h-6 text-red-500 flex-shrink-0" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" fill="currentColor"><path d="M256 32c142.2 0 256 114.6 256 256c0 142.2-114.6 256-256 256C114.6 512 0 397.4 0 256C0 114.6 114.6 32 256 32zm0 88c-13.3 0-24 10.7-24 24l0 128c0 13.3 10.7 24 24 24s24-10.7 24-24l0-128c0-13.3-10.7-24-24-24zm32 216a32 32 0 1 0-64 0 32 32 0 1 0 64 0z"/></svg>
+                <p class="text-sm font-semibold text-red-700">Terdapat **{{ pendingApprovalCount.damage }}** Permintaan Perbaikan yang perlu di-*review* atau direvisi!</p>
             </div>
           </div>
         </div>
@@ -694,10 +925,10 @@ const getCurrentTime = () => new Date().toLocaleTimeString('id-ID')
 
       <footer class="text-center py-10 mt-8 border-t border-gray-200">
         <div class="flex items-center justify-center gap-2 mb-2">
-          <span class="text-2xl">🌱</span>
-          <p class="text-gray-400 font-bold text-sm">GREENHOUSE</p>
+          <span class="text-2xl">🥔</span>
+          <p class="text-gray-400 font-bold text-sm">POTATO GROW</p>
         </div>
-        <p class="text-gray-400 text-xs">© 2025 All Rights Reserved</p>
+        <p class="text-gray-400 text-xs">© 2025 Semua Hak Cipta Dilindungi</p>
       </footer>
     </div>
   </div>

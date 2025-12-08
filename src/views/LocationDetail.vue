@@ -2,6 +2,7 @@
 import { ref, onMounted, computed } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import PotatoProgressBar from '@/components/PotatoProgressBar.vue'
+import DamageRepairModal from '@/components/DamageRepairModal.vue' // Tambahkan modal jika perlu fungsi perbaikan
 import {
   Chart,
   LineController,
@@ -38,13 +39,17 @@ import { supabase } from '@/lib/supabase'
 const router = useRouter()
 const route = useRoute()
 
+// --- PERBAIKAN: Parsing ID agar lebih aman (bisa baca :id atau :location_id) ---
 const locationId = computed(() => {
-  // Router menggunakan 'location_id', bukan 'id'
-  const id = parseInt(route.params.location_id)
-  console.log('Location ID from route:', route.params.location_id, 'Parsed:', id)
+  const rawId = route.params.location_id || route.params.id
+  const id = parseInt(rawId)
+  console.log('Location ID Parsed:', id)
   return id
 })
+// -----------------------------------------------------------------------------
+
 const locationInfo = ref(null)
+const environmentData = ref(null) 
 const batchList = ref([])
 
 // Data ringkasan
@@ -57,26 +62,12 @@ const summary = ref({
   pendapatan: 0,
 })
 
-// Data untuk tingkat keberhasilan
+// Data untuk tingkat keberhasilan (Diperbarui dengan detail kerusakan dan G2)
 const successRate = ref({
-  planlet: {
-    total: 0,
-    damaged: 0,
-    success: 0,
-    percentage: 0
-  },
-  g0: {
-    total: 0,
-    damaged: 0,
-    success: 0,
-    percentage: 0
-  },
-  g1: {
-    total: 0,
-    damaged: 0,
-    success: 0,
-    percentage: 0
-  }
+  planlet: { total: 0, kuning: 0, kutilang: 0, busuk: 0, damaged: 0, dead: 0, success: 0, percentage: 0 },
+  g0: { total: 0, kuning: 0, kutilang: 0, busuk: 0, damaged: 0, dead: 0, success: 0, percentage: 0 },
+  g1: { total: 0, kuning: 0, kutilang: 0, busuk: 0, damaged: 0, dead: 0, success: 0, percentage: 0 },
+  g2: { total: 0, kuning: 0, kutilang: 0, busuk: 0, damaged: 0, dead: 0, success: 0, percentage: 0 }
 })
 
 // Data untuk charts
@@ -86,20 +77,83 @@ const chartData = ref({
   penjualanChart: null
 })
 
+// --- State Modal untuk Perbaikan (Disinkronkan dari BatchDetail) ---
+const isRepairModalOpen = ref(false)
+const selectedPhaseForRepair = ref(null)
+
+const openRepairModal = (phase) => {
+  selectedPhaseForRepair.value = phase
+  isRepairModalOpen.value = true
+}
+
+const closeRepairModal = () => {
+  isRepairModalOpen.value = false
+  selectedPhaseForRepair.value = null
+}
+
+const handleRepairSuccess = async () => {
+  closeRepairModal()
+  await loadProductionData() // Refresh data setelah perbaikan
+}
+// -------------------------------------------------------------------
+
+// Helper function untuk normalize phase name (Disalin dari BatchDetail)
+const normalizePhase = (phaseName) => {
+  const phase = phaseName?.toLowerCase() || '';
+  
+  if (phase.includes('planlet')) return 'Planlet';
+  if (phase.includes('g0')) return 'G0';
+  if (phase === 'g1' || phase.includes('g1')) return 'G1';
+  if (phase === 'g2' || phase.includes('g2')) return 'G2';
+  
+  return null; 
+}
+
+// Helper untuk mendapatkan warna gradient per fase (Disalin dari BatchDetail)
+const getPhaseColors = (phaseKey) => {
+    // Warna Cokelat/Krem dari gambar referensi (Potato/Kartu)
+    const BROWN_START = '#D4A574'; 
+    const BROWN_END = '#B88A5C';
+
+    // Warna Kuning/Emas untuk tombol Repair (dari gambar referensi)
+    const REPAIR_BUTTON_BG = '#FFC107'; 
+    const REPAIR_BUTTON_HOVER = '#FFA000';
+    
+    // Warna untuk progress bar, menggunakan gradient cokelat/krem sesuai gambar
+    switch (phaseKey) {
+        case 'planlet':
+        case 'g0':
+        case 'g1':
+        case 'g2':
+            return { 
+                start: BROWN_START, 
+                end: BROWN_END,
+                button_bg: REPAIR_BUTTON_BG,
+                button_hover: REPAIR_BUTTON_HOVER
+            };
+        default:
+            return { 
+                start: BROWN_START, 
+                end: BROWN_END,
+                button_bg: REPAIR_BUTTON_BG,
+                button_hover: REPAIR_BUTTON_HOVER
+            };
+    }
+}
+
 onMounted(async () => {
-  // Validasi locationId sebelum load data
   if (isNaN(locationId.value)) {
-    console.error('Invalid location ID:', route.params.id)
+    console.error('Invalid location ID. Route params:', route.params)
     return
   }
   
   await loadLocationData()
+  await loadEnvironmentData() 
   await loadProductionData()
   await initCharts()
 })
 
 const loadLocationData = async () => {
-  // Ambil info lokasi
   const { data: locData } = await supabase
     .from("gh_location")
     .select("*")
@@ -108,112 +162,129 @@ const loadLocationData = async () => {
 
   locationInfo.value = locData
 
-  // Ambil batch di lokasi ini
   const { data: batchData } = await supabase
     .from("gh_batch")
-    .select("*")
+    .select("batch_id, batch_name, tanggal_mulai") // Ambil detail batch
     .eq("location_id", locationId.value)
 
   batchList.value = batchData || []
 }
 
 const loadProductionData = async () => {
-  // Ambil data produksi per lokasi
   const { data: productionData } = await supabase
     .from("gh_data_production")
     .select("production_type, qty")
     .eq("location_id", locationId.value)
 
-  // Ambil data kerusakan
-  const { data: damageData } = await supabase
-    .from("gh_type_damage")
-    .select("kuning, kutilang, busuk, report_id")
-    .eq("status", "approved")
-
-  // Ambil data report untuk lokasi ini
+  // 1. Ambil semua report approved di lokasi ini
   const { data: reportData } = await supabase
     .from("gh_report")
-    .select("report_id, phase, location_id, batch_id")
+    .select(`
+      report_id, 
+      report_status,
+      gh_phase!inner(phase_name)
+    `)
     .eq("report_status", "approved")
     .eq("location_id", locationId.value)
 
+  // 2. Ambil kerusakan NETT (sudah dikurangi perbaikan) dari gh_damage_summary
+  let damageSummaryData = null
+  if (reportData && reportData.length > 0) {
+    const approvedReportIds = reportData.map(r => r.report_id)
+    const { data } = await supabase
+      .from("gh_damage_summary")
+      .select("kuning_nett, kutilang_nett, busuk_nett, report_id")
+      .in("report_id", approvedReportIds)
+    damageSummaryData = data
+  }
+
+
+  // Reset dan Inisialisasi
+  summary.value = {
+    totalPlanlet: 0,
+    g0Terjual: 0,
+    g0Diproduksi: 0,
+    g2Diproduksi: 0,
+    g2Terjual: 0,
+    pendapatan: 0,
+  }
+
+  successRate.value = {
+    planlet: { total: 0, kuning: 0, kutilang: 0, busuk: 0, damaged: 0, dead: 0, success: 0, percentage: 0 },
+    g0: { total: 0, kuning: 0, kutilang: 0, busuk: 0, damaged: 0, dead: 0, success: 0, percentage: 0 },
+    g1: { total: 0, kuning: 0, kutilang: 0, busuk: 0, damaged: 0, dead: 0, success: 0, percentage: 0 },
+    g2: { total: 0, kuning: 0, kutilang: 0, busuk: 0, damaged: 0, dead: 0, success: 0, percentage: 0 }
+  }
+
+
+  // A. Hitung Total Produksi
   if (productionData) {
-    // Reset
-    summary.value = {
-      totalPlanlet: 0,
-      g0Terjual: 0,
-      g0Diproduksi: 0,
-      g2Diproduksi: 0,
-      g2Terjual: 0,
-      pendapatan: 0,
-    }
-
-    successRate.value = {
-      planlet: { total: 0, damaged: 0, success: 0, percentage: 0 },
-      g0: { total: 0, damaged: 0, success: 0, percentage: 0 },
-      g1: { total: 0, damaged: 0, success: 0, percentage: 0 }
-    }
-
-    // Aggregate data
     productionData.forEach(item => {
       const qty = parseFloat(item.qty) || 0
-      const type = item.production_type?.toLowerCase() || ''
+      const normalizedType = normalizePhase(item.production_type)
 
-      if (type.includes('planlet')) {
+      if (normalizedType === 'Planlet') {
         summary.value.totalPlanlet += qty
         successRate.value.planlet.total += qty
-      } else if (type.includes('g0')) {
-        if (type.includes('terjual')) {
+      } else if (normalizedType === 'G0') {
+        if (item.production_type?.toLowerCase().includes('terjual')) {
           summary.value.g0Terjual += qty
-        } else if (type.includes('diproduksi') || type.includes('produksi')) {
+        } else {
           summary.value.g0Diproduksi += qty
           successRate.value.g0.total += qty
         }
-      } else if (type.includes('g1')) {
+      } else if (normalizedType === 'G1') {
         successRate.value.g1.total += qty
-      } else if (type.includes('g2')) {
-        if (type.includes('diproduksi') || type.includes('produksi')) {
-          summary.value.g2Diproduksi += qty
-        } else if (type.includes('terjual')) {
+      } else if (normalizedType === 'G2') {
+        if (item.production_type?.toLowerCase().includes('terjual')) {
           summary.value.g2Terjual += qty
+        } else {
+          summary.value.g2Diproduksi += qty
+          successRate.value.g2.total += qty
         }
       }
     })
+  }
 
-    // Hitung kerusakan
-    if (damageData && reportData) {
-      damageData.forEach(damage => {
-        const totalDamage = (parseInt(damage.kuning) || 0) + 
-                           (parseInt(damage.kutilang) || 0) + 
-                           (parseInt(damage.busuk) || 0)
+  // B. Hitung Kerusakan NETT
+  if (damageSummaryData && reportData) {
+    const reportPhaseMap = {}
+    reportData.forEach(r => reportPhaseMap[r.report_id] = r.gh_phase?.phase_name)
+
+    damageSummaryData.forEach(damage => {
+      const kuning = parseInt(damage.kuning_nett) || 0
+      const kutilang = parseInt(damage.kutilang_nett) || 0
+      const busuk = parseInt(damage.busuk_nett) || 0
+      
+      const phaseName = reportPhaseMap[damage.report_id]
+      
+      if (phaseName) {
+        const normalizedPhase = normalizePhase(phaseName)
+        const phaseKey = normalizedPhase ? normalizedPhase.toLowerCase() : null
+        const phaseRate = successRate.value[phaseKey]
         
-        const report = reportData.find(r => r.report_id === damage.report_id)
-        
-        if (report && report.phase) {
-          const phase = report.phase.toLowerCase()
-          
-          if (phase.includes('planlet') || phase === 'planlet') {
-            successRate.value.planlet.damaged += totalDamage
-          } else if (phase.includes('g0') || phase === 'g0') {
-            successRate.value.g0.damaged += totalDamage
-          } else if (phase.includes('g1') || phase === 'g1') {
-            successRate.value.g1.damaged += totalDamage
-          }
+        if (phaseRate) {
+          phaseRate.kuning += kuning
+          phaseRate.kutilang += kutilang
+          phaseRate.busuk += busuk
+          phaseRate.damaged += (kuning + kutilang) // Kerusakan yang bisa diperbaiki (kuning, kutilang)
+          phaseRate.dead += busuk // Kerusakan mati (busuk)
         }
-      })
-    }
-
-    // Hitung success rate
-    Object.keys(successRate.value).forEach(key => {
-      const phase = successRate.value[key]
-      phase.success = phase.total - phase.damaged
-      phase.percentage = phase.total > 0 
-        ? ((phase.success / phase.total) * 100).toFixed(1) 
-        : 0
+      }
     })
   }
 
-  // Ambil pendapatan dari penjualan lokasi ini
+  // C. Finalisasi Success Rate
+  Object.keys(successRate.value).forEach(key => {
+    const phase = successRate.value[key]
+    phase.success = Math.max(0, phase.total - phase.damaged - phase.dead)
+    phase.percentage = phase.total > 0 
+      ? ((phase.success / phase.total) * 100).toFixed(1) 
+      : 0
+  })
+
+
+  // D. Hitung Total Penjualan
   const { data: salesData } = await supabase
     .from("gh_sales")
     .select("qty, price")
@@ -226,28 +297,66 @@ const loadProductionData = async () => {
   }
 }
 
+const loadEnvironmentData = async () => {
+  try {
+    const today = new Date().toISOString().split('T')[0]
+    
+    let { data } = await supabase
+      .from('gh_environment_log')
+      .select('*')
+      .eq('location_id', locationId.value)
+      .eq('log_date', today)
+      .maybeSingle()
+    
+    if (!data) {
+      const { data: lastData } = await supabase
+        .from('gh_environment_log')
+        .select('*')
+        .eq('location_id', locationId.value)
+        .order('log_date', { ascending: false })
+        .limit(1)
+        .maybeSingle()
+      data = lastData
+    }
+    
+    environmentData.value = data
+  } catch (err) {
+    console.error("Error loading environment data:", err)
+  }
+}
+
+const formatDate = (dateString) => {
+  if (!dateString) return '-'
+  const date = new Date(dateString)
+  return date.toLocaleDateString('id-ID', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })
+}
+
+const formatTime = (timeString) => {
+  if (!timeString) return '-'
+  return timeString.substring(0, 5)
+}
+
 const initCharts = async () => {
   await initFaseChart()
   await initBatchComparisonChart()
   await initPenjualanChart()
 }
 
-// Chart 1: Fase Produksi per Lokasi
 const initFaseChart = async () => {
   const canvas = document.getElementById('faseChart')
   if (!canvas) return
+
+  // Hapus chart lama jika ada
+  if (chartData.value.faseChart) {
+    chartData.value.faseChart.destroy()
+  }
 
   const { data: productionData } = await supabase
     .from("gh_data_production")
     .select("production_type, qty")
     .eq("location_id", locationId.value)
 
-  const faseData = {
-    planlet: 0,
-    g0: 0,
-    g1: 0,
-    g2: 0
-  }
+  const faseData = { planlet: 0, g0: 0, g1: 0, g2: 0 }
 
   productionData?.forEach(item => {
     const qty = parseFloat(item.qty) || 0
@@ -281,38 +390,26 @@ const initFaseChart = async () => {
       responsive: true,
       maintainAspectRatio: false,
       plugins: {
-        legend: {
-          display: true,
-          position: 'top'
-        },
-        title: {
-          display: true,
-          text: 'Produksi Per Fase',
-          font: { size: 16, weight: 'bold' }
-        }
+        legend: { display: true, position: 'top' },
+        title: { display: true, text: 'Produksi Per Fase', font: { size: 16, weight: 'bold' } }
       },
       scales: {
-        y: {
-          beginAtZero: true,
-          ticks: {
-            callback: function(value) {
-              return value.toLocaleString('id-ID')
-            }
-          }
-        }
+        y: { beginAtZero: true, ticks: { callback: function(value) { return value.toLocaleString('id-ID') } } }
       }
     }
   })
 }
 
-// Chart 2: Perbandingan Batch
 const initBatchComparisonChart = async () => {
   const canvas = document.getElementById('batchComparisonChart')
   if (!canvas) return
-
   if (batchList.value.length === 0) return
 
-  // Ambil data produksi per batch
+  // Hapus chart lama jika ada
+  if (chartData.value.batchComparisonChart) {
+    chartData.value.batchComparisonChart.destroy()
+  }
+  
   const batchIds = batchList.value.map(b => b.batch_id)
   
   const { data: productionData } = await supabase
@@ -320,7 +417,6 @@ const initBatchComparisonChart = async () => {
     .select("batch_id, qty")
     .in("batch_id", batchIds)
 
-  // Aggregate per batch
   const batchProduction = {}
   productionData?.forEach(item => {
     const batchId = item.batch_id
@@ -347,33 +443,24 @@ const initBatchComparisonChart = async () => {
       responsive: true,
       maintainAspectRatio: false,
       plugins: {
-        legend: {
-          display: false
-        },
-        title: {
-          display: true,
-          text: 'Perbandingan Produksi Per Batch',
-          font: { size: 16, weight: 'bold' }
-        }
+        legend: { display: false },
+        title: { display: true, text: 'Perbandingan Produksi Per Batch', font: { size: 16, weight: 'bold' } }
       },
       scales: {
-        y: {
-          beginAtZero: true,
-          ticks: {
-            callback: function(value) {
-              return value.toLocaleString('id-ID')
-            }
-          }
-        }
+        y: { beginAtZero: true, ticks: { callback: function(value) { return value.toLocaleString('id-ID') } } }
       }
     }
   })
 }
 
-// Chart 3: Penjualan Bulanan
 const initPenjualanChart = async () => {
   const canvas = document.getElementById('penjualanChart')
   if (!canvas) return
+
+  // Hapus chart lama jika ada
+  if (chartData.value.penjualanChart) {
+    chartData.value.penjualanChart.destroy()
+  }
 
   const { data: salesData } = await supabase
     .from("gh_sales")
@@ -425,52 +512,22 @@ const initPenjualanChart = async () => {
     options: {
       responsive: true,
       maintainAspectRatio: false,
-      interaction: {
-        mode: 'index',
-        intersect: false
-      },
+      interaction: { mode: 'index', intersect: false },
       plugins: {
-        legend: {
-          display: true,
-          position: 'top'
-        },
-        title: {
-          display: true,
-          text: 'Penjualan & Pendapatan Bulanan',
-          font: { size: 16, weight: 'bold' }
-        }
+        legend: { display: true, position: 'top' },
+        title: { display: true, text: 'Penjualan & Pendapatan Bulanan', font: { size: 16, weight: 'bold' } }
       },
       scales: {
         y: {
-          type: 'linear',
-          display: true,
-          position: 'left',
-          title: {
-            display: true,
-            text: 'Jumlah Unit'
-          },
-          ticks: {
-            callback: function(value) {
-              return value.toLocaleString('id-ID')
-            }
-          }
+          type: 'linear', display: true, position: 'left',
+          title: { display: true, text: 'Jumlah Unit' },
+          ticks: { callback: function(value) { return value.toLocaleString('id-ID') } }
         },
         y1: {
-          type: 'linear',
-          display: true,
-          position: 'right',
-          title: {
-            display: true,
-            text: 'Pendapatan (Juta Rp)'
-          },
-          grid: {
-            drawOnChartArea: false
-          },
-          ticks: {
-            callback: function(value) {
-              return 'Rp ' + value.toFixed(1) + 'M'
-            }
-          }
+          type: 'linear', display: true, position: 'right',
+          title: { display: true, text: 'Pendapatan (Juta Rp)' },
+          grid: { drawOnChartArea: false },
+          ticks: { callback: function(value) { return 'Rp ' + value.toFixed(1) + 'M' } }
         }
       }
     }
@@ -480,7 +537,14 @@ const initPenjualanChart = async () => {
 
 <template>
   <div class="min-h-screen bg-gradient-to-br from-gray-50 to-white">
-    <!-- Header Bar -->
+    <DamageRepairModal
+        :isOpen="isRepairModalOpen"
+        :phase="selectedPhaseForRepair"
+        :damageData="selectedPhaseForRepair ? successRate[selectedPhaseForRepair] : null"
+        @close="closeRepairModal"
+        @success="handleRepairSuccess"
+    />
+    
     <div class="bg-white border-b border-gray-200 shadow-sm sticky top-0 z-40">
       <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-5">
         <div class="flex justify-between items-center">
@@ -507,10 +571,72 @@ const initPenjualanChart = async () => {
       </div>
     </div>
 
-    <!-- Main Content -->
     <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
       
-      <!-- Stats Grid -->
+      <div class="mb-10">
+        <div class="flex justify-between items-end mb-4">
+           <div>
+              <h2 class="text-sm font-semibold text-gray-500 uppercase tracking-wide">Kondisi Lingkungan Terkini</h2>
+              <p v-if="environmentData" class="text-xs text-gray-400 mt-1">Data Tanggal: {{ formatDate(environmentData.log_date) }}</p>
+           </div>
+           <router-link to="/environment-log/add" class="text-xs font-bold text-blue-600 hover:underline flex items-center gap-1">
+              Update Kondisi <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14 5l7 7m0 0l-7 7m7-7H3"/></svg>
+           </router-link>
+        </div>
+
+        <div v-if="environmentData" class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
+            <div class="bg-white rounded-xl border-t-4 border-t-orange-400 p-4 shadow-sm">
+                <div class="flex justify-between items-center mb-3">
+                    <span class="font-bold text-gray-800 flex items-center gap-1"> Pagi</span>
+                    <span class="text-xs bg-gray-100 px-2 py-0.5 rounded text-gray-600 font-mono">{{ formatTime(environmentData.time_morning) }}</span>
+                </div>
+                <div class="space-y-2 text-sm">
+                    <div class="flex justify-between"><span>Temp</span> <b class="text-gray-900">{{ environmentData.temp_morning || '-' }}°C</b></div>
+                    <div class="flex justify-between"><span>Humid</span> <b class="text-gray-900">{{ environmentData.humid_morning || '-' }}%</b></div>
+                    <div class="flex justify-between"><span>CO2</span> <b class="text-gray-900">{{ environmentData.co2_morning || '-' }} ppm</b></div>
+                </div>
+            </div>
+            <div class="bg-white rounded-xl border-t-4 border-t-yellow-400 p-4 shadow-sm">
+                <div class="flex justify-between items-center mb-3">
+                    <span class="font-bold text-gray-800 flex items-center gap-1"> Siang</span>
+                    <span class="text-xs bg-gray-100 px-2 py-0.5 rounded text-gray-600 font-mono">{{ formatTime(environmentData.time_noon) }}</span>
+                </div>
+                <div class="space-y-2 text-sm">
+                    <div class="flex justify-between"><span>Temp</span> <b class="text-gray-900">{{ environmentData.temp_noon || '-' }}°C</b></div>
+                    <div class="flex justify-between"><span>Humid</span> <b class="text-gray-900">{{ environmentData.humid_noon || '-' }}%</b></div>
+                    <div class="flex justify-between"><span>CO2</span> <b class="text-gray-900">{{ environmentData.co2_noon || '-' }} ppm</b></div>
+                </div>
+            </div>
+            <div class="bg-white rounded-xl border-t-4 border-t-indigo-400 p-4 shadow-sm">
+                <div class="flex justify-between items-center mb-3">
+                    <span class="font-bold text-gray-800 flex items-center gap-1"> Sore</span>
+                    <span class="text-xs bg-gray-100 px-2 py-0.5 rounded text-gray-600 font-mono">{{ formatTime(environmentData.time_afternoon) }}</span>
+                </div>
+                <div class="space-y-2 text-sm">
+                    <div class="flex justify-between"><span>Temp</span> <b class="text-gray-900">{{ environmentData.temp_afternoon || '-' }}°C</b></div>
+                    <div class="flex justify-between"><span>Humid</span> <b class="text-gray-900">{{ environmentData.humid_afternoon || '-' }}%</b></div>
+                    <div class="flex justify-between"><span>CO2</span> <b class="text-gray-900">{{ environmentData.co2_afternoon || '-' }} ppm</b></div>
+                </div>
+            </div>
+            <div class="bg-white rounded-xl border-t-4 border-t-slate-500 p-4 shadow-sm">
+                <div class="flex justify-between items-center mb-3">
+                    <span class="font-bold text-gray-800 flex items-center gap-1"> Malam</span>
+                    <span class="text-xs bg-gray-100 px-2 py-0.5 rounded text-gray-600 font-mono">{{ formatTime(environmentData.time_night) }}</span>
+                </div>
+                <div class="space-y-2 text-sm">
+                    <div class="flex justify-between"><span>Temp</span> <b class="text-gray-900">{{ environmentData.temp_night || '-' }}°C</b></div>
+                    <div class="flex justify-between"><span>Humid</span> <b class="text-gray-900">{{ environmentData.humid_night || '-' }}%</b></div>
+                    <div class="flex justify-between"><span>CO2</span> <b class="text-gray-900">{{ environmentData.co2_night || '-' }} ppm</b></div>
+                </div>
+            </div>
+        </div>
+
+        <div v-else class="bg-gray-50 border border-dashed border-gray-300 rounded-xl p-6 text-center text-gray-400 text-sm">
+           <p>Belum ada data lingkungan tercatat untuk hari ini.</p>
+           <router-link to="/environment-log/add" class="text-blue-500 font-bold hover:underline mt-1 inline-block">Catat Kondisi Sekarang</router-link>
+        </div>
+      </div>
+      
       <div class="mb-8">
         <h2 class="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-3">Ringkasan Produksi</h2>
         <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
@@ -558,43 +684,71 @@ const initPenjualanChart = async () => {
         </div>
       </div>
 
-      <!-- Progress Stats with Potato -->
       <div class="mb-8">
-        <h2 class="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-3">Tingkat Keberhasilan</h2>
-        <div class="grid grid-cols-1 md:grid-cols-3 gap-5">
-          <PotatoProgressBar
-            :percentage="parseFloat(successRate.planlet.percentage)"
-            label="Planlet"
-            :success="successRate.planlet.success"
-            :total="successRate.planlet.total"
-            :damaged="successRate.planlet.damaged"
-            gradient-start="#10b981"
-            gradient-end="#059669"
-          />
-          
-          <PotatoProgressBar
-            :percentage="parseFloat(successRate.g0.percentage)"
-            label="G0"
-            :success="successRate.g0.success"
-            :total="successRate.g0.total"
-            :damaged="successRate.g0.damaged"
-            gradient-start="#0071f3"
-            gradient-end="#0060d1"
-          />
-          
-          <PotatoProgressBar
-            :percentage="parseFloat(successRate.g1.percentage)"
-            label="G1"
-            :success="successRate.g1.success"
-            :total="successRate.g1.total"
-            :damaged="successRate.g1.damaged"
-            gradient-start="#f59e0b"
-            gradient-end="#d97706"
-          />
+        <h2 class="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-3">Tingkat Keberhasilan Fase</h2>
+        
+        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5"> 
+          <div v-for="(phase, key) in successRate" :key="key" 
+               class="bg-white rounded-2xl border-2 border-gray-100 hover:border-gray-200 p-6 shadow-sm hover:shadow-lg transition-all flex flex-col justify-between">
+            
+            <div>
+              <PotatoProgressBar
+                :percentage="parseFloat(phase.percentage)"
+                :label="key.toUpperCase()"
+                :success="phase.success"
+                :total="phase.total"
+                :damaged="phase.damaged + phase.dead" 
+                :gradient-start="getPhaseColors(key).start"
+                :gradient-end="getPhaseColors(key).end"
+                class="mb-6"
+              />
+
+              <div class="space-y-3">
+                <div class="flex justify-between items-center text-sm">
+                  <div class="flex items-center gap-2">
+                    <span class="w-2.5 h-2.5 rounded-full bg-green-500"></span>
+                    <span class="text-gray-600">Sehat</span>
+                  </div>
+                  <span class="font-bold text-gray-900">{{ phase.success.toLocaleString('id-ID') }}</span>
+                </div>
+
+                <div class="flex justify-between items-center text-sm">
+                  <div class="flex items-center gap-2">
+                    <span class="w-2.5 h-2.5 rounded-full bg-yellow-500"></span>
+                    <span class="text-gray-600">Rusak</span>
+                  </div>
+                  <span class="font-bold text-yellow-600">{{ phase.damaged.toLocaleString('id-ID') }}</span>
+                </div>
+
+                <div class="pl-6 space-y-1 text-xs text-gray-500">
+                  <div class="flex justify-between items-center">
+                    <span>• Kuning</span>
+                    <span>{{ phase.kuning.toLocaleString('id-ID') }}</span>
+                  </div>
+                  <div class="flex justify-between items-center">
+                    <span>• Kutilang</span>
+                    <span>{{ phase.kutilang.toLocaleString('id-ID') }}</span>
+                  </div>
+                </div>
+
+                <div class="flex justify-between items-center text-sm">
+                  <div class="flex items-center gap-2">
+                    <span class="w-2.5 h-2.5 rounded-full bg-red-500"></span>
+                    <span class="text-gray-600">Mati (Busuk)</span>
+                  </div>
+                  <span class="font-bold text-red-600">{{ phase.dead.toLocaleString('id-ID') }}</span>
+                </div>
+
+                <div class="pt-3 border-t border-gray-100 flex justify-between items-center font-bold text-gray-900 text-sm">
+                  <span>Total</span>
+                  <span>{{ phase.total.toLocaleString('id-ID') }}</span>
+                </div>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
 
-      <!-- Charts -->
       <div class="mb-8">
         <h2 class="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-3">Analisis & Visualisasi</h2>
         <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -611,7 +765,6 @@ const initPenjualanChart = async () => {
         <canvas id="penjualanChart"></canvas>
       </div>
 
-      <!-- Batch List -->
       <div class="mb-8">
         <h2 class="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-3">Daftar Batch di Lokasi Ini</h2>
         <div v-if="batchList.length === 0" class="text-center py-8 text-gray-500 bg-white rounded-2xl border-2 border-gray-100">
@@ -632,15 +785,21 @@ const initPenjualanChart = async () => {
                 <p class="text-xs text-gray-500 mt-0.5">{{ batch.tanggal_mulai ? new Date(batch.tanggal_mulai).toLocaleDateString('id-ID') : '-' }}</p>
               </div>
             </div>
+            
+            <router-link
+                :to="`/batch/${batch.batch_id}`"
+                class="w-full mt-4 inline-block text-center bg-gray-100 hover:bg-gray-200 text-gray-700 py-2 rounded-lg font-semibold text-sm transition"
+            >
+                Lihat Detail Batch
+            </router-link>
           </div>
         </div>
       </div>
 
-      <!-- Footer -->
       <footer class="text-center py-10 mt-16 border-t border-gray-200">
         <div class="flex items-center justify-center gap-2 mb-2">
           <span class="text-2xl">🌱</span>
-          <p class="text-gray-400 font-bold text-sm">GREENHOUSE</p>
+          <p class="text-gray-400 font-bold text-sm">POTATO GROW</p>
         </div>
         <p class="text-gray-400 text-xs">© 2025 All Rights Reserved</p>
       </footer>
