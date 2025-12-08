@@ -799,58 +799,66 @@ const getPhaseColors = (phaseKey) => {
            </router-link>
         </div>
 
-        <div v-if="environmentData" class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
-            <div class="bg-white rounded-xl border-t-4 border-t-orange-400 p-4 shadow-sm">
-                <div class="flex justify-between items-center mb-3">
-                    <span class="font-bold text-gray-800 flex items-center gap-1"> Pagi</span>
-                    <span class="text-xs bg-gray-100 px-2 py-0.5 rounded text-gray-600 font-mono">{{ formatTime(environmentData.time_morning) }}</span>
-                </div>
-                <div class="space-y-2 text-sm">
-                    <div class="flex justify-between"><span>Temp</span> <b class="text-gray-900">{{ environmentData.temp_morning || '-' }}°C</b></div>
-                    <div class="flex justify-between"><span>Humid</span> <b class="text-gray-900">{{ environmentData.humid_morning || '-' }}%</b></div>
-                    <div class="flex justify-between"><span>CO2</span> <b class="text-gray-900">{{ environmentData.co2_morning || '-' }} ppm</b></div>
-                </div>
-            </div>
-            <div class="bg-white rounded-xl border-t-4 border-t-yellow-400 p-4 shadow-sm">
-                <div class="flex justify-between items-center mb-3">
-                    <span class="font-bold text-gray-800 flex items-center gap-1"> Siang</span>
-                    <span class="text-xs bg-gray-100 px-2 py-0.5 rounded text-gray-600 font-mono">{{ formatTime(environmentData.time_noon) }}</span>
-                </div>
-                <div class="space-y-2 text-sm">
-                    <div class="flex justify-between"><span>Temp</span> <b class="text-gray-900">{{ environmentData.temp_noon || '-' }}°C</b></div>
-                    <div class="flex justify-between"><span>Humid</span> <b class="text-gray-900">{{ environmentData.humid_noon || '-' }}%</b></div>
-                    <div class="flex justify-between"><span>CO2</span> <b class="text-gray-900">{{ environmentData.co2_noon || '-' }} ppm</b></div>
+        <div v-if="environmentData">
+            <div class="bg-white rounded-xl border border-gray-200 p-4 mb-4 shadow-sm flex justify-between items-center">
+                <div class="flex items-center gap-4">
+                    <div class="w-12 h-12 bg-blue-50 rounded-full flex items-center justify-center text-2xl shadow-sm">
+                        🌤️
+                    </div>
+                    <div>
+                        <p class="text-xs text-gray-500 uppercase font-bold tracking-wide">Cuaca Harian</p>
+                        <p class="text-xl font-bold text-gray-900 capitalize">{{ environmentData.weather || '-' }}</p>
+                    </div>
                 </div>
             </div>
-            <div class="bg-white rounded-xl border-t-4 border-t-indigo-400 p-4 shadow-sm">
-                <div class="flex justify-between items-center mb-3">
-                    <span class="font-bold text-gray-800 flex items-center gap-1"> Sore</span>
-                    <span class="text-xs bg-gray-100 px-2 py-0.5 rounded text-gray-600 font-mono">{{ formatTime(environmentData.time_afternoon) }}</span>
+            <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
+                <div class="bg-white rounded-xl border-t-4 border-t-orange-400 p-4 shadow-sm">
+                    <div class="flex justify-between items-center mb-3">
+                        <span class="font-bold text-gray-800 flex items-center gap-1"> Pagi</span>
+                        <span class="text-xs bg-gray-100 px-2 py-0.5 rounded text-gray-600 font-mono">{{ formatTime(environmentData.time_morning) }}</span>
+                    </div>
+                    <div class="space-y-2 text-sm">
+                        <div class="flex justify-between"><span>Temp</span> <b class="text-gray-900">{{ environmentData.temp_morning || '-' }}°C</b></div>
+                        <div class="flex justify-between"><span>Humid</span> <b class="text-gray-900">{{ environmentData.humid_morning || '-' }}%</b></div>
+                        <div class="flex justify-between"><span>CO2</span> <b class="text-gray-900">{{ environmentData.co2_morning || '-' }} ppm</b></div>
+                    </div>
                 </div>
-                <div class="space-y-2 text-sm">
-                    <div class="flex justify-between"><span>Temp</span> <b class="text-gray-900">{{ environmentData.temp_afternoon || '-' }}°C</b></div>
-                    <div class="flex justify-between"><span>Humid</span> <b class="text-gray-900">{{ environmentData.humid_afternoon || '-' }}%</b></div>
-                    <div class="flex justify-between"><span>CO2</span> <b class="text-gray-900">{{ environmentData.co2_afternoon || '-' }} ppm</b></div>
+                <div class="bg-white rounded-xl border-t-4 border-t-yellow-400 p-4 shadow-sm">
+                    <div class="flex justify-between items-center mb-3">
+                        <span class="font-bold text-gray-800 flex items-center gap-1"> Siang</span>
+                        <span class="text-xs bg-gray-100 px-2 py-0.5 rounded text-gray-600 font-mono">{{ formatTime(environmentData.time_noon) }}</span>
+                    </div>
+                    <div class="space-y-2 text-sm">
+                        <div class="flex justify-between"><span>Temp</span> <b class="text-gray-900">{{ environmentData.temp_noon || '-' }}°C</b></div>
+                        <div class="flex justify-between"><span>Humid</span> <b class="text-gray-900">{{ environmentData.humid_noon || '-' }}%</b></div>
+                        <div class="flex justify-between"><span>CO2</span> <b class="text-gray-900">{{ environmentData.co2_noon || '-' }} ppm</b></div>
+                    </div>
                 </div>
-            </div>
-            <div class="bg-white rounded-xl border-t-4 border-t-slate-500 p-4 shadow-sm">
-                <div class="flex justify-between items-center mb-3">
-                    <span class="font-bold text-gray-800 flex items-center gap-1"> Malam</span>
-                    <span class="text-xs bg-gray-100 px-2 py-0.5 rounded text-gray-600 font-mono">{{ formatTime(environmentData.time_night) }}</span>
+                <div class="bg-white rounded-xl border-t-4 border-t-indigo-400 p-4 shadow-sm">
+                    <div class="flex justify-between items-center mb-3">
+                        <span class="font-bold text-gray-800 flex items-center gap-1"> Sore</span>
+                        <span class="text-xs bg-gray-100 px-2 py-0.5 rounded text-gray-600 font-mono">{{ formatTime(environmentData.time_afternoon) }}</span>
+                    </div>
+                    <div class="space-y-2 text-sm">
+                        <div class="flex justify-between"><span>Temp</span> <b class="text-gray-900">{{ environmentData.temp_afternoon || '-' }}°C</b></div>
+                        <div class="flex justify-between"><span>Humid</span> <b class="text-gray-900">{{ environmentData.humid_afternoon || '-' }}%</b></div>
+                        <div class="flex justify-between"><span>CO2</span> <b class="text-gray-900">{{ environmentData.co2_afternoon || '-' }} ppm</b></div>
+                    </div>
                 </div>
-                <div class="space-y-2 text-sm">
-                    <div class="flex justify-between"><span>Temp</span> <b class="text-gray-900">{{ environmentData.temp_night || '-' }}°C</b></div>
-                    <div class="flex justify-between"><span>Humid</span> <b class="text-gray-900">{{ environmentData.humid_night || '-' }}%</b></div>
-                    <div class="flex justify-between"><span>CO2</span> <b class="text-gray-900">{{ environmentData.co2_night || '-' }} ppm</b></div>
+                <div class="bg-white rounded-xl border-t-4 border-t-slate-500 p-4 shadow-sm">
+                    <div class="flex justify-between items-center mb-3">
+                        <span class="font-bold text-gray-800 flex items-center gap-1"> Malam</span>
+                        <span class="text-xs bg-gray-100 px-2 py-0.5 rounded text-gray-600 font-mono">{{ formatTime(environmentData.time_night) }}</span>
+                    </div>
+                    <div class="space-y-2 text-sm">
+                        <div class="flex justify-between"><span>Temp</span> <b class="text-gray-900">{{ environmentData.temp_night || '-' }}°C</b></div>
+                        <div class="flex justify-between"><span>Humid</span> <b class="text-gray-900">{{ environmentData.humid_night || '-' }}%</b></div>
+                        <div class="flex justify-between"><span>CO2</span> <b class="text-gray-900">{{ environmentData.co2_night || '-' }} ppm</b></div>
+                    </div>
                 </div>
             </div>
         </div>
-
-        <div v-else class="bg-gray-50 border border-dashed border-gray-300 rounded-xl p-6 text-center text-gray-400 text-sm">
-           <p>Belum ada data lingkungan tercatat untuk hari ini di lokasi ini.</p>
-           <router-link to="/environment-log/add" class="text-blue-500 font-bold hover:underline mt-1 inline-block">Catat Kondisi Sekarang</router-link>
         </div>
-      </div>
       
       <div class="mb-8">
         <h2 class="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-3">Ringkasan Produksi</h2>

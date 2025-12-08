@@ -372,25 +372,28 @@ const repairRequests = computed(() => {
   return list;
 })
 
-// ✅ NEW: Hitung jumlah laporan/planning yang perlu di-review (HANYA UNTUK USER INI)
+// ✅ UPDATED: Hitung jumlah laporan/planning yang perlu di-review
 const pendingApprovalCount = computed(() => {
     const userLevel = currentUserApprovalLevel.value;
-    if (!userLevel) {
-        return { activity: 0, planning: 0, production: 0, damage: 0, total: 0 };
-    }
+    const isStaffOrNonApprover = !userLevel; // TRUE jika staff/bukan approver
+    
+    // Helper untuk staff/pembuat laporan: hanya 'needRevision' atau 'revision'
+    const isNeedRevision = (status) => {
+        return status === 'needRevision' || status === 'revision'; 
+    };
 
+    // Helper untuk approver: item yang menunggu review di level user ini
     const isPendingAndNeedsUserReview = (recordId, overallStatus) => {
+        // Staff/Non-Approver TIDAK BOLEH menghitung status 'onReview', 'Waiting', 'pending'
+        if (isStaffOrNonApprover) return false; 
+        
         const record = approvalRecordMap.value[recordId];
-        if (!record) {
-             // Untuk Planning, yang tidak punya approval_record_id, statusnya adalah 'onReview'
-             // Kita asumsikan planning tanpa record ID (draft) tidak perlu review di sini.
-             return false;
-        }
+        if (!record) return false; 
         
-        // 1. Status harus 'onReview'
-        const statusIsOnReview = overallStatus === 'onReview';
+        // Status yang dianggap menunggu review: 'onReview', 'Waiting', 'pending'
+        const statusIsOnReview = overallStatus === 'onReview' || overallStatus === 'Waiting' || overallStatus === 'pending';
         
-        // 2. Level saat ini harus sama dengan level user yang login
+        // Level saat ini harus sama dengan level user yang login
         const needsUserLevelReview = record.current_level === userLevel;
         
         return statusIsOnReview && needsUserLevelReview;
@@ -400,20 +403,20 @@ const pendingApprovalCount = computed(() => {
     const activityPending = activityReportStore.reports.filter(r => {
         const status = approvalRecordMap.value[r.approval_record_id]?.overall_status || r.report_status;
         
-        // Cek apakah perlu direvisi OLEH STAFF (status needRevision, tanpa melihat level)
-        if (status === 'needRevision') return true; 
+        // 1. Cek apakah perlu direvisi (Berlaku untuk SEMUA ROLE)
+        if (isNeedRevision(status)) return true; 
         
-        // Cek apakah perlu di-review OLEH APPROVER (user yang login)
+        // 2. Cek apakah perlu di-review (Hanya berlaku untuk APPROVER)
         return isPendingAndNeedsUserReview(r.approval_record_id, status);
     }).length;
 
-    // --- 2. Planning Reports (Planning memiliki status 'onReview' tanpa approval record sampai disubmit) ---
-    // Di sini kita asumsikan Planning (gh_planning_report) yang berstatus 'onReview' dan memiliki approval_record_id
+    // --- 2. Planning Reports ---
     const planningPending = planningStore.plannings.filter(p => {
         const recordId = p.approval_record_id;
         const status = p.status;
         
-        // Planning hanya punya status 'onReview'
+        // Planning: Hanya hitung jika Approver dan perlu di-review.
+        // Planning tidak punya status 'needRevision' di sini, hanya 'onReview'/'approved'
         return isPendingAndNeedsUserReview(recordId, status);
     }).length;
 
@@ -421,10 +424,10 @@ const pendingApprovalCount = computed(() => {
     const productionPending = productionReports.value.filter(p => {
         const status = p.status;
         
-        // Cek apakah perlu direvisi OLEH STAFF (status needRevision/revision, tanpa melihat level)
-        if (status === 'needRevision' || status === 'revision') return true; 
+        // 1. Cek apakah perlu direvisi (Berlaku untuk SEMUA ROLE)
+        if (isNeedRevision(status)) return true; 
         
-        // Cek apakah perlu di-review OLEH APPROVER
+        // 2. Cek apakah perlu di-review (Hanya berlaku untuk APPROVER)
         return isPendingAndNeedsUserReview(p.record_id, status);
     }).length;
 
@@ -433,14 +436,11 @@ const pendingApprovalCount = computed(() => {
         const recordId = d.approval_record_id;
         const status = approvalRecordMap.value[recordId]?.overall_status || d.status;
         
-        // Cek apakah perlu direvisi OLEH STAFF (status needRevision, tanpa melihat level)
-        if (status === 'needRevision') return true; 
+        // 1. Cek apakah perlu direvisi (Berlaku untuk SEMUA ROLE)
+        if (isNeedRevision(status)) return true; 
         
-        // Status 'onReview', 'Waiting', 'pending' dianggap sebagai 'onReview' untuk filtering
-        const simplifiedStatus = (status === 'Waiting' || status === 'pending') ? 'onReview' : status;
-        
-        // Cek apakah perlu di-review OLEH APPROVER
-        return isPendingAndNeedsUserReview(recordId, simplifiedStatus);
+        // 2. Cek apakah perlu di-review (Hanya berlaku untuk APPROVER)
+        return isPendingAndNeedsUserReview(recordId, status);
     }).length;
 
 
