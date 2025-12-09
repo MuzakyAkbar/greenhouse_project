@@ -396,6 +396,7 @@
 <script setup>
 import { ref, computed, onMounted, watch } from 'vue'
 import openbravoApi from '@/lib/openbravo'
+import logoPG from '../assets/logoPG.svg'
 
 // ===== STATE
 const selectedDate = ref('')

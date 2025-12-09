@@ -6,7 +6,7 @@ import { supabase } from '@/lib/supabase'
 
 const authStore = useAuthStore()
 const router = useRouter()
-
+import logoPG from '../assets/logoPG.svg'
 // Logout function
 const logout = async () => {
   const is_validate = await authStore.logout()
@@ -466,11 +466,12 @@ onMounted(async () => {
         </div>
       </div>
 
-      <!-- Footer -->
-      <footer class="text-center py-10 mt-8 border-t border-gray-200">
+      <footer class="text-center py-10 mt-16 border-t border-gray-200">
         <div class="flex items-center justify-center gap-2 mb-2">
-          <span class="text-2xl">🌱</span>
-          <p class="text-gray-400 font-bold text-sm">GREENHOUSE</p>
+           <span class="w-6 h-6 p-0.5">
+             <img :src="logoPG" alt="Potato Grow Logo" class="w-full h-full object-contain" />
+          </span>
+          <p class="text-gray-400 font-bold text-sm">POTATO GROW</p>
         </div>
         <p class="text-gray-400 text-xs">© 2025 All Rights Reserved</p>
       </footer>

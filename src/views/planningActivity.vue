@@ -4,7 +4,8 @@ import { supabase } from "@/lib/supabase.js";
 import { Html5Qrcode } from "html5-qrcode";
 import openbravoApi from '@/lib/openbravo'
 import { useRouter } from 'vue-router';
-import { useAuthStore } from "@/stores/auth"; // Tambahkan Auth Store
+import { useAuthStore } from "@/stores/auth"; 
+import logoPG from '../assets/logoPG.svg'
 
 // Initialize router & auth
 const router = useRouter();
@@ -1065,13 +1066,15 @@ onUnmounted(() => { stopScanner(); });
       </div>
     </div>
 
-    <footer class="text-center py-10 mt-8 border-t border-gray-200">
-      <div class="flex items-center justify-center gap-2 mb-2">
-        <span class="text-2xl">🌱</span>
-        <p class="text-gray-400 font-bold text-sm">GREENHOUSE</p>
-      </div>
-      <p class="text-gray-400 text-xs">© 2025 All Rights Reserved</p>
-    </footer>
+    <footer class="text-center py-10 mt-16 border-t border-gray-200">
+        <div class="flex items-center justify-center gap-2 mb-2">
+           <span class="w-6 h-6 p-0.5">
+             <img :src="logoPG" alt="Potato Grow Logo" class="w-full h-full object-contain" />
+          </span>
+          <p class="text-gray-400 font-bold text-sm">POTATO GROW</p>
+        </div>
+        <p class="text-gray-400 text-xs">© 2025 All Rights Reserved</p>
+      </footer>
   </div>
 </template>
 

@@ -9,6 +9,7 @@ import { useProductionStore } from '../stores/production'
 import { useSalesStore } from '../stores/sales'
 import { onMounted, ref, computed, watch, nextTick } from 'vue'
 import { supabase } from '../lib/supabase'
+import logoPG from '../assets/logoPG.svg'
 
 const authStore = useAuthStore()
 const activityReportStore = useActivityReportStore()
@@ -923,12 +924,14 @@ const getCurrentTime = () => new Date().toLocaleTimeString('id-ID')
         </div>
       </div>
 
-      <footer class="text-center py-10 mt-8 border-t border-gray-200">
+      <footer class="text-center py-10 mt-16 border-t border-gray-200">
         <div class="flex items-center justify-center gap-2 mb-2">
-          <span class="text-2xl">🥔</span>
+           <span class="w-6 h-6 p-0.5">
+             <img :src="logoPG" alt="Potato Grow Logo" class="w-full h-full object-contain" />
+          </span>
           <p class="text-gray-400 font-bold text-sm">POTATO GROW</p>
         </div>
-        <p class="text-gray-400 text-xs">© 2025 Semua Hak Cipta Dilindungi</p>
+        <p class="text-gray-400 text-xs">© 2025 All Rights Reserved</p>
       </footer>
     </div>
   </div>

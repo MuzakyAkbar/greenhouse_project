@@ -2,6 +2,7 @@
 import { ref, onMounted } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { usePlanningStore } from '@/stores/planning';
+import logoPG from '../assets/logoPG.svg'
 
 const route = useRoute();
 const router = useRouter();
@@ -306,13 +307,15 @@ onMounted(async () => {
     </div>
 
     <!-- Footer (Hidden on print) -->
-    <footer class="text-center py-10 mt-8 border-t border-gray-200 print:hidden">
-      <div class="flex items-center justify-center gap-2 mb-2">
-        <span class="text-2xl">🌱</span>
-        <p class="text-gray-400 font-bold text-sm">GREENHOUSE</p>
-      </div>
-      <p class="text-gray-400 text-xs">© 2025 All Rights Reserved</p>
-    </footer>
+    <footer class="text-center py-10 mt-16 border-t border-gray-200">
+        <div class="flex items-center justify-center gap-2 mb-2">
+           <span class="w-6 h-6 p-0.5">
+             <img :src="logoPG" alt="Potato Grow Logo" class="w-full h-full object-contain" />
+          </span>
+          <p class="text-gray-400 font-bold text-sm">POTATO GROW</p>
+        </div>
+        <p class="text-gray-400 text-xs">© 2025 All Rights Reserved</p>
+      </footer>
   </div>
 </template>
 
