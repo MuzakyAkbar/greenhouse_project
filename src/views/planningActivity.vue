@@ -963,8 +963,9 @@ onUnmounted(() => { stopScanner(); });
                     </div>
                   </div>
 
-                  <div class="flex gap-3 items-end">
-                    <div class="flex-1 flex flex-col">
+                  <div class="grid grid-cols-2 sm:flex sm:gap-3 sm:items-end gap-3">
+                    
+                    <div class="col-span-1 sm:flex-1 flex flex-col">
                       <label class="text-xs font-semibold text-gray-600 mb-2">Qty</label>
                       <input
                         v-model="material.qty"
@@ -975,7 +976,7 @@ onUnmounted(() => { stopScanner(); });
                       />
                     </div>
 
-                    <div class="flex-1 flex flex-col">
+                    <div class="col-span-1 sm:flex-1 flex flex-col">
                       <label class="text-xs font-semibold text-gray-600 mb-2">Unit</label>
                       <input
                         v-model="material.uom"
@@ -988,7 +989,7 @@ onUnmounted(() => { stopScanner(); });
                     <button
                       @click="removeMaterialRow(index, matIndex)"
                       v-if="section.materials.length > 1"
-                      class="px-4 py-2.5 bg-red-500 hover:bg-red-600 text-white text-sm font-semibold rounded-lg transition shadow-sm hover:shadow"
+                      class="col-span-2 sm:w-auto px-4 py-2.5 bg-red-500 hover:bg-red-600 text-white text-sm font-semibold rounded-lg transition shadow-sm hover:shadow"
                     >
                       Hapus
                     </button>

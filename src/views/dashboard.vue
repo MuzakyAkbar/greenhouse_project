@@ -116,7 +116,7 @@ const summary = ref({
   g1Mati: 0,
   g2Diproduksi: 0,
   g2Mitra: 0,
-  g2Petani: 0,
+  g2Perusahaan: 0,
   g2Terjual: 0,
   pendapatan: 0,
 })
@@ -212,7 +212,7 @@ const loadDashboardData = async () => {
     g1Mati: 0,
     g2Diproduksi: 0,
     g2Mitra: 0,
-    g2Petani: 0,
+    g2Perusahaan: 0,
     g2Terjual: 0,
     pendapatan: 0,
   };

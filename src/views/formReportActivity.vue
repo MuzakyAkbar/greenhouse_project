@@ -1329,27 +1329,7 @@ onBeforeUnmount(() => stopCamera());
                         class="px-4 py-2.5 border-2 border-gray-200 rounded-lg bg-gray-100 text-gray-700 text-sm font-medium focus:outline-none cursor-not-allowed"
                       />
                     </div>
-                    <div class="flex flex-col">
-                      <label class="text-xs font-semibold text-gray-600 mb-2">Unit Price</label>
-                      <input
-                        :value="formatNumber(material.unit_price)"
-                        type="text"
-                        readonly
-                        placeholder="0"
-                        class="px-4 py-2.5 border-2 border-gray-200 rounded-lg bg-gray-100 text-gray-700 text-sm font-medium focus:outline-none cursor-not-allowed"
-                      />
                     </div>
-                    <div class="flex flex-col">
-                      <label class="text-xs font-semibold text-gray-600 mb-2">Total Price</label>
-                      <input
-                        :value="formatNumber(material.total_price)"
-                        type="text"
-                        readonly
-                        placeholder="0"
-                        class="px-4 py-2.5 border-2 border-gray-200 rounded-lg bg-green-100 text-green-700 text-sm font-bold focus:outline-none cursor-not-allowed"
-                      />
-                    </div>
-                  </div>
 
                   <button
                     @click="removeMaterialRow(index, matIndex)"

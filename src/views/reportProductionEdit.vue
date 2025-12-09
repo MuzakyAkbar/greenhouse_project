@@ -32,7 +32,7 @@ const revisionNotes = ref([]) // Akan diisi dari gh_approval_level_status
 // Categories & Options (tetap sama)
 const productionCategories = ['Planlet G0', 'Planlet G1', 'Planlet G2', 'Planlet G3', 'Minituber']
 const salesCategories = ['Planlet G0', 'Planlet G1', 'Planlet G2', 'Planlet G3', 'Minituber']
-const ownerOptions = ['Petani', 'Mitra', 'Internal', 'Lainnya']
+const ownerOptions = ['Perusahaan', 'Mitra', 'Internal', 'Lainnya']
 
 // Helper: Format Date
 const formatDate = (dateStr) => {

@@ -534,7 +534,7 @@ function resetForm() {
                     class="px-4 py-2.5 rounded-lg border-2 border-gray-200 bg-white text-gray-800 focus:outline-none focus:ring-2 focus:ring-[#0071f3] focus:border-transparent transition-all"
                   >
                     <option value="" disabled>Pilih Kepemilikan</option>
-                    <option>Petani</option>
+                    <option>Perusahaan</option>
                     <option>Mitra</option>
                   </select>
                 </div>
