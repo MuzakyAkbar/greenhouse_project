@@ -164,6 +164,37 @@ const formatTime = (timeString) => {
 }
 
 // --------------------------------------------------------------------------------------
+// NEW: Fungsi Load Environment Data (Diperbaiki agar hanya menampilkan data HARI INI)
+// --------------------------------------------------------------------------------------
+const loadEnvironmentData = async (location_id) => {
+  if (!location_id) return;
+  try {
+    const today = new Date().toISOString().split('T')[0] // Format YYYY-MM-DD
+    
+    // 1. Coba ambil data TEPAT HARI INI
+    let { data, error } = await supabase
+      .from('gh_environment_log')
+      .select('*')
+      .eq('location_id', location_id)
+      .eq('log_date', today)
+      .maybeSingle()
+    
+    // 2. Jika data hari ini TIDAK ADA, JANGAN ambil data terakhir/kemarin. Cukup set null.
+    if (!data) {
+      console.log("Data lingkungan HARI INI (9/12/2025) tidak ditemukan, mereset tampilan.")
+      environmentData.value = null; // Kunci: Reset ke null jika data hari ini kosong
+    } else {
+      environmentData.value = data
+    }
+    
+  } catch (err) {
+    console.error("Error loading environment data:", err)
+    environmentData.value = null
+  }
+}
+
+
+// --------------------------------------------------------------------------------------
 // NEW: Fungsi Load Data Detail Batch
 // --------------------------------------------------------------------------------------
 
@@ -189,7 +220,7 @@ const loadBatchDetailData = async () => {
   batchDetail.value = batch;
   locationInfo.value = batch.gh_location;
 
-  // Muat data lingkungan setelah mendapatkan location_id
+  // ✅ PERBAIKAN: Muat data lingkungan setelah mendapatkan location_id
   await loadEnvironmentData(batch.location_id);
   
   // Reset summary & successRate
@@ -322,37 +353,6 @@ const loadBatchDetailData = async () => {
   await loadActivityAndMaterialData(batch.batch_id);
 
   await initCharts();
-}
-
-// NEW: Fungsi Load Environment Data (mirip LocationDetail.vue)
-const loadEnvironmentData = async (location_id) => {
-  if (!location_id) return;
-  try {
-    const today = new Date().toISOString().split('T')[0]
-    
-    let { data, error } = await supabase
-      .from('gh_environment_log')
-      .select('*')
-      .eq('location_id', location_id)
-      .eq('log_date', today)
-      .maybeSingle()
-    
-    if (!data) {
-      const { data: lastData } = await supabase
-        .from('gh_environment_log')
-        .select('*')
-        .eq('location_id', location_id)
-        .order('log_date', { ascending: false })
-        .limit(1)
-        .maybeSingle()
-      data = lastData
-    }
-    
-    environmentData.value = data
-  } catch (err) {
-    console.error("Error loading environment data:", err)
-    environmentData.value = null
-  }
 }
 
 // NEW: Fungsi Load Activity & Material Data (MENGGUNAKAN gh_activity)

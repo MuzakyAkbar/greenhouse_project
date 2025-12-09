@@ -383,6 +383,29 @@ onMounted(async () => {
             </div>
           </router-link>
 
+          <router-link
+            to="/environment-log-list"
+            class="group bg-white border-2 border-gray-100 hover:border-teal-500 rounded-2xl p-6 text-left hover:shadow-xl transition-all transform hover:-translate-y-1"
+          >
+            <div class="flex items-start gap-4">
+              <div class="w-14 h-14 bg-gradient-to-br from-teal-500 to-teal-600 rounded-xl flex items-center justify-center text-white text-2xl shadow-md group-hover:shadow-lg transition-all">
+                🌡️
+              </div>
+              <div class="flex-1">
+                <h3 class="text-lg font-bold text-gray-900 mb-2 group-hover:text-teal-600 transition-colors">
+                  Environment Log
+                </h3>
+                <p class="text-sm text-gray-500 leading-relaxed">
+                  Pantau data suhu dan kelembaban area greenhouse
+                </p>
+              </div>
+            </div>
+            <div class="mt-4 pt-4 border-t border-gray-100 flex items-center justify-between">
+              <span class="text-xs font-semibold text-gray-400 uppercase tracking-wide">Monitoring</span>
+              <span class="text-teal-600 font-bold group-hover:translate-x-1 transition-transform">→</span>
+            </div>
+          </router-link>
+
           <!-- Help & Support -->
           <div class="group bg-gradient-to-br from-amber-50 to-orange-50 border-2 border-amber-200 rounded-2xl p-6 text-left hover:shadow-xl transition-all">
             <div class="flex items-start gap-4">

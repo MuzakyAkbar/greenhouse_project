@@ -299,31 +299,33 @@ const loadProductionData = async () => {
   }
 }
 
+// --------------------------------------------------------------------------------------
+// NEW: Fungsi Load Environment Data (Diperbaiki agar hanya menampilkan data HARI INI)
+// --------------------------------------------------------------------------------------
 const loadEnvironmentData = async () => {
+  if (!locationId.value) return;
   try {
-    const today = new Date().toISOString().split('T')[0]
+    const today = new Date().toISOString().split('T')[0] // Format YYYY-MM-DD
     
-    let { data } = await supabase
+    // 1. Coba ambil data TEPAT HARI INI
+    let { data, error } = await supabase
       .from('gh_environment_log')
       .select('*')
       .eq('location_id', locationId.value)
       .eq('log_date', today)
       .maybeSingle()
     
+    // 2. Jika data hari ini TIDAK ADA, JANGAN ambil data terakhir/kemarin. Cukup set null.
     if (!data) {
-      const { data: lastData } = await supabase
-        .from('gh_environment_log')
-        .select('*')
-        .eq('location_id', locationId.value)
-        .order('log_date', { ascending: false })
-        .limit(1)
-        .maybeSingle()
-      data = lastData
+      console.log("Data lingkungan HARI INI (9/12/2025) tidak ditemukan, mereset tampilan.")
+      environmentData.value = null; // Kunci: Reset ke null jika data hari ini kosong
+    } else {
+      environmentData.value = data
     }
     
-    environmentData.value = data
   } catch (err) {
     console.error("Error loading environment data:", err)
+    environmentData.value = null
   }
 }
 
