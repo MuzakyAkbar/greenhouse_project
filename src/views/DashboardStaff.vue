@@ -186,9 +186,9 @@ onMounted(async () => {
               <span class="w-10 h-10 bg-gradient-to-br from-[#ffffff] to-[#ffffff] rounded-lg flex items-center justify-center text-white text-lg">
                 🌱
               </span>
-              Dashboard MHN GreenHouse
+              Dashboard MHN Potato Grow
             </h1>
-            <p class="text-sm text-gray-500 mt-1 ml-13">Dashboard Staff</p>
+            <p class="text-sm text-gray-500 mt-1 ml-13">Dashboard Staf</p>
           </div>
           <button
             @click="logout"
@@ -197,7 +197,7 @@ onMounted(async () => {
             <svg class="w-4 h-4" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" fill="currentColor">
               <path d="M505 273c9.4-9.4 9.4-24.6 0-33.9L361 95c-6.9-6.9-17.2-8.9-26.2-5.2S320 102.3 320 112l0 80-112 0c-26.5 0-48 21.5-48 48l0 32c0 26.5 21.5 48 48 48l112 0 0 80c0 9.7 5.8 18.5 14.8 22.2s19.3 1.7 26.2-5.2L505 273zM160 96c17.7 0 32-14.3 32-32s-14.3-32-32-32L96 32C43 32 0 75 0 128L0 384c0 53 43 96 96 96l64 0c17.7 0 32-14.3 32-32s-14.3-32-32-32l-64 0c-17.7 0-32-14.3-32-32l0-256c0-17.7 14.3-32 32-32l64 0z"/>
             </svg>
-            Logout
+            Keluar
           </button>
         </div>
       </div>
@@ -211,7 +211,7 @@ onMounted(async () => {
         <div class="absolute top-0 right-0 w-64 h-64 bg-white opacity-5 rounded-full -mr-32 -mt-32"></div>
         <div class="absolute bottom-0 left-0 w-48 h-48 bg-white opacity-5 rounded-full -ml-24 -mb-24"></div>
         <div class="relative">
-          <h2 class="text-3xl font-bold mb-2">Selamat Datang, Staff! 👋</h2>
+          <h2 class="text-3xl font-bold mb-2">Selamat Datang, Staf! 👋</h2>
           <p class="text-blue-100 text-lg">Kelola aktivitas dan laporan Anda dengan mudah</p>
         </div>
       </div>
@@ -238,7 +238,7 @@ onMounted(async () => {
                 ✅
               </div>
               <div>
-                <p class="text-sm font-semibold text-gray-500 mb-1">Selesai</p>
+                <p class="text-sm font-semibold text-gray-500 mb-1">Tugas Selesai</p>
                 <h3 class="text-3xl font-bold text-gray-900">{{ quickStats.taskCompleted }}</h3>
               </div>
             </div>
@@ -250,7 +250,7 @@ onMounted(async () => {
                 ⏳
               </div>
               <div>
-                <p class="text-sm font-semibold text-gray-500 mb-1">Laporan Pending</p>
+                <p class="text-sm font-semibold text-gray-500 mb-1">Laporan Tertunda</p>
                 <h3 class="text-3xl font-bold text-gray-900">{{ quickStats.pendingReports }}</h3>
               </div>
             </div>
@@ -274,15 +274,15 @@ onMounted(async () => {
               </div>
               <div class="flex-1">
                 <h3 class="text-lg font-bold text-gray-900 mb-2 group-hover:text-[#0071f3] transition-colors">
-                  Planning & Report List
+                  Daftar Perencanaan & Laporan
                 </h3>
                 <p class="text-sm text-gray-500 leading-relaxed">
-                  Review dan pantau laporan aktivitas yang telah dibuat
+                  Tinjau dan pantau laporan aktivitas yang telah dibuat
                 </p>
               </div>
             </div>
             <div class="mt-4 pt-4 border-t border-gray-100 flex items-center justify-between">
-              <span class="text-xs font-semibold text-gray-400 uppercase tracking-wide">View Report</span>
+              <span class="text-xs font-semibold text-gray-400 uppercase tracking-wide">Lihat Laporan</span>
               <span class="text-[#0071f3] font-bold group-hover:translate-x-1 transition-transform">→</span>
             </div>
           </button>
@@ -298,7 +298,7 @@ onMounted(async () => {
               </div>
               <div class="flex-1">
                 <h3 class="text-lg font-bold text-gray-900 mb-2 group-hover:text-[#0071f3] transition-colors">
-                  Form Activity Planning
+                  Formulir Perencanaan Kegiatan
                 </h3>
                 <p class="text-sm text-gray-500 leading-relaxed">
                   Buat rencana aktivitas untuk produksi mendatang
@@ -306,7 +306,7 @@ onMounted(async () => {
               </div>
             </div>
             <div class="mt-4 pt-4 border-t border-gray-100 flex items-center justify-between">
-              <span class="text-xs font-semibold text-gray-400 uppercase tracking-wide">Planning</span>
+              <span class="text-xs font-semibold text-gray-400 uppercase tracking-wide">Perencanaan</span>
               <span class="text-[#0071f3] font-bold group-hover:translate-x-1 transition-transform">→</span>
             </div>
           </router-link>
@@ -322,7 +322,7 @@ onMounted(async () => {
               </div>
               <div class="flex-1">
                 <h3 class="text-lg font-bold text-gray-900 mb-2 group-hover:text-[#0071f3] transition-colors">
-                  Form Activity Report
+                  Laporan Kegiatan
                 </h3>
                 <p class="text-sm text-gray-500 leading-relaxed">
                   Laporkan aktivitas harian dan perkembangan produksi
@@ -330,7 +330,7 @@ onMounted(async () => {
               </div>
             </div>
             <div class="mt-4 pt-4 border-t border-gray-100 flex items-center justify-between">
-              <span class="text-xs font-semibold text-gray-400 uppercase tracking-wide">Report</span>
+              <span class="text-xs font-semibold text-gray-400 uppercase tracking-wide">Laporan</span>
               <span class="text-[#0071f3] font-bold group-hover:translate-x-1 transition-transform">→</span>
             </div>
           </button>
@@ -346,7 +346,7 @@ onMounted(async () => {
               </div>
               <div class="flex-1">
                 <h3 class="text-lg font-bold text-gray-900 mb-2 group-hover:text-gray-800 transition-colors">
-                  Add Location & Batch
+                  Tambahkan Lokasi & Batch
                 </h3>
                 <p class="text-sm text-gray-500 leading-relaxed">
                   Tambahkan lokasi baru dan kelola batch produksi
@@ -354,7 +354,7 @@ onMounted(async () => {
               </div>
             </div>
             <div class="mt-4 pt-4 border-t border-gray-100 flex items-center justify-between">
-              <span class="text-xs font-semibold text-gray-400 uppercase tracking-wide">Manage</span>
+              <span class="text-xs font-semibold text-gray-400 uppercase tracking-wide">Kelola</span>
               <span class="text-gray-700 font-bold group-hover:translate-x-1 transition-transform">→</span>
             </div>
           </router-link>
@@ -370,7 +370,7 @@ onMounted(async () => {
               </div>
               <div class="flex-1">
                 <h3 class="text-lg font-bold text-gray-900 mb-2 group-hover:text-blue-700 transition-colors">
-                  Good Movement
+                  Perpindahan Barang
                 </h3>
                 <p class="text-sm text-gray-500 leading-relaxed">
                   Transfer dan kelola perpindahan barang antar gudang
@@ -383,6 +383,7 @@ onMounted(async () => {
             </div>
           </router-link>
 
+          <!-- Environment Log List -->
           <router-link
             to="/environment-log-list"
             class="group bg-white border-2 border-gray-100 hover:border-teal-500 rounded-2xl p-6 text-left hover:shadow-xl transition-all transform hover:-translate-y-1"
@@ -393,15 +394,15 @@ onMounted(async () => {
               </div>
               <div class="flex-1">
                 <h3 class="text-lg font-bold text-gray-900 mb-2 group-hover:text-teal-600 transition-colors">
-                  Environment Log
+                  Catatan Lingkungan
                 </h3>
                 <p class="text-sm text-gray-500 leading-relaxed">
-                  Pantau data suhu dan kelembaban area greenhouse
+                  Pantau data suhu dan kelembaban area produksi
                 </p>
               </div>
             </div>
             <div class="mt-4 pt-4 border-t border-gray-100 flex items-center justify-between">
-              <span class="text-xs font-semibold text-gray-400 uppercase tracking-wide">Monitoring</span>
+              <span class="text-xs font-semibold text-gray-400 uppercase tracking-wide">Pemantauan</span>
               <span class="text-teal-600 font-bold group-hover:translate-x-1 transition-transform">→</span>
             </div>
           </router-link>
@@ -422,7 +423,7 @@ onMounted(async () => {
               </div>
             </div>
             <div class="mt-4 pt-4 border-t border-amber-200 flex items-center justify-between">
-              <span class="text-xs font-semibold text-amber-600 uppercase tracking-wide">Support</span>
+              <span class="text-xs font-semibold text-amber-600 uppercase tracking-wide">Dukungan</span>
               <span class="text-amber-600 font-bold">📖</span>
             </div>
           </div>
@@ -483,7 +484,7 @@ onMounted(async () => {
           <div class="flex-1">
             <h3 class="font-bold text-gray-900 text-lg mb-2">Tips Hari Ini</h3>
             <p class="text-gray-700 leading-relaxed">
-              Pastikan untuk mengisi form aktivitas setiap hari sebelum pukul 16.00 WIB untuk memastikan data tercatat dengan akurat. Gunakan fitur "Planning & Report List" untuk mereview aktivitas minggu ini.
+              Pastikan untuk mengisi formulir aktivitas setiap hari sebelum pukul 16.00 WIB untuk memastikan data tercatat dengan akurat. Gunakan fitur "Daftar Perencanaan & Laporan" untuk meninjau aktivitas minggu ini.
             </p>
           </div>
         </div>
@@ -492,11 +493,11 @@ onMounted(async () => {
       <footer class="text-center py-10 mt-16 border-t border-gray-200">
         <div class="flex items-center justify-center gap-2 mb-2">
            <span class="w-6 h-6 p-0.5">
-             <img :src="logoPG" alt="Potato Grow Logo" class="w-full h-full object-contain" />
+             <img :src="logoPG" alt="Logo Potato Grow" class="w-full h-full object-contain" />
           </span>
           <p class="text-gray-400 font-bold text-sm">POTATO GROW</p>
         </div>
-        <p class="text-gray-400 text-xs">© 2025 All Rights Reserved</p>
+        <p class="text-gray-400 text-xs">© 2025 Hak Cipta Dilindungi</p>
       </footer>
     </div>
   </div>

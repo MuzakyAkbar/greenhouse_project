@@ -21,6 +21,10 @@ const error = ref(null)
 const currentReport = ref(null)
 const phaseInfo = ref(null);
 
+// --- Approval History State ---
+const approvalProgress = ref([])
+const approvalHistory = ref([])
+
 // --- Environment Log State ---
 const envLogData = ref(null) 
 const sessionLabels = {
@@ -115,6 +119,93 @@ const loadEnvironmentLog = async (locationId, dateStr) => {
   } catch (err) { console.error('Error fetching env log:', err) }
 }
 
+// --- Approval Logic ---
+const loadApprovalProgress = async (recordId) => {
+  try {
+    const { data: recordData, error: recordErr } = await supabase
+      .from('gh_approve_record')
+      .select(`current_level_order, overall_status, flow_id, gh_approval_flow!inner(last_level, first_level)`)
+      .eq('record_id', recordId)
+      .single();
+    
+    if (recordErr) throw recordErr;
+
+    const { data: levelStatuses, error: statusErr } = await supabase
+      .from('gh_approval_level_status')
+      .select(`level_status_id, level_order, level_name, status, approved_by, approved_at, revision_notes, revision_requested_by, revision_requested_at`)
+      .eq('record_id', recordId)
+      .order('level_order', { ascending: true });
+    
+    if (statusErr) throw statusErr;
+
+    const approverIds = [...levelStatuses.map(s => s.approved_by), ...levelStatuses.map(s => s.revision_requested_by)].filter(Boolean);
+    let approverNames = {};
+    
+    if (approverIds.length > 0) {
+      const { data: users } = await supabase
+        .from('user')
+        .select('user_id, username, email')
+        .in('user_id', approverIds);
+      
+      if (users) {
+        approverNames = users.reduce((acc, user) => {
+          acc[user.user_id] = user.username || user.email;
+          return acc;
+        }, {});
+      }
+    }
+
+    approvalProgress.value = levelStatuses.map(level => ({
+      ...level,
+      approver_name: level.approved_by ? approverNames[level.approved_by] : null,
+      revisor_name: level.revision_requested_by ? approverNames[level.revision_requested_by] : null,
+      is_final_level: level.level_order === recordData.gh_approval_flow.last_level,
+      level_status: level.status
+    }));
+    
+  } catch (err) {
+    console.error('Error loading approval progress:', err);
+  }
+};
+
+const loadApprovalHistory = async (recordId) => {
+  try {
+    const { data, error } = await supabase
+      .from('gh_approval_history')
+      .select('*')
+      .eq('record_id', recordId)
+      .order('action_at', { ascending: true });
+    
+    if (error) throw error;
+    
+    const userIds = [...new Set(data.map(h => h.user_id).filter(Boolean))];
+    let userNames = {};
+    
+    if (userIds.length > 0) {
+      const { data: users } = await supabase
+        .from('user')
+        .select('user_id, username, email')
+        .in('user_id', userIds);
+      
+      if (users) {
+        userNames = users.reduce((acc, user) => {
+          acc[user.user_id] = user.username || user.email;
+          return acc;
+        }, {});
+      }
+    }
+    
+    approvalHistory.value = data.map(h => ({
+      ...h,
+      user_name: h.user_id ? (userNames[h.user_id] || 'Unknown') : 'System'
+    }));
+    
+  } catch (err) {
+    console.error('Error loading approval history:', err);
+    approvalHistory.value = [];
+  }
+};
+
 onMounted(async () => {
   document.addEventListener('keydown', handleKeydown)
   if (!authStore.isLoggedIn) { router.push('/'); return }
@@ -129,7 +220,7 @@ const loadData = async () => {
     loading.value = true
     await Promise.all([batchStore.getBatches(), locationStore.fetchAll()]);
 
-    // ✅ FIX: Query dengan relasi lengkap & Hapus filter strict 'approved' agar data selalu tampil
+    // 1. Get Report Data
     const { data: report, error: fetchError } = await supabase
       .from('gh_report')
       .select(`
@@ -146,9 +237,23 @@ const loadData = async () => {
     currentReport.value = report;
     if (report.phase_id) phaseInfo.value = await loadPhaseInfo(report.phase_id);
     
-    // Load Env Log
+    // 2. Load Env Log
     if (report.location_id && report.report_date) {
       await loadEnvironmentLog(report.location_id, report.report_date)
+    }
+
+    // 3. Load Approval Record & History
+    // Kita cari record_id di gh_approve_record berdasarkan entity_id (report_id) dan table_name ('gh_report')
+    const { data: recordData } = await supabase
+      .from('gh_approve_record')
+      .select('record_id')
+      .eq('entity_id', report.report_id)
+      .eq('table_name', 'gh_report')
+      .maybeSingle();
+
+    if (recordData) {
+      await loadApprovalProgress(recordData.record_id);
+      await loadApprovalHistory(recordData.record_id);
     }
     
   } catch (err) {
@@ -163,9 +268,19 @@ const loadData = async () => {
 const getBatchName = (batchId) => batchStore.batches.find(b => b.batch_id == batchId)?.batch_name || `Batch ${batchId}`
 const getLocationName = (locationId) => locationStore.locations.find(l => l.location_id == locationId)?.location || `Location ${locationId}`
 const formatDate = (dateStr) => dateStr ? new Date(dateStr).toLocaleDateString('id-ID', { day: '2-digit', month: 'long', year: 'numeric' }) : '-'
-const formatDateTime = (dateStr) => dateStr ? new Date(dateStr).toLocaleString('id-ID', { day: '2-digit', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '-'
 const formatNumber = (value) => Number(value || 0).toLocaleString('id-ID', { minimumFractionDigits: 0, maximumFractionDigits: 2 })
 const formatCurrency = (value) => 'Rp ' + formatNumber(value)
+
+const formatDateTime = (dateStr) => {
+  if (!dateStr) return '-'
+  return new Date(dateStr).toLocaleString('id-ID', { 
+    day: '2-digit', 
+    month: 'long', 
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit'
+  })
+}
 
 const calculateActivityTotal = (materials) => {
   if (!materials) return 0
@@ -218,9 +333,9 @@ const printReport = async () => {
             <div>
               <h1 class="text-2xl font-bold text-gray-900 flex items-center gap-3">
                 <span class="w-10 h-10 bg-gradient-to-br from-green-400 to-green-500 rounded-lg flex items-center justify-center text-white text-lg">✅</span>
-                View Activity Report
+                Lihat Laporan Aktivitas
               </h1>
-              <p class="text-sm text-gray-500 mt-1">Report ID: #{{ report_id }}</p>
+              <p class="text-sm text-gray-500 mt-1">ID Laporan: #{{ report_id }}</p>
             </div>
           </div>
           <button @click="printReport" class="flex items-center gap-2 bg-[#0071f3] hover:bg-[#0060d1] text-white font-semibold px-6 py-2.5 rounded-xl transition-all shadow-md hover:shadow-lg">
@@ -241,7 +356,7 @@ const printReport = async () => {
 
       <template v-else-if="currentReport">
         
-        <div class="mb-8 flex justify-center pdf-avoid-break-inside" v-if="currentReport.report_status === 'approved'">
+        <div class="mb-6 flex justify-center pdf-avoid-break-inside" v-if="currentReport.report_status === 'approved'">
            <div class="inline-flex items-center gap-2 bg-green-100 text-green-800 px-6 py-3 rounded-xl font-bold text-base shadow-sm border-2 border-green-200">
             <svg class="w-5 h-5" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512" fill="currentColor"><path d="M438.6 105.4c12.5 12.5 12.5 32.8 0 45.3l-256 256c-12.5 12.5-32.8 12.5-45.3 0l-128-128c-12.5-12.5-12.5-32.8 0-45.3s32.8-12.5 45.3 0L160 338.7 393.4 105.4c12.5-12.5 32.8-12.5 45.3 0z"/></svg> Laporan Telah Disetujui
           </div>
@@ -251,7 +366,7 @@ const printReport = async () => {
            <h2 class="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-3">📋 Informasi Dasar</h2>
           <div class="bg-white rounded-2xl border-2 border-gray-100 shadow-sm p-6">
             <div class="grid grid-cols-1 md:grid-cols-3 gap-5">
-              <div class="flex flex-col"><label class="text-sm font-semibold text-gray-700 mb-2">🆔 Report ID</label><div class="px-4 py-3 border-2 border-gray-200 rounded-xl bg-gray-50 text-gray-700 font-bold">#{{ currentReport.report_id }}</div></div>
+              <div class="flex flex-col"><label class="text-sm font-semibold text-gray-700 mb-2">🆔 ID Laporan</label><div class="px-4 py-3 border-2 border-gray-200 rounded-xl bg-gray-50 text-gray-700 font-bold">#{{ currentReport.report_id }}</div></div>
               <div class="flex flex-col"><label class="text-sm font-semibold text-gray-700 mb-2">📅 Tanggal</label><div class="px-4 py-3 border-2 border-gray-200 rounded-xl bg-gray-50 text-gray-700 font-medium">{{ formatDate(currentReport.report_date) }}</div></div>
               <div class="flex flex-col"><label class="text-sm font-semibold text-gray-700 mb-2">📍 Lokasi</label><div class="px-4 py-3 border-2 border-gray-200 rounded-xl bg-gray-50 text-gray-700 font-medium">{{ getLocationName(currentReport.location_id) }}</div></div>
             </div>
@@ -265,7 +380,7 @@ const printReport = async () => {
 
         <div v-if="envLogData" class="mb-8 pdf-avoid-break-inside">
            <h2 class="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-3 flex items-center gap-2">
-             <span class="text-lg">🌡️</span> Environment Log
+             <span class="text-lg">🌡️</span> Catatan Lingkungan
            </h2>
            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
               <div v-for="sessionKey in ['morning', 'noon', 'afternoon', 'night']" :key="sessionKey" class="rounded-xl border-2 overflow-hidden bg-white shadow-sm pdf-avoid-break-inside" :class="sessionLabels[sessionKey].colorClass">
@@ -282,7 +397,7 @@ const printReport = async () => {
                        <div v-if="envLogData[`img_${pKey}_${sessionKey}`]" class="w-10 h-10 rounded-lg border overflow-hidden cursor-pointer hover:opacity-80 transition shadow-sm bg-gray-50 flex-shrink-0 no-print-action" @click="openEnvImagePreview(envLogData[`img_${pKey}_${sessionKey}`], `${sessionLabels[sessionKey].label} - ${param.label}`)">
                          <img :src="envLogData[`img_${pKey}_${sessionKey}`]" class="w-full h-full object-cover">
                        </div>
-                       <div v-else class="w-10 h-10 rounded-lg border border-dashed border-gray-200 flex items-center justify-center bg-gray-50 flex-shrink-0"><span class="text-[10px] text-gray-300 italic">No Img</span></div>
+                       <div v-else class="w-10 h-10 rounded-lg border border-dashed border-gray-200 flex items-center justify-center bg-gray-50 flex-shrink-0"><span class="text-[10px] text-gray-300 italic">Tidak ada gambar</span></div>
                     </div>
                  </div>
               </div>
@@ -336,7 +451,7 @@ const printReport = async () => {
                   <h4 class="text-base font-bold text-blue-900 flex items-center gap-2 mb-4"><span class="text-lg">📦</span>Material ({{ activity.materials.length }})</h4>
                   <div class="overflow-x-auto">
                     <table class="w-full text-sm">
-                      <thead><tr class="border-b-2 border-blue-300"><th class="text-left py-2 px-3 font-semibold text-blue-900">Material</th><th class="text-right py-2 px-3 font-semibold text-blue-900">Qty</th><th class="text-center py-2 px-3 font-semibold text-blue-900">UOM</th><th class="text-right py-2 px-3 font-semibold text-blue-900">Total</th></tr></thead>
+                      <thead><tr class="border-b-2 border-blue-300"><th class="text-left py-2 px-3 font-semibold text-blue-900">Material</th><th class="text-right py-2 px-3 font-semibold text-blue-900">Jumlah</th><th class="text-center py-2 px-3 font-semibold text-blue-900">Satuan</th><th class="text-right py-2 px-3 font-semibold text-blue-900">Total</th></tr></thead>
                       <tbody>
                         <tr v-for="mat in activity.materials" :key="mat.material_used_id" class="border-b border-blue-200 bg-white"><td class="py-3 px-3 font-semibold">{{ mat.material_name }}</td><td class="py-3 px-3 text-right">{{ formatNumber(mat.qty) }}</td><td class="py-3 px-3 text-center text-gray-600">{{ mat.uom }}</td><td class="py-3 px-3 text-right font-bold text-blue-700">{{ formatCurrency(mat.total_price || 0) }}</td></tr>
                       </tbody>
@@ -350,8 +465,107 @@ const printReport = async () => {
 
         <div v-if="currentReport.activities && currentReport.activities.some(a => a.materials && a.materials.length > 0)" class="mb-8 pdf-avoid-break-inside">
           <div class="bg-gradient-to-br from-green-50 to-emerald-50 rounded-2xl border-2 border-green-200 shadow-sm p-6 flex justify-between items-center">
-            <div class="flex items-center gap-4"><div class="w-12 h-12 bg-green-500 rounded-xl flex items-center justify-center text-white text-2xl">💰</div><div><p class="text-sm text-green-600 font-semibold">Grand Total Cost</p><p class="text-xs text-green-700">Total biaya material</p></div></div>
+            <div class="flex items-center gap-4"><div class="w-12 h-12 bg-green-500 rounded-xl flex items-center justify-center text-white text-2xl">💰</div><div><p class="text-sm text-green-600 font-semibold">Total Biaya Keseluruhan</p><p class="text-xs text-green-700">Total biaya material</p></div></div>
             <p class="text-3xl font-bold text-green-700">{{ formatCurrency(calculateReportTotal()) }}</p>
+          </div>
+        </div>
+        
+        <div v-if="approvalProgress.length > 0" class="mb-8 pdf-avoid-break-inside">
+          <h2 class="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-3">📊 Riwayat Persetujuan</h2>
+          <div class="bg-white rounded-2xl border-2 border-gray-100 shadow-sm p-6">
+            <div class="space-y-3">
+              <div 
+                v-for="level in approvalProgress" 
+                :key="level.level_status_id" 
+                class="flex items-start gap-4 p-4 rounded-lg" 
+                :class="{
+                  'bg-green-50 border-2 border-green-200': level.level_status === 'approved', 
+                  'bg-yellow-50 border-2 border-yellow-200': level.level_status === 'pending', 
+                  'bg-red-50 border-2 border-red-200': level.level_status === 'needRevision', 
+                  'bg-gray-50 border-2 border-gray-200': level.level_status === 'skipped'
+                }"
+              >
+                <div 
+                  class="w-10 h-10 rounded-full flex items-center justify-center font-bold text-white flex-shrink-0" 
+                  :class="{
+                    'bg-green-500': level.level_status === 'approved', 
+                    'bg-yellow-500': level.level_status === 'pending', 
+                    'bg-red-500': level.level_status === 'needRevision', 
+                    'bg-gray-400': level.level_status === 'skipped'
+                  }"
+                >
+                  {{ level.level_order }}
+                </div>
+                
+                <div class="flex-1">
+                  <p class="font-bold text-gray-900">{{ level.level_name || `Level ${level.level_order}` }}</p>
+                  
+                  <p class="text-sm text-gray-600">
+                    <span v-if="level.level_status === 'approved'">✅ Disetujui oleh {{ level.approver_name || 'Admin' }}</span>
+                    <span v-else-if="level.level_status === 'needRevision'">🔄 Revisi diminta oleh {{ level.revisor_name || 'Admin' }}</span>
+                    <span v-else-if="level.level_status === 'pending'">⏳ Menunggu Persetujuan</span>
+                    <span v-else>⏭️ Dilewati</span>
+                  </p>
+                  
+                  <p v-if="level.approved_at" class="text-xs text-gray-500 mt-1">{{ formatDateTime(level.approved_at) }}</p>
+                  
+                  <div v-if="approvalHistory.length > 0" class="mt-3 space-y-2">
+                    <template v-for="history in approvalHistory.filter(h => h.level_order === level.level_order)" :key="history.history_id">
+                      
+                      <div v-if="history.action === 'approved'" class="p-3 bg-white border-2 border-green-300 rounded-lg shadow-sm">
+                        <div class="flex items-start justify-between mb-2">
+                          <div class="flex items-center gap-2">
+                            <svg class="w-4 h-4 text-green-600" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" fill="currentColor">
+                              <path d="M256 512A256 256 0 1 0 256 0a256 256 0 1 0 0 512zM369 209L241 337c-9.4 9.4-24.6 9.4-33.9 0l-64-64c-9.4-9.4-9.4-24.6 0-33.9s24.6-9.4 33.9 0l47 47L335 175c9.4-9.4 24.6-9.4 33.9 0s9.4 24.6 0 33.9z"/>
+                            </svg>
+                            <p class="text-xs font-bold text-green-700">Komentar oleh {{ history.user_name }}</p>
+                          </div>
+                          <p class="text-xs text-gray-500">{{ formatDateTime(history.action_at) }}</p>
+                        </div>
+                        <p class="text-sm text-gray-700 whitespace-pre-wrap pl-6">{{ history.comment || 'Tidak ada komentar' }}</p>
+                      </div>
+                      
+                      <div v-if="history.action === 'revision_requested'" class="p-3 bg-white border-2 border-red-300 rounded-lg shadow-sm">
+                        <div class="flex items-start justify-between mb-2">
+                          <div class="flex items-center gap-2">
+                            <span class="text-red-600 font-bold">🔄</span>
+                            <p class="text-xs font-bold text-red-700">Revisi diminta oleh {{ history.user_name }}</p>
+                          </div>
+                          <p class="text-xs text-gray-500">{{ formatDateTime(history.action_at) }}</p>
+                        </div>
+                        <p class="text-sm text-gray-700 whitespace-pre-wrap pl-6">{{ history.comment || 'Tidak ada catatan' }}</p>
+                      </div>
+                      
+                      <div v-if="history.action === 'submitted'" class="p-3 bg-white border-2 border-blue-300 rounded-lg shadow-sm">
+                        <div class="flex items-start justify-between mb-2">
+                          <div class="flex items-center gap-2">
+                            <svg class="w-4 h-4 text-blue-600" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" fill="currentColor">
+                              <path d="M16.1 260.2c-22.6 12.9-20.5 47.3 3.6 57.3L160 376l0 103.3c0 18.1 14.6 32.7 32.7 32.7c9.7 0 18.9-4.3 25.1-11.8l62-74.3 123.9 51.6c18.9 7.9 40.8-4.5 43.9-24.7l64-416c1.9-12.1-3.4-24.3-13.5-31.2s-23.3-7.5-34-1.4l-448 256zm52.1 25.5L409.7 90.6 190.1 336l1.2 1L68.2 285.7zM403.3 425.4L236.7 355.9 450.8 116.6 403.3 425.4z"/>
+                            </svg>
+                            <p class="text-xs font-bold text-blue-700">Diajukan oleh {{ history.user_name }}</p>
+                          </div>
+                          <p class="text-xs text-gray-500">{{ formatDateTime(history.action_at) }}</p>
+                        </div>
+                        <p class="text-sm text-gray-700 whitespace-pre-wrap pl-6">{{ history.comment || 'Laporan diajukan untuk persetujuan' }}</p>
+                      </div>
+                      
+                    </template>
+                  </div>
+                </div>
+                
+                <span 
+                  class="px-3 py-1 rounded-lg font-bold text-xs border-2 whitespace-nowrap self-start" 
+                  :class="{
+                    'bg-green-100 text-green-800 border-green-200': level.level_status === 'approved', 
+                    'bg-yellow-100 text-yellow-800 border-yellow-200': level.level_status === 'pending', 
+                    'bg-red-100 text-red-800 border-red-200': level.level_status === 'needRevision', 
+                    'bg-gray-100 text-gray-800 border-gray-200': level.level_status === 'skipped'
+                  }"
+                >
+                  {{ level.level_status === 'approved' ? '✅ Approved' : level.level_status === 'needRevision' ? '🔄 Revision' : level.level_status === 'skipped' ? '⏭️ Skipped' : '⏳ Pending' }}
+                </span>
+              </div>
+            </div>
           </div>
         </div>
 
@@ -366,18 +580,18 @@ const printReport = async () => {
       <button v-if="imagePreview.images.length > 1" @click.stop="prevImage" class="absolute left-4 text-white hover:text-gray-300 p-3">‹</button>
       <div class="relative max-w-7xl max-h-[85vh] p-4 flex flex-col items-center">
         <img :src="getImageUrl(imagePreview.images[imagePreview.currentIndex])" class="max-w-full max-h-[80vh] rounded-lg shadow-xl object-contain"/>
-        <div class="mt-4 text-center"><p class="text-white font-bold text-lg">{{ imagePreview.title }}</p><p class="text-gray-400 text-sm">Image {{ imagePreview.currentIndex + 1 }} of {{ imagePreview.images.length }}</p></div>
+        <div class="mt-4 text-center"><p class="text-white font-bold text-lg">{{ imagePreview.title }}</p><p class="text-gray-400 text-sm">Gambar {{ imagePreview.currentIndex + 1 }} dari {{ imagePreview.images.length }}</p></div>
       </div>
       <button v-if="imagePreview.images.length > 1" @click.stop="nextImage" class="absolute right-4 text-white hover:text-gray-300 p-3">›</button>
     </div>
     <footer class="text-center py-10 mt-16 border-t border-gray-200">
         <div class="flex items-center justify-center gap-2 mb-2">
            <span class="w-6 h-6 p-0.5">
-             <img :src="logoPG" alt="Potato Grow Logo" class="w-full h-full object-contain" />
+             <img :src="logoPG" alt="Logo Potato Grow" class="w-full h-full object-contain" />
           </span>
           <p class="text-gray-400 font-bold text-sm">POTATO GROW</p>
         </div>
-        <p class="text-gray-400 text-xs">© 2025 All Rights Reserved</p>
+        <p class="text-gray-400 text-xs">© 2025 Hak Cipta Dilindungi</p>
       </footer>
   </div>
 </template>

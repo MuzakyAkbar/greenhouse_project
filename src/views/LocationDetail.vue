@@ -566,9 +566,9 @@ const initPenjualanChart = async () => {
                 <span class="w-10 h-10 bg-gradient-to-br from-[#0071f3] to-[#8FABD4] rounded-lg flex items-center justify-center text-white text-lg">
                   📍
                 </span>
-                {{ locationInfo?.location || 'Loading...' }}
+                {{ locationInfo?.location || 'Memuat...' }}
               </h1>
-              <p class="text-sm text-gray-500 mt-1 ml-13">Detail Produksi & Monitoring Lokasi</p>
+              <p class="text-sm text-gray-500 mt-1 ml-13">Detail Produksi & Pemantauan Lokasi</p>
             </div>
           </div>
         </div>
@@ -584,7 +584,7 @@ const initPenjualanChart = async () => {
               <p v-if="environmentData" class="text-xs text-gray-400 mt-1">Data Tanggal: {{ formatDate(environmentData.log_date) }}</p>
            </div>
            <router-link to="/environment-log/add" class="text-xs font-bold text-blue-600 hover:underline flex items-center gap-1">
-              Update Kondisi <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14 5l7 7m0 0l-7 7m7-7H3"/></svg>
+              Perbarui Kondisi <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14 5l7 7m0 0l-7 7m7-7H3"/></svg>
            </router-link>
         </div>
 
@@ -607,8 +607,8 @@ const initPenjualanChart = async () => {
                         <span class="text-xs bg-gray-100 px-2 py-0.5 rounded text-gray-600 font-mono">{{ formatTime(environmentData.time_morning) }}</span>
                     </div>
                     <div class="space-y-2 text-sm">
-                        <div class="flex justify-between"><span>Temp</span> <b class="text-gray-900">{{ environmentData.temp_morning || '-' }}°C</b></div>
-                        <div class="flex justify-between"><span>Humid</span> <b class="text-gray-900">{{ environmentData.humid_morning || '-' }}%</b></div>
+                        <div class="flex justify-between"><span>Suhu</span> <b class="text-gray-900">{{ environmentData.temp_morning || '-' }}°C</b></div>
+                        <div class="flex justify-between"><span>Kelembapan</span> <b class="text-gray-900">{{ environmentData.humid_morning || '-' }}%</b></div>
                         <div class="flex justify-between"><span>CO2</span> <b class="text-gray-900">{{ environmentData.co2_morning || '-' }} ppm</b></div>
                     </div>
                 </div>
@@ -618,8 +618,8 @@ const initPenjualanChart = async () => {
                         <span class="text-xs bg-gray-100 px-2 py-0.5 rounded text-gray-600 font-mono">{{ formatTime(environmentData.time_noon) }}</span>
                     </div>
                     <div class="space-y-2 text-sm">
-                        <div class="flex justify-between"><span>Temp</span> <b class="text-gray-900">{{ environmentData.temp_noon || '-' }}°C</b></div>
-                        <div class="flex justify-between"><span>Humid</span> <b class="text-gray-900">{{ environmentData.humid_noon || '-' }}%</b></div>
+                        <div class="flex justify-between"><span>Suhu</span> <b class="text-gray-900">{{ environmentData.temp_noon || '-' }}°C</b></div>
+                        <div class="flex justify-between"><span>Kelembapan</span> <b class="text-gray-900">{{ environmentData.humid_noon || '-' }}%</b></div>
                         <div class="flex justify-between"><span>CO2</span> <b class="text-gray-900">{{ environmentData.co2_noon || '-' }} ppm</b></div>
                     </div>
                 </div>
@@ -629,8 +629,8 @@ const initPenjualanChart = async () => {
                         <span class="text-xs bg-gray-100 px-2 py-0.5 rounded text-gray-600 font-mono">{{ formatTime(environmentData.time_afternoon) }}</span>
                     </div>
                     <div class="space-y-2 text-sm">
-                        <div class="flex justify-between"><span>Temp</span> <b class="text-gray-900">{{ environmentData.temp_afternoon || '-' }}°C</b></div>
-                        <div class="flex justify-between"><span>Humid</span> <b class="text-gray-900">{{ environmentData.humid_afternoon || '-' }}%</b></div>
+                        <div class="flex justify-between"><span>Suhu</span> <b class="text-gray-900">{{ environmentData.temp_afternoon || '-' }}°C</b></div>
+                        <div class="flex justify-between"><span>Kelembapan</span> <b class="text-gray-900">{{ environmentData.humid_afternoon || '-' }}%</b></div>
                         <div class="flex justify-between"><span>CO2</span> <b class="text-gray-900">{{ environmentData.co2_afternoon || '-' }} ppm</b></div>
                     </div>
                 </div>
@@ -640,8 +640,8 @@ const initPenjualanChart = async () => {
                         <span class="text-xs bg-gray-100 px-2 py-0.5 rounded text-gray-600 font-mono">{{ formatTime(environmentData.time_night) }}</span>
                     </div>
                     <div class="space-y-2 text-sm">
-                        <div class="flex justify-between"><span>Temp</span> <b class="text-gray-900">{{ environmentData.temp_night || '-' }}°C</b></div>
-                        <div class="flex justify-between"><span>Humid</span> <b class="text-gray-900">{{ environmentData.humid_night || '-' }}%</b></div>
+                        <div class="flex justify-between"><span>Suhu</span> <b class="text-gray-900">{{ environmentData.temp_night || '-' }}°C</b></div>
+                        <div class="flex justify-between"><span>Kelembapan</span> <b class="text-gray-900">{{ environmentData.humid_night || '-' }}%</b></div>
                         <div class="flex justify-between"><span>CO2</span> <b class="text-gray-900">{{ environmentData.co2_night || '-' }} ppm</b></div>
                     </div>
                 </div>
@@ -690,7 +690,7 @@ const initPenjualanChart = async () => {
             <div class="relative">
               <p class="text-sm font-semibold opacity-90 mb-2">Pendapatan Total</p>
               <h2 class="text-4xl font-bold mb-1">Rp {{ (summary.pendapatan / 1000000).toFixed(1) }}M</h2>
-              <p class="text-xs opacity-75">💵 Revenue lokasi</p>
+              <p class="text-xs opacity-75">💵 Pendapatan lokasi</p>
             </div>
           </div>
         </div>
@@ -811,7 +811,7 @@ const initPenjualanChart = async () => {
       <footer class="text-center py-10 mt-16 border-t border-gray-200">
         <div class="flex items-center justify-center gap-2 mb-2">
            <span class="w-6 h-6 p-0.5">
-             <img :src="logoPG" alt="Potato Grow Logo" class="w-full h-full object-contain" />
+             <img :src="logoPG" alt="Logo Potato Grow" class="w-full h-full object-contain" />
           </span>
           <p class="text-gray-400 font-bold text-sm">POTATO GROW</p>
         </div>

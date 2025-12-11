@@ -23,6 +23,12 @@ const router = createRouter({
       meta: { requiresAuth: true, roles: ["staff"] },
     },
     {
+      path: "/dashboardWarehouse",
+      name: "dashboardWarehouse",
+      component: () => import("../views/dashboardWarehouse.vue"),
+      meta: { requiresAuth: true },
+    },
+    {
       path: "/planningReportList",
       name: "planningReportList",
       component: () => import("../views/planningReportList.vue"),
@@ -182,13 +188,28 @@ const router = createRouter({
       meta: { requiresAuth: true },
     },
     
-    // Good movement routes
+    // ✅ GOOD MOVEMENT ROUTES
     {
       path: "/goodmovement",
       name: "goodmovement",
       component: () => import("../views/goodmovement.vue"),
       meta: { requiresAuth: true },
     },
+    // --- Penambahan Route Baru (Receiving & Berita Acara) ---
+    {
+      path: "/movementReceiving/:id",
+      name: "movementReceiving",
+      component: () => import("../views/movementReceiving.vue"),
+      meta: { requiresAuth: true },
+      props: true,
+    },
+    {
+      path: "/movementBA",
+      name: "movement-berita-acara",
+      component: () => import("../views/movementBA.vue"),
+      meta: { requiresAuth: true },
+    },
+    // --------------------------------------------------------
     {
       path: "/movement-edit/:id",
       name: "movement-edit",
@@ -235,8 +256,7 @@ const router = createRouter({
       meta: { requiresAuth: true },
     },
 
-    // ✅ DAMAGE / REPAIR ROUTES (UPDATED)
-    // Parameter diubah dari :summary_id menjadi :record_id untuk mendukung approval Repair
+    // ✅ DAMAGE / REPAIR ROUTES
     {
       path: "/damageReportReview/:record_id",
       name: "damageReportReview",
@@ -251,7 +271,6 @@ const router = createRouter({
         }
       }
     },
-    // View dan Edit juga disesuaikan untuk menerima record_id jika diperlukan untuk konsistensi
     {
       path: "/damageReportView/:record_id",
       name: "damageReportView",
@@ -264,6 +283,7 @@ const router = createRouter({
       component: () => import("../views/DamageReportEdit.vue"),
       meta: { requiresAuth: true },
     },
+    
     // ✅ ENVIRONMENT LOG ROUTES
     {
       path: "/environment-log-list",

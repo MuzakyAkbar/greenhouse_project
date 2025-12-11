@@ -605,7 +605,7 @@ const getBatchCount = (locationId) => {
             @click="bukaLaporanActivity"
             class="bg-white hover:bg-gray-50 text-gray-700 font-medium px-5 py-3 rounded-xl transition-all text-sm border-2 border-gray-200 hover:border-[#0071f3] shadow-sm hover:shadow"
           >
-            📊 Daftar Planning & Laporan
+            📊 Daftar Perencanaan & Laporan
           </button>
           <router-link
             to="/planningActivity"
@@ -646,7 +646,7 @@ const getBatchCount = (locationId) => {
             class="bg-white hover:bg-gray-50 text-gray-700 font-medium px-5 py-3 rounded-xl transition-all text-sm border-2 border-gray-200 hover:border-teal-500 shadow-sm hover:shadow inline-flex items-center gap-2"
           >
             <span class="text-lg">🌡️</span> 
-            Environment Log
+            Catatan Lingkungan
           </router-link>
         </div>
       </div>
@@ -692,7 +692,7 @@ const getBatchCount = (locationId) => {
             <div class="relative">
               <p class="text-sm font-semibold opacity-90 mb-2">Pendapatan Total</p>
               <h2 class="text-4xl font-bold mb-1">Rp {{ (summary.pendapatan / 1000000).toFixed(1) }}M</h2>
-              <p class="text-xs opacity-75">💵 Revenue keseluruhan</p>
+              <p class="text-xs opacity-75">💵 Pendapatan keseluruhan</p>
             </div>
           </div>
         </div>

@@ -761,7 +761,7 @@ onUnmounted(() => { stopScanner(); });
               <span class="w-10 h-10 bg-gradient-to-br from-[#0071f3] to-[#8FABD4] rounded-lg flex items-center justify-center text-white text-lg">
                 📝
               </span>
-              Form Activity Planning
+              Formulir Perencanaan Kegiatan
             </h1>
             <p class="text-sm text-gray-500 mt-1 ml-13">Input Planning Daily GreenHouse</p>
           </div>
@@ -780,7 +780,7 @@ onUnmounted(() => { stopScanner(); });
                 <svg class="w-4 h-4 text-[#0071f3]" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512" fill="currentColor">
                   <path d="M128 0c17.7 0 32 14.3 32 32l0 32 128 0 0-32c0-17.7 14.3-32 32-32s32 14.3 32 32l0 32 48 0c26.5 0 48 21.5 48 48l0 48L0 160l0-48C0 85.5 21.5 64 48 64l48 0 0-32c0-17.7 14.3-32 32-32zM0 192l448 0 0 272c0 26.5-21.5 48-48 48L48 512c-26.5 0-48-21.5-48-48L0 192z"/>
                 </svg>
-                Date
+                Tanggal
               </label>
               <input 
                 type="date"  
@@ -792,10 +792,10 @@ onUnmounted(() => { stopScanner(); });
             <div class="flex flex-col">
               <label class="text-sm font-semibold text-gray-700 mb-2 flex items-center gap-2 h-6">
                 <span class="text-lg leading-none">🌱</span>
-                Phase
+                Fase
               </label>
               <select v-model="selectedPhase" class="px-4 py-3 border-2 border-gray-200 rounded-xl bg-white text-gray-700 font-medium focus:outline-none focus:border-[#0071f3] focus:ring-2 focus:ring-[#0071f3]/20 transition appearance-none cursor-pointer">
-                <option value="">Pilih Phase</option>
+                <option value="">Pilih Fase</option>
                 <option v-for="p in phaseList" :key="p.phase_id" :value="p.phase_id">
                   {{ p.phase_name }}
                 </option>
@@ -805,14 +805,14 @@ onUnmounted(() => { stopScanner(); });
             <div class="flex flex-col">
               <label class="text-sm font-semibold text-gray-700 mb-2 flex items-center gap-2 h-6">
                 <span class="text-lg leading-none">📍</span>
-                Location
+                Lokasi
               </label>
               <select  
                 v-model="selectedLocation"
                 class="w-full px-4 py-3 border-2 border-gray-200 rounded-xl bg-gray-50 text-gray-700 font-medium 
                       focus:outline-none focus:border-[#0071f3] focus:ring-2 focus:ring-[#0071f3]/20 transition appearance-none"
               >
-                <option disabled value="">Select Location</option>
+                <option disabled value="">Pilih Lokasi</option>
                 <option
                   v-for="loc in locations"
                   :key="loc.location_id"
@@ -836,7 +836,7 @@ onUnmounted(() => { stopScanner(); });
                       disabled:bg-gray-100 disabled:text-gray-400 disabled:cursor-not-allowed"
               >
                 <option disabled value="">
-                  {{ filteredBatches.length === 0 ? "Select Location First" : "Select Batch" }}
+                  {{ filteredBatches.length === 0 ? "Pilih Lokasi Terlebih Dahulu" : "Pilih Batch" }}
                 </option>
                 <option
                   v-for="b in filteredBatches"
@@ -874,20 +874,20 @@ onUnmounted(() => { stopScanner(); });
               <div class="w-10 h-10 bg-gradient-to-br from-[#0071f3] to-[#8FABD4] rounded-lg flex items-center justify-center text-white font-bold">
                 {{ index + 1 }}
               </div>
-              <h3 class="text-lg font-bold text-gray-900">Activity {{ index + 1 }}</h3>
+              <h3 class="text-lg font-bold text-gray-900">Aktivitas {{ index + 1 }}</h3>
               <span v-if="selectedPhase" class="ml-auto px-3 py-1 bg-green-100 text-green-700 rounded-lg text-sm font-semibold">
-                Phase: {{ selectedPhase }}
+                Fase: {{ selectedPhase }}
               </span>
             </div>
 
             <div class="grid grid-cols-1 md:grid-cols-2 gap-5 mb-6">
               <div class="flex flex-col">
-                <label class="text-sm font-semibold text-gray-700 mb-2">Select Activity</label>
+                <label class="text-sm font-semibold text-gray-700 mb-2">Pilih Aktivitas</label>
                 <select
                   v-model="section.activity_id"
                   class="px-4 py-3 border-2 border-gray-200 rounded-xl bg-white text-gray-700 font-medium focus:outline-none focus:border-[#0071f3] focus:ring-2 focus:ring-[#0071f3]/20 transition appearance-none cursor-pointer"
                 >
-                  <option value="" disabled>Select Activity</option>
+                  <option value="" disabled>Pilih Aktivitas</option>
                   <option
                     v-for="a in potatoActivities"
                     :key="a.activity_id"
@@ -914,7 +914,7 @@ onUnmounted(() => { stopScanner(); });
               <div class="flex justify-between items-center mb-4">
                 <h4 class="text-base font-bold text-gray-900 flex items-center gap-2">
                   <span class="text-lg">📦</span>
-                  Material
+                  Bahan Baku
                 </h4>
               </div>
               <div class="space-y-3">
@@ -924,14 +924,14 @@ onUnmounted(() => { stopScanner(); });
                   class="flex flex-col gap-3 bg-white rounded-lg p-4 border border-gray-200"
                 >
                   <div class="flex flex-col">
-                    <label class="text-xs font-semibold text-gray-600 mb-2">Material Name</label>
+                    <label class="text-xs font-semibold text-gray-600 mb-2">Nama Bahan Baku</label>
                     <select
                       v-model="material.material_name"
                       :disabled="materialLoading"
                       class="px-4 py-2.5 border-2 border-gray-200 rounded-lg bg-white text-gray-700 text-sm font-medium focus:outline-none focus:border-[#0071f3] focus:ring-2 focus:ring-[#0071f3]/20 transition appearance-none cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
                     >
                       <option value="" disabled>
-                        {{ materialLoading ? '⏳ Loading materials...' : 'Select Material' }}
+                        {{ materialLoading ? '⏳ Memuat bahan baku...' : 'Pilih Bahan Baku' }}
                       </option>
                       <option
                         v-for="mat in availableMaterials"
@@ -953,11 +953,11 @@ onUnmounted(() => { stopScanner(); });
                         </div>
                         <div class="flex justify-between text-orange-600">
                           <span>Sudah digunakan hari ini:</span>
-                          <span class="font-semibold" :id="`used-${index}-${matIndex}`">Calculating...</span>
+                          <span class="font-semibold" :id="`used-${index}-${matIndex}`">Perhitungan...</span>
                         </div>
                         <div class="flex justify-between border-t border-blue-300 pt-1">
                           <span class="text-green-700 font-semibold">Tersedia:</span>
-                          <span class="font-bold text-green-700" :id="`available-${index}-${matIndex}`">Calculating...</span>
+                          <span class="font-bold text-green-700" :id="`available-${index}-${matIndex}`">Perhitungan...</span>
                         </div>
                       </div>
                     </div>
@@ -966,7 +966,7 @@ onUnmounted(() => { stopScanner(); });
                   <div class="grid grid-cols-2 sm:flex sm:gap-3 sm:items-end gap-3">
                     
                     <div class="col-span-1 sm:flex-1 flex flex-col">
-                      <label class="text-xs font-semibold text-gray-600 mb-2">Qty</label>
+                      <label class="text-xs font-semibold text-gray-600 mb-2">Jumlah</label>
                       <input
                         v-model="material.qty"
                         type="number"
@@ -1001,7 +1001,7 @@ onUnmounted(() => { stopScanner(); });
                 @click="addMaterialRow(index)"
                 class="w-full mt-3 bg-gradient-to-r from-[#0071f3] to-[#0060d1] hover:from-[#0060d1] hover:to-[#0050b1] text-white font-semibold px-4 py-2.5 rounded-lg transition shadow-md hover:shadow-lg text-sm"
               >
-                + Add Material
+                + Tambahkan Bahan
               </button>
             </div>
 
@@ -1009,7 +1009,7 @@ onUnmounted(() => { stopScanner(); });
               <div class="flex justify-between items-center mb-4">
                 <h4 class="text-base font-bold text-gray-900 flex items-center gap-2">
                   <span class="text-lg">👷</span>
-                  Number of Workers
+                  Jumlah Pekerja
                 </h4>
               </div>
               <div class="space-y-3">
@@ -1019,7 +1019,7 @@ onUnmounted(() => { stopScanner(); });
                   class="flex gap-3 items-end bg-white rounded-lg p-4 border border-gray-200"
                 >
                   <div class="flex-1 flex flex-col">
-                    <label class="text-xs font-semibold text-gray-600 mb-2">Number of Workers</label>
+                    <label class="text-xs font-semibold text-gray-600 mb-2">Jumlah Pekerja</label>
                     <input
                       type="number"
                       v-model="worker.qty"
@@ -1033,7 +1033,7 @@ onUnmounted(() => { stopScanner(); });
                     v-if="section.workers.length > 1"
                     class="px-4 py-2.5 bg-red-500 hover:bg-red-600 text-white text-sm font-semibold rounded-lg transition shadow-sm hover:shadow"
                   >
-                    Delete
+                    Hapus
                   </button>
                 </div>
               </div>
@@ -1050,7 +1050,7 @@ onUnmounted(() => { stopScanner(); });
           <svg class="w-5 h-5 text-[#0071f3]" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512" fill="currentColor">
             <path d="M256 80c0-17.7-14.3-32-32-32s-32 14.3-32 32l0 144L48 224c-17.7 0-32 14.3-32 32s14.3 32 32 32l144 0 0 144c0 17.7 14.3 32 32 32s32-14.3 32-32l0-144 144 0c17.7 0 32-14.3 32-32s-14.3-32-32-32l-144 0 0-144z"/>
           </svg>
-          Add New Activity
+          Tambahkan Aktivitas Baru
         </button>
       </div>
 
@@ -1061,8 +1061,8 @@ onUnmounted(() => { stopScanner(); });
           :class="{ 'opacity-50 cursor-not-allowed': isSubmitting }"
           class="bg-gradient-to-r from-[#0071f3] to-[#0060d1] hover:from-[#0060d1] hover:to-[#0050b1] text-white font-bold px-12 py-4 rounded-xl shadow-lg hover:shadow-xl transition-all transform hover:-translate-y-0.5 text-lg"
         >
-          <span v-if="isSubmitting">⏳ Saving...</span>
-          <span v-else>📤 Submit Planning</span>
+          <span v-if="isSubmitting">⏳ Menyimpan...</span>
+          <span v-else>📤 Ajukan Rencana</span>
         </button>
       </div>
     </div>

@@ -6,6 +6,7 @@ import { useBatchStore } from '../stores/batch'
 import { useLocationStore } from '../stores/location'
 import { supabase } from '../lib/supabase'
 import openbravoApi from '@/lib/openbravo'
+import axios from 'axios'
 import logoPG from '../assets/logoPG.svg'
 
 const router = useRouter()
@@ -13,6 +14,8 @@ const route = useRoute()
 const authStore = useAuthStore()
 const batchStore = useBatchStore()
 const locationStore = useLocationStore()
+const approvalComment = ref('')
+const approvalHistory = ref([])
 
 const report_id = ref(route.params.report_id || null)
 const sourcePage = ref(route.query.from || '/planningReportList')
@@ -301,9 +304,10 @@ const loadData = async () => {
 
     currentReport.value = report;
     if (report.phase_id) phaseInfo.value = await loadPhaseInfo(report.phase_id);
-    await loadApprovalProgress();
     
-    // ✅ Load Environment Data
+    await loadApprovalProgress();
+    await loadApprovalHistory(); // ✅ LOAD HISTORY
+    
     if (report.location_id && report.report_date) {
       await loadEnvironmentLog(report.location_id, report.report_date)
     }
@@ -320,92 +324,308 @@ const loadData = async () => {
 };
 
 // ===========================================
-// APPROVAL LOGIC (Versi Lama / Robust)
+// APPROVAL LOGIC (Fixed for API Process)
 // ===========================================
 
 const createAndProcessMovement = async (materials, activityName) => {
-  if (!materials || materials.length === 0) return { success: false, errors: 'No materials' };
-  if (!warehouseInfo.value.warehouse || !warehouseInfo.value.bin) return { success: false, errors: 'Warehouse/Bin missing' };
+  // 1. Validasi Awal
+  if (!materials || materials.length === 0) {
+    return { success: false, errors: 'No materials provided' };
+  }
+  
+  // Check credentials for Standard REST (Step 1 & 2)
+  const obUser = localStorage.getItem('OB_USER');
+  const obKey = localStorage.getItem('OB_KEY');
+  
+  if (!obUser || !obKey) {
+    return { 
+      success: false, 
+      errors: 'Kredensial Openbravo hilang. Silakan Logout & Login ulang.' 
+    };
+  }
+
+  // Check warehouse & bin info
+  if (!warehouseInfo.value.bin || !warehouseInfo.value.warehouse) {
+    return { 
+      success: false, 
+      errors: 'Warehouse/Bin tidak ditemukan untuk location ini' 
+    };
+  }
 
   const warehouse = warehouseInfo.value.warehouse;
   const bin = warehouseInfo.value.bin;
-  let orgId = warehouse.organization?.id || warehouse.organization;
+  const warehouseId = warehouse.id;
+  const binId = bin.id; 
+  
+  // ✅ FIX: Gunakan ID Default jika object client/org tidak terbaca sempurna
+  const DEFAULT_CLIENT_ID = '025F309A89714992995442D9CDE13A15';
+  const DEFAULT_ORG_ID = '96D7D37973EF450383B8ADCFDB666725';
+
+  const orgId = warehouse.organization?.id || warehouse.organization || DEFAULT_ORG_ID;
+  const clientId = warehouse.client?.id || warehouse.client || DEFAULT_CLIENT_ID;
+  
+  const PATH_SERVICE = '/org.openbravo.service.json.jsonrest';
+
+  console.log(`\n${'='.repeat(60)}`);
+  console.log(`🔄 CREATING INTERNAL CONSUMPTION`);
+  console.log(`${'='.repeat(60)}`);
+  console.log('Activity:', activityName);
+  console.log('Org ID:', orgId);
+  console.log('Client ID:', clientId);
+  console.log(`${'='.repeat(60)}\n`);
 
   try {
-    // 1. Create Header
-    const movementPayload = {
-      organization: orgId,
-      movementType: 'I-',
-      movementDate: new Date().toISOString(),
-      name: `Material Usage - ${activityName} - ${new Date().toLocaleDateString('id-ID')}`,
-      description: `Auto-generated from Greenhouse Activity: ${activityName}`
+    // ============================================
+    // STEP 1: CREATE HEADER
+    // ============================================
+    console.log('🔄 STEP 1: Creating Header...');
+    
+    const now = new Date();
+    const movementDate = now.toISOString().split('T')[0];
+    const consumptionName = `GH-${activityName.replace(/[^a-zA-Z0-9]/g, '').substring(0, 20)}-${Date.now()}`;
+    
+    const consumptionPayload = {
+      data: [{
+        _entityName: 'MaterialMgmtInternalConsumption',
+        organization: orgId,
+        client: clientId,
+        warehouse: warehouseId,
+        movementDate: movementDate,
+        name: consumptionName,
+        description: `Auto: ${activityName}`
+      }]
     };
 
-    const createMovementRes = await openbravoApi.post('/org.openbravo.service.json.jsonrest/MaterialMgmtMaterialMovement', { data: movementPayload });
+    const createRes = await openbravoApi.post(`${PATH_SERVICE}/MaterialMgmtInternalConsumption`, consumptionPayload);
+
+    if (createRes.data.response && createRes.data.response.status !== 0) {
+      throw new Error(`Openbravo Reject: ${createRes.data.response.error?.message}`);
+    }
+
+    let consumptionId = null;
+    const rData = createRes.data.response?.data || createRes.data.data;
+    if (Array.isArray(rData) && rData.length > 0) consumptionId = rData[0].id;
+    else if (rData && rData.id) consumptionId = rData.id;
+
+    if (!consumptionId) throw new Error('Gagal mendapatkan ID Header');
+    console.log(`✅ Header Created: ${consumptionId}`);
+
+    // ============================================
+    // STEP 2: CREATE LINES
+    // ============================================
+    console.log('\n🔄 STEP 2: Creating Lines...');
     
-    let movementId = null;
-    let mData = createMovementRes?.data?.response?.data || createMovementRes?.data?.data || createMovementRes?.data;
-    if (Array.isArray(mData) && mData.length > 0) movementId = mData[0].id;
-    else if (mData && mData.id) movementId = mData.id;
-
-    if (!movementId) throw new Error('Failed to create movement header');
-
-    // 2. Create Lines
     let successCount = 0;
     const errors = [];
 
     for (const material of materials) {
       try {
         const escapedName = material.material_name.replace(/'/g, "''");
-        const productRes = await openbravoApi.get('/org.openbravo.service.json.jsonrest/Product', { 
-            params: { _where: `name='${escapedName}'`, _selectedProperties: 'id,name,uOM' } 
+        const prodRes = await openbravoApi.get(`${PATH_SERVICE}/Product`, { 
+          params: { _where: `name='${escapedName}'`, _selectedProperties: 'id,name,uOM', _startRow: 0, _endRow: 1 } 
         });
-        const products = productRes?.data?.response?.data || [];
-        if (products.length === 0) { errors.push(`Product not found: ${material.material_name}`); continue; }
         
+        const products = prodRes.data.response?.data || [];
+        if (!products.length) {
+          errors.push(`Produk '${material.material_name}' tidak ditemukan`);
+          continue;
+        }
+
         const product = products[0];
         let uomId = product.uOM?.id || product.uOM;
+
+        if (material.uom) {
+          const uomRes = await openbravoApi.get(`${PATH_SERVICE}/UOM`, { params: { _where: `name='${material.uom}'`, _startRow: 0, _endRow: 1 } });
+          const uoms = uomRes?.data?.response?.data || [];
+          if (uoms.length > 0) uomId = uoms[0].id;
+        }
+
+        // Check Stock
+        const stockRes = await openbravoApi.get(`${PATH_SERVICE}/MaterialMgmtStorageDetail`, {
+          params: { _where: `storageBin='${binId}' AND product='${product.id}'`, _selectedProperties: 'quantityOnHand', _startRow: 0, _endRow: 1 }
+        });
+
+        const stockDetails = stockRes?.data?.response?.data || [];
+        const currentStock = stockDetails[0]?.quantityOnHand || 0;
         const qty = Math.abs(Number(material.qty) || 0);
-        if (qty === 0) continue;
+
+        if (currentStock < qty) {
+          errors.push(`${material.material_name}: Stok kurang (${currentStock}/${qty})`);
+          continue;
+        }
 
         const linePayload = {
-          organization: orgId,
-          materialMgmtMaterialMovement: movementId,
-          product: product.id,
-          movementQuantity: qty,
-          uOM: uomId,
-          storageBin: bin.id,
-          lineNo: (successCount + 1) * 10,
-          description: `${material.material_name} - ${activityName}`
+          data: [{
+            _entityName: 'MaterialMgmtInternalConsumptionLine',
+            organization: orgId,
+            client: clientId,
+            internalConsumption: consumptionId,
+            lineNo: (successCount + 1) * 10,
+            product: product.id,
+            uOM: uomId,
+            movementQuantity: qty,
+            storageBin: binId
+          }]
         };
 
-        const lineRes = await openbravoApi.post('/org.openbravo.service.json.jsonrest/MaterialMgmtMaterialMovementLine', { data: linePayload });
-        if(lineRes.data) successCount++;
-
-      } catch (lineErr) { errors.push(`${material.material_name}: ${lineErr.message}`); }
+        const lineRes = await openbravoApi.post(`${PATH_SERVICE}/MaterialMgmtInternalConsumptionLine`, linePayload);
+        if (lineRes?.data?.response?.status === -1) throw new Error('Failed to create line');
+        
+        successCount++;
+      } catch (err) {
+        errors.push(`${material.material_name}: ${err.message}`);
+      }
     }
 
-    // 3. Process
-    if (successCount > 0) {
-      try {
-        await openbravoApi.post(`/org.openbravo.service.json.jsonrest/MaterialMgmtMaterialMovement/${movementId}`, { data: { documentAction: 'CO' } });
-        return { success: true, movementId, successCount, errors: errors.length ? errors.join('; ') : null };
-      } catch (pErr) {
-        return { success: true, movementId, successCount, errors: `Movement created but processing failed. Manual check required.` };
+    if (successCount === 0) {
+      await openbravoApi.delete(`${PATH_SERVICE}/MaterialMgmtInternalConsumption/${consumptionId}`).catch(() => {});
+      throw new Error(`Gagal insert item: ${errors.join(', ')}`);
+    }
+
+    // ============================================
+    // STEP 3: PROCESS (FIXED TO MATCH USER REQUEST)
+    // ============================================
+    console.log('\n🔄 STEP 3: Processing (Custom API)...');
+    
+    // Gunakan Env Vars untuk Auth Process API
+    const apiUser = import.meta.env.VITE_API_USER;
+    const apiPass = import.meta.env.VITE_API_PASS;
+    const apiUrl = import.meta.env.VITE_OPENBRAVO_URL?.trim() || 'http://202.59.169.85';
+    const processPort = import.meta.env.VITE_API_PORT?.trim() || '8090';
+
+    if (!apiUser || !apiPass) {
+      return {
+        success: true, movementId: consumptionId, successCount, totalMaterials: materials.length,
+        errors: errors.length > 0 ? errors : null,
+        warning: 'Credential ENV missing for Processing.'
+      };
+    }
+
+    const baseUrl = apiUrl.replace(/\/+$/, '').replace(/:\d+$/, '');
+    const endpoint = `${baseUrl}:${processPort}/api/process`;
+    
+    // Basic Auth
+    const authToken = btoa(unescape(encodeURIComponent(`${apiUser}:${apiPass}`)));
+
+    // 🔥 PAYLOAD PERSIS SEPERTI PERMINTAAN
+    const processPayload = {
+      ad_process_id: "800131",
+      ad_client_id: clientId, // Menggunakan ID yang sudah divalidasi
+      ad_org_id: orgId,       // Menggunakan ID yang sudah divalidasi
+      data: [
+        { id: consumptionId }
+      ]
+    };
+
+    console.log('📤 Sending Payload:', JSON.stringify(processPayload, null, 2));
+
+    try {
+      const processRes = await axios.post(endpoint, processPayload, {
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Basic ${authToken}`
+        },
+        timeout: 45000 // Extended timeout
+      });
+
+      console.log('📥 Response:', JSON.stringify(processRes.data, null, 2));
+
+      // ✅ Validasi response persis seperti permintaan: "result": 1
+      const resultData = processRes.data?.data?.[0];
+      
+      if (resultData && resultData.result === 1) {
+        console.log('✅ Processing Success!');
+        return {
+          success: true,
+          movementId: consumptionId,
+          successCount,
+          totalMaterials: materials.length,
+          errors: errors.length > 0 ? errors : null
+        };
+      } else {
+        const msg = resultData?.errormsg || 'Unknown Error (Result not 1)';
+        console.error('❌ Processing Failed:', msg);
+        throw new Error(msg);
       }
-    } else {
-      try { await openbravoApi.delete(`/org.openbravo.service.json.jsonrest/MaterialMgmtMaterialMovement/${movementId}`); } catch(e){}
-      return { success: false, movementId: null, errors: `All lines failed: ${errors.join('; ')}` };
+
+    } catch (procErr) {
+      console.error('❌ API Error:', procErr.message);
+      
+      return { 
+        success: true,
+        movementId: consumptionId, 
+        successCount, 
+        totalMaterials: materials.length,
+        errors: errors.length > 0 ? errors : null,
+        warning: `Processing Failed: ${procErr.message}. Silakan proses manual dokumen ${consumptionId}`
+      };
     }
 
   } catch (err) {
-    return { success: false, errors: `Critical error: ${err.message}` };
+    console.error(`❌ CRITICAL ERROR:`, err);
+    return { success: false, errors: err.message };
   }
 };
 
+const loadApprovalHistory = async () => {
+  if (!currentReport.value?.approval_record_id) {
+    approvalHistory.value = [];
+    return;
+  }
+  
+  try {
+    // ✅ Query tanpa relasi dulu (lebih aman)
+    const { data, error } = await supabase
+      .from('gh_approval_history')
+      .select('*')
+      .eq('record_id', currentReport.value.approval_record_id)
+      .order('action_at', { ascending: true });
+    
+    if (error) throw error;
+    
+    // ✅ Manual fetch user names
+    const userIds = [...new Set(data.map(h => h.user_id).filter(Boolean))];
+    let userNames = {};
+    
+    if (userIds.length > 0) {
+      const { data: users } = await supabase
+        .from('user')
+        .select('user_id, username, email')
+        .in('user_id', userIds);
+      
+      if (users) {
+        userNames = users.reduce((acc, user) => {
+          acc[user.user_id] = user.username || user.email;
+          return acc;
+        }, {});
+      }
+    }
+    
+    approvalHistory.value = data.map(h => ({
+      ...h,
+      user_name: h.user_id ? (userNames[h.user_id] || 'Unknown') : 'System'
+    }));
+    
+    console.log('✅ Approval History Loaded:', approvalHistory.value);
+    
+  } catch (err) {
+    console.error('❌ Error loading approval history:', err);
+    approvalHistory.value = [];
+  }
+};
+
+// ✅ IMPROVED APPROVAL HANDLER - Better error reporting
 const approveCurrentLevel = async () => {
   if (!canApproveCurrentLevel.value || !currentUserLevel.value) return;
   const levelName = currentUserLevel.value.level_name;
+  
+  const comment = prompt(
+    `Tambahkan komentar untuk approval Level ${currentUserLevel.value.level_order} (opsional):`, 
+    ''
+  );
+  
+  if (comment === null) return;
+  
   if (!confirm(`✅ Approve report ini untuk level "${levelName}"?`)) return;
 
   try {
@@ -413,51 +633,226 @@ const approveCurrentLevel = async () => {
     const currentLevelOrder = currentUserLevel.value.level_order;
     const username = authStore.user?.username || authStore.user?.email || 'Admin';
 
-    // 1. Update status level
-    const { error: updateLevelErr } = await supabase.from('gh_approval_level_status')
-      .update({ status: 'approved', approved_by: authStore.user.user_id, approved_at: new Date().toISOString() })
-      .eq('record_id', currentReport.value.approval_record_id).eq('level_order', currentLevelOrder);
+    // 1. Update Current Level Status
+    const { error: updateLevelErr } = await supabase
+      .from('gh_approval_level_status')
+      .update({ 
+        status: 'approved', 
+        approved_by: authStore.user.user_id, 
+        approved_at: new Date().toISOString()
+      })
+      .eq('record_id', currentReport.value.approval_record_id)
+      .eq('level_order', currentLevelOrder);
+    
     if (updateLevelErr) throw updateLevelErr;
 
-    // 2. Insert history
-    const { data: recData } = await supabase.from('gh_approve_record').select('flow_id').eq('record_id', currentReport.value.approval_record_id).single();
-    await supabase.from('gh_approval_history').insert({
-      record_id: currentReport.value.approval_record_id, flow_id: recData.flow_id, user_id: authStore.user.user_id,
-      level_order: currentLevelOrder, level_name: levelName, action: 'approved', comment: `Approved by ${username}`
-    });
+    // 2. Insert History WITH COMMENT
+    const { data: recData } = await supabase
+      .from('gh_approve_record')
+      .select('flow_id')
+      .eq('record_id', currentReport.value.approval_record_id)
+      .single();
+    
+    await supabase
+      .from('gh_approval_history')
+      .insert({
+        record_id: currentReport.value.approval_record_id, 
+        flow_id: recData.flow_id, 
+        user_id: authStore.user.user_id,
+        level_order: currentLevelOrder, 
+        level_name: levelName, 
+        action: 'approved', 
+        comment: comment.trim() || `Approved by ${username}`
+      });
 
-    // 3. Final Level Check
-    const { data: flowData } = await supabase.from('gh_approve_record').select(`flow_id, gh_approval_flow!inner(last_level)`).eq('record_id', currentReport.value.approval_record_id).single();
+    // 3. Check if Final Level
+    const { data: flowData } = await supabase
+      .from('gh_approve_record')
+      .select(`flow_id, gh_approval_flow!inner(last_level)`)
+      .eq('record_id', currentReport.value.approval_record_id)
+      .single();
+    
     const isFinalLevel = currentLevelOrder === flowData.gh_approval_flow.last_level;
 
     if (isFinalLevel) {
-      // ✅ FINAL: Process OB & Update Status
-      await supabase.from('gh_approve_record').update({ overall_status: 'approved', completed_at: new Date().toISOString() }).eq('record_id', currentReport.value.approval_record_id);
-      await supabase.from('gh_report').update({ report_status: 'approved' }).eq('report_id', currentReport.value.report_id);
+      console.log('🎉 FINAL APPROVAL - Processing Internal Consumption...');
+      
+      await supabase
+        .from('gh_approve_record')
+        .update({ 
+          overall_status: 'approved', 
+          completed_at: new Date().toISOString() 
+        })
+        .eq('record_id', currentReport.value.approval_record_id);
+      
+      await supabase
+        .from('gh_report')
+        .update({ report_status: 'approved' })
+        .eq('report_id', currentReport.value.report_id);
 
-      let successCount = 0;
+      if (currentReport.value.type_damages?.length > 0) {
+        const damageIds = currentReport.value.type_damages.map(d => d.typedamage_id);
+        await supabase
+          .from('gh_type_damage')
+          .update({ status: 'approved' })
+          .in('typedamage_id', damageIds);
+      }
+
+      // ✅ PROCESS MATERIALS WITH DETAILED TRACKING
+      const processResults = {
+        total: 0,
+        successful: [],
+        failed: [],
+        manualRequired: []
+      };
+      
       for (const activity of currentReport.value.activities) {
+        await supabase
+          .from('gh_activity')
+          .update({ status: 'approved' })
+          .eq('activity_id', activity.activity_id);
+        
         if (activity.materials?.length > 0) {
+          processResults.total++;
+          
+          console.log(`\n📦 Processing materials for: ${activity.act_name}`);
+          
           const res = await createAndProcessMovement(activity.materials, activity.act_name);
+          
           if (res.success) {
-            await supabase.from('gh_activity').update({ openbravo_movement_id: res.movementId, status: 'approved' }).eq('activity_id', activity.activity_id);
-            successCount++;
+            // ✅ SUCCESS or PARTIAL SUCCESS
+            await supabase
+              .from('gh_activity')
+              .update({ 
+                openbravo_movement_id: res.movementId 
+              })
+              .eq('activity_id', activity.activity_id);
+            
+            const materialIds = activity.materials.map(m => m.material_used_id);
+            await supabase
+              .from('gh_material_used')
+              .update({ 
+                status: res.warning ? 'pending' : 'consumed',
+                consumed_at: new Date().toISOString()
+              })
+              .in('material_used_id', materialIds);
+            
+            if (res.warning) {
+              // Header created but not processed
+              processResults.manualRequired.push({
+                activity: activity.act_name,
+                movementId: res.movementId,
+                items: res.successCount,
+                warning: res.warning,
+                errors: res.errors
+              });
+            } else {
+              // Fully successful
+              processResults.successful.push({
+                activity: activity.act_name,
+                movementId: res.movementId,
+                items: res.successCount
+              });
+            }
+            
+            console.log(`✅ ${activity.act_name}: ${res.movementId}`);
+          } else {
+            // ❌ FAILED
+            processResults.failed.push({
+              activity: activity.act_name,
+              error: res.errors || res.error
+            });
+            console.error(`❌ ${activity.act_name}: ${res.errors || res.error}`);
           }
         }
       }
-      alert(`✅ Report Fully Approved. ${successCount} material movements processed.`);
+
+      // ============================================
+      // ✅ DISPLAY COMPREHENSIVE SUMMARY
+      // ============================================
+      let message = '';
+      
+      // Header
+      message += `✅ REPORT FULLY APPROVED!\n`;
+      message += `${'='.repeat(50)}\n\n`;
+      
+      // Summary Stats
+      message += `📊 SUMMARY:\n`;
+      message += `• Activities Processed: ${processResults.total}\n`;
+      message += `• Successful: ${processResults.successful.length}\n`;
+      message += `• Manual Action Required: ${processResults.manualRequired.length}\n`;
+      message += `• Failed: ${processResults.failed.length}\n\n`;
+      
+      // Successful Items
+      if (processResults.successful.length > 0) {
+        message += `✅ SUCCESSFULLY PROCESSED:\n`;
+        processResults.successful.forEach(item => {
+          message += `   • ${item.activity}\n`;
+          message += `     ID: ${item.movementId} (${item.items} items)\n`;
+          message += `     Stock: ✅ Reduced in Openbravo\n\n`;
+        });
+      }
+      
+      // Manual Action Required
+      if (processResults.manualRequired.length > 0) {
+        message += `⚠️ MANUAL ACTION REQUIRED:\n`;
+        message += `The following Internal Consumptions were created but\n`;
+        message += `need to be processed manually in Openbravo:\n\n`;
+        
+        processResults.manualRequired.forEach(item => {
+          message += `   📋 ${item.activity}\n`;
+          message += `      Document ID: ${item.movementId}\n`;
+          message += `      Items Created: ${item.items}\n`;
+          if (item.errors) {
+            message += `      Issues: ${item.errors.length} material(s)\n`;
+          }
+          message += `\n`;
+        });
+        
+        message += `📝 STEPS TO COMPLETE:\n`;
+        message += `1. Login to Openbravo\n`;
+        message += `2. Open "Internal Consumption" menu\n`;
+        message += `3. Find documents by ID above\n`;
+        message += `4. Click "Process" → Select "Complete" (CO)\n`;
+        message += `5. Confirm to reduce stock\n\n`;
+      }
+      
+      // Failed Items
+      if (processResults.failed.length > 0) {
+        message += `❌ FAILED ACTIVITIES:\n`;
+        message += `These activities could not create Internal Consumption.\n`;
+        message += `Please create manually in Openbravo:\n\n`;
+        
+        processResults.failed.forEach(item => {
+          message += `   • ${item.activity}\n`;
+          message += `     Error: ${item.error}\n\n`;
+        });
+      }
+      
+      alert(message);
+      
     } else {
-      // Next Level
-      await supabase.from('gh_approve_record').update({ current_level_order: currentLevelOrder + 1 }).eq('record_id', currentReport.value.approval_record_id);
-      await supabase.from('gh_approval_level_status').update({ status: 'pending' }).eq('record_id', currentReport.value.approval_record_id).eq('level_order', currentLevelOrder + 1);
-      alert(`✅ Level ${currentLevelOrder} Approved. Proceeding to next level.`);
+      // Not final level - proceed to next level
+      await supabase
+        .from('gh_approve_record')
+        .update({ current_level_order: currentLevelOrder + 1 })
+        .eq('record_id', currentReport.value.approval_record_id);
+      
+      await supabase
+        .from('gh_approval_level_status')
+        .update({ status: 'pending' })
+        .eq('record_id', currentReport.value.approval_record_id)
+        .eq('level_order', currentLevelOrder + 1);
+      
+      alert(`✅ Level ${currentLevelOrder} Approved.\n\nProceeding to Level ${currentLevelOrder + 1}.`);
     }
 
     await loadData();
     router.push(sourcePage.value);
 
   } catch (err) {
-    alert('❌ Gagal approve: ' + err.message);
+    console.error('❌ Approval Error:', err);
+    alert(`❌ Gagal approve:\n\n${err.message}`);
   } finally {
     processing.value = false;
   }
@@ -466,40 +861,100 @@ const approveCurrentLevel = async () => {
 const requestRevisionForLevel = async () => {
   if (!canApproveCurrentLevel.value) return;
   if (!revisionModal.value.notes || revisionModal.value.notes.trim().length < 10) {
-    alert('⚠️ Catatan revisi minimal 10 karakter'); return;
+    alert('⚠️ Catatan revisi minimal 10 karakter'); 
+    return;
   }
   if (!confirm('🔄 Kirim permintaan revisi report?')) return;
 
   try {
     processing.value = true;
     const currentLevel = currentUserLevel.value;
-    const { data: recData } = await supabase.from('gh_approve_record').select('flow_id').eq('record_id', currentReport.value.approval_record_id).single();
-
-    // 1. Update Level
-    await supabase.from('gh_approval_level_status').update({
-      status: 'needRevision', revision_notes: revisionModal.value.notes,
-      revision_requested_by: authStore.user.user_id, revision_requested_at: new Date().toISOString()
-    }).eq('record_id', currentReport.value.approval_record_id).eq('level_order', currentLevel.level_order);
-
-    // 2. History
-    await supabase.from('gh_approval_history').insert({
-      record_id: currentReport.value.approval_record_id, flow_id: recData.flow_id, user_id: authStore.user.user_id,
-      level_order: currentLevel.level_order, level_name: currentLevel.level_name, action: 'revision_requested', comment: revisionModal.value.notes
-    });
-
-    // 3. Reset Record & Report
-    await supabase.from('gh_approve_record').update({ overall_status: 'needRevision', current_level_order: 1 }).eq('record_id', currentReport.value.approval_record_id);
-    await supabase.from('gh_report').update({ report_status: 'needRevision' }).eq('report_id', currentReport.value.report_id);
     
-    // Reset pending statuses
-    await supabase.from('gh_approval_level_status').update({ status: 'pending', approved_by: null, approved_at: null }).eq('record_id', currentReport.value.approval_record_id).neq('level_order', currentLevel.level_order);
+    // 1. Get Flow Info
+    const { data: recData } = await supabase
+      .from('gh_approve_record')
+      .select('flow_id')
+      .eq('record_id', currentReport.value.approval_record_id)
+      .single();
+
+    // 2. Update Current Level Status to needRevision
+    await supabase
+      .from('gh_approval_level_status')
+      .update({
+        status: 'needRevision', 
+        revision_notes: revisionModal.value.notes,
+        revision_requested_by: authStore.user.user_id, 
+        revision_requested_at: new Date().toISOString()
+      })
+      .eq('record_id', currentReport.value.approval_record_id)
+      .eq('level_order', currentLevel.level_order);
+
+    // 3. Insert History
+    await supabase
+      .from('gh_approval_history')
+      .insert({
+        record_id: currentReport.value.approval_record_id, 
+        flow_id: recData.flow_id, 
+        user_id: authStore.user.user_id,
+        level_order: currentLevel.level_order, 
+        level_name: currentLevel.level_name, 
+        action: 'revision_requested', 
+        comment: revisionModal.value.notes
+      });
+
+    // 4. ✅ FIX: Update gh_approve_record - Reset to Level 1
+    await supabase
+      .from('gh_approve_record')
+      .update({ 
+        overall_status: 'needRevision', 
+        current_level_order: 1 
+      })
+      .eq('record_id', currentReport.value.approval_record_id);
+
+    // 5. ✅ FIX: Update gh_report Status
+    await supabase
+      .from('gh_report')
+      .update({ report_status: 'needRevision' })
+      .eq('report_id', currentReport.value.report_id);
+    
+    // 6. ✅ FIX: Reset ALL Approval Levels (except current)
+    await supabase
+      .from('gh_approval_level_status')
+      .update({ 
+        status: 'pending', 
+        approved_by: null, 
+        approved_at: null 
+      })
+      .eq('record_id', currentReport.value.approval_record_id)
+      .neq('level_order', currentLevel.level_order);
+
+    // 7. ✅ NEW: Update Child Tables Status to needRevision
+    
+    // 7a. Update gh_type_damage
+    if (currentReport.value.type_damages?.length > 0) {
+      const damageIds = currentReport.value.type_damages.map(d => d.typedamage_id);
+      await supabase
+        .from('gh_type_damage')
+        .update({ status: 'needRevision' })
+        .in('typedamage_id', damageIds);
+    }
+    
+    // 7b. Update gh_activity
+    if (currentReport.value.activities?.length > 0) {
+      const activityIds = currentReport.value.activities.map(a => a.activity_id);
+      await supabase
+        .from('gh_activity')
+        .update({ status: 'needRevision' })
+        .in('activity_id', activityIds);
+    }
 
     await loadData();
     closeRevisionModal();
-    alert('✅ Permintaan revisi dikirim!');
+    alert('✅ Permintaan revisi dikirim! Status direset ke Level 1.');
     router.push(sourcePage.value);
 
   } catch (err) {
+    console.error('❌ Revision Error:', err);
     alert('❌ Gagal revisi: ' + err.message);
   } finally {
     processing.value = false;
@@ -614,19 +1069,72 @@ const reportInfo = computed(() => {
           <h2 class="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-3">📊 Approval Progress</h2>
           <div class="bg-white rounded-2xl border-2 border-gray-100 shadow-sm p-6">
              <div class="space-y-3">
-              <div v-for="level in approvalProgress" :key="level.level_status_id" class="flex items-center gap-4 p-4 rounded-lg" :class="{'bg-green-50 border-2 border-green-200': level.level_status === 'approved', 'bg-yellow-50 border-2 border-yellow-200': level.level_status === 'pending' && level.level_order === currentUserLevel?.level_order, 'bg-red-50 border-2 border-red-200': level.level_status === 'needRevision', 'bg-gray-50 border-2 border-gray-200': level.level_status === 'pending' && level.level_order !== currentUserLevel?.level_order}">
-                <div class="w-10 h-10 rounded-full flex items-center justify-center font-bold text-white" :class="{'bg-green-500': level.level_status === 'approved', 'bg-blue-500': level.level_status === 'pending' && level.level_order === currentUserLevel?.level_order, 'bg-red-500': level.level_status === 'needRevision', 'bg-gray-400': level.level_status === 'pending' && level.level_order !== currentUserLevel?.level_order}">{{ level.level_order }}</div>
-                <div class="flex-1">
-                  <p class="font-bold text-gray-900">{{ level.level_name || currentUserLevel?.level_name || `Level ${level.level_order}` }}</p>
-                  <p class="text-sm text-gray-600">
-                    <span v-if="level.level_status === 'approved'">✅ Approved by {{ level.approver_name || 'Admin' }}</span>
-                    <span v-else-if="level.level_status === 'needRevision'">🔄 Revision requested by {{ level.revisor_name || 'Admin' }}</span>
-                    <span v-else-if="level.level_order === currentUserLevel?.level_order">⏳ Menunggu approval Anda</span>
-                    <span v-else>⏸️ Pending</span>
-                  </p>
-                  <p v-if="level.approved_at" class="text-xs text-gray-500">{{ formatDateTime(level.approved_at) }}</p>
+              <div v-for="level in approvalProgress" :key="level.level_status_id" 
+                  class="flex items-start gap-4 p-4 rounded-lg" 
+                  :class="{
+                    'bg-green-50 border-2 border-green-200': level.level_status === 'approved', 
+                    'bg-yellow-50 border-2 border-yellow-200': level.level_status === 'pending' && level.level_order === currentUserLevel?.level_order, 
+                    'bg-red-50 border-2 border-red-200': level.level_status === 'needRevision', 
+                    'bg-gray-50 border-2 border-gray-200': level.level_status === 'pending' && level.level_order !== currentUserLevel?.level_order
+                  }">
+                
+                <div class="w-10 h-10 rounded-full flex items-center justify-center font-bold text-white flex-shrink-0" 
+                    :class="{
+                      'bg-green-500': level.level_status === 'approved', 
+                      'bg-blue-500': level.level_status === 'pending' && level.level_order === currentUserLevel?.level_order, 
+                      'bg-red-500': level.level_status === 'needRevision', 
+                      'bg-gray-400': level.level_status === 'pending' && level.level_order !== currentUserLevel?.level_order
+                    }">
+                  {{ level.level_order }}
                 </div>
-                <span class="px-3 py-1 rounded-lg font-bold text-xs border-2 whitespace-nowrap" :class="{'bg-green-100 text-green-800 border-green-200': level.status === 'approved', 'bg-yellow-100 text-yellow-800 border-yellow-200': level.status === 'pending' && level.level_order === currentUserLevel?.level_order, 'bg-red-100 text-red-800 border-red-200': level.status === 'needRevision', 'bg-gray-100 text-gray-800 border-gray-200': level.status === 'pending' && level.level_order !== currentUserLevel?.level_order}">{{ level.status === 'approved' ? '✅ Approved' : level.status === 'needRevision' ? '🔄 Revision' : '⏳ Pending' }}</span>
+                
+                <div class="flex-1">
+                  <p class="font-bold text-gray-900">{{ level.level_name || `Level ${level.level_order}` }}</p>
+                  
+                  <p class="text-sm text-gray-600">
+                    <span v-if="level.level_status === 'approved'">✅ Disetujui oleh {{ level.approver_name || 'Admin' }}</span>
+                    <span v-else-if="level.level_status === 'needRevision'">🔄 Revisi diminta oleh {{ level.revisor_name || 'Admin' }}</span>
+                    <span v-else-if="level.level_order === currentUserLevel?.level_order">⏳ Menunggu Disetujui Anda</span>
+                    <span v-else>⏸️ Menunggu</span>
+                  </p>
+                  
+                  <p v-if="level.approved_at" class="text-xs text-gray-500 mt-1">{{ formatDateTime(level.approved_at) }}</p>
+                  
+                  <div v-if="approvalHistory.length > 0" class="mt-3 space-y-2">
+                    <template v-for="history in approvalHistory.filter(h => h.level_order === level.level_order)" :key="history.history_id">
+                      <div v-if="history.action === 'approved'" class="p-3 bg-white border-2 border-green-300 rounded-lg shadow-sm">
+                        <div class="flex items-start justify-between mb-2">
+                          <div class="flex items-center gap-2">
+                            <p class="text-xs font-bold text-green-700">Komentar oleh {{ history.user_name }}</p>
+                          </div>
+                          <p class="text-xs text-gray-500">{{ formatDateTime(history.action_at) }}</p>
+                        </div>
+                        <p class="text-sm text-gray-700 whitespace-pre-wrap pl-6">{{ history.comment || 'Tidak ada komentar' }}</p>
+                      </div>
+                      
+                      <div v-else-if="history.action === 'revision_requested'" class="p-3 bg-white border-2 border-red-300 rounded-lg shadow-sm">
+                        <div class="flex items-start justify-between mb-2">
+                          <div class="flex items-center gap-2">
+                            <span class="text-red-600 font-bold">🔄</span>
+                            <p class="text-xs font-bold text-red-700">Revisi diminta oleh {{ history.user_name }}</p>
+                          </div>
+                          <p class="text-xs text-gray-500">{{ formatDateTime(history.action_at) }}</p>
+                        </div>
+                        <p class="text-sm text-gray-700 whitespace-pre-wrap pl-6">{{ history.comment || 'Tidak ada catatan' }}</p>
+                      </div>
+                    </template>
+                  </div>
+                </div>
+                
+                <span class="px-3 py-1 rounded-lg font-bold text-xs border-2 whitespace-nowrap self-start" 
+                      :class="{
+                        'bg-green-100 text-green-800 border-green-200': level.status === 'approved', 
+                        'bg-yellow-100 text-yellow-800 border-yellow-200': level.status === 'pending' && level.level_order === currentUserLevel?.level_order, 
+                        'bg-red-100 text-red-800 border-red-200': level.status === 'needRevision', 
+                        'bg-gray-100 text-gray-800 border-gray-200': level.status === 'pending' && level.level_order !== currentUserLevel?.level_order
+                      }">
+                  {{ level.status === 'approved' ? '✅ Approved' : level.status === 'needRevision' ? '🔄 Revision' : '⏳ Pending' }}
+                </span>
               </div>
             </div>
             <div v-if="canApproveCurrentLevel && currentUserLevel && reportInfo.report_status !== 'approved'" class="mt-6 pt-6 border-t-2 border-gray-100">

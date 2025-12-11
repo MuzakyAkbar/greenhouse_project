@@ -95,7 +95,15 @@ const selectedBin = ref(null);
 const showScanner = ref(false);
 const isScanning = ref(false);
 let html5QrCode = null;
-const formSections = ref([{ id: Date.now(), phase_id: "", activity_id: "", coa: "", materials: [{ material_name: "", qty: "", uom: "", unit_price: 0, total_price: 0 }], workers: [{ qty: "" }] }]);
+const formSections = ref([{ 
+  id: Date.now(), 
+  phase_id: "", 
+  activity_id: "", 
+  coa: "", 
+  notes: "", // ✅ FIX: Tambah properti notes
+  materials: [{ material_name: "", qty: "", uom: "", unit_price: 0, total_price: 0 }], 
+  workers: [{ qty: "" }] 
+}]);
 const typeDamageImages = ref({});
 const activityImages = ref({});
 const uploadingImages = ref({});
@@ -433,7 +441,17 @@ const stopScanner = () => {
 
 function addTypeDamageRow() { typeDamages.value.push({ id: Date.now(), type_damage: "", kuning: 0, kutilang: 0, busuk: 0 }); }
 function removeTypeDamageRow(index) { if (typeDamages.value.length > 1) { const damageId = typeDamages.value[index].id; if (typeDamageImages.value[damageId]) delete typeDamageImages.value[damageId]; typeDamages.value.splice(index, 1); } }
-function addFormSection() { formSections.value.push({ id: Date.now(), phase_id: selectedPhase.value, activity_id: "", coa: "", materials: [{ material_name: "", qty: "", uom: "", unit_price: 0, total_price: 0 }], workers: [{ qty: "" }] }); }
+function addFormSection() { 
+  formSections.value.push({ 
+    id: Date.now(), 
+    phase_id: selectedPhase.value, 
+    activity_id: "", 
+    coa: "", 
+    notes: "", // ✅ FIX: Tambah notes saat membuat section baru
+    materials: [{ material_name: "", qty: "", uom: "", unit_price: 0, total_price: 0 }], 
+    workers: [{ qty: "" }] 
+  }); 
+}
 function removeFormSection(index) { if (formSections.value.length > 1) { const sectionId = formSections.value[index].id; if (activityImages.value[sectionId]) delete activityImages.value[sectionId]; formSections.value.splice(index, 1); } }
 function addMaterialRow(i) { formSections.value[i].materials.push({ material_name: "", qty: "", uom: "", unit_price: 0, total_price: 0 }); }
 function removeMaterialRow(sectionIndex, matIndex) { if (formSections.value[sectionIndex].materials.length > 1) formSections.value[sectionIndex].materials.splice(matIndex, 1); }
@@ -625,6 +643,7 @@ const submitActivityReport = async () => {
         act_name: selectedActivity?.activity || "",
         CoA: section.coa ? parseFloat(section.coa) : null,
         manpower: manpowerTotal.toString(),
+        notes: section.notes || null,
         images: []
       };
 
@@ -793,7 +812,7 @@ onBeforeUnmount(() => stopCamera());
               <span class="w-10 h-10 bg-gradient-to-br from-[#0071f3] to-[#8FABD4] rounded-lg flex items-center justify-center text-white text-lg">
                 📝
               </span>
-              Form Activity Report
+              Formulir Laporan Aktivitas
             </h1>
             <p class="text-sm text-gray-500 mt-1 ml-13">Input Aktivitas Harian GreenHouse</p>
           </div>
@@ -813,7 +832,7 @@ onBeforeUnmount(() => stopCamera());
             <svg class="w-4 h-4" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" fill="currentColor">
               <path d="M149.1 64.8L138.7 96H64C28.7 96 0 124.7 0 160V416c0 35.3 28.7 64 64 64H448c35.3 0 64-28.7 64-64V160c0-35.3-28.7-64-64-64H373.3L362.9 64.8C356.4 45.2 338.1 32 317.4 32H194.6c-20.7 0-39 13.2-45.5 32.8zM256 192a96 96 0 1 1 0 192 96 96 0 1 1 0-192z"/>
             </svg>
-            Scan QR Code
+            Scan Kode QR
           </button>
         </div>
 
@@ -843,14 +862,14 @@ onBeforeUnmount(() => stopCamera());
                 <div class="w-8 h-8 bg-green-100 rounded-lg flex items-center justify-center">
                   <span class="text-lg leading-none">🌱</span>
                 </div>
-                <span>Phase</span>
+                <span>Fase</span>
               </label>
               <select 
                 v-model="selectedPhase"
                 :disabled="!selectedBatch"
                 class="px-4 py-3 border-2 border-gray-200 rounded-xl bg-white text-gray-700 font-medium focus:outline-none focus:border-[#0071f3] focus:ring-2 focus:ring-[#0071f3]/20 transition appearance-none cursor-pointer disabled:bg-gray-100 disabled:cursor-not-allowed"
               >
-                <option value="">Pilih Phase</option>
+                <option value="">Pilih Fase</option>
                 <option 
                   v-for="p in phaseList" 
                   :key="p.phase_id" 
@@ -860,7 +879,7 @@ onBeforeUnmount(() => stopCamera());
                 </option>
               </select>
               <span class="text-xs text-gray-500 mt-2">
-                {{ selectedBatch ? 'Pilih phase untuk batch' : 'Pilih batch terlebih dahulu' }}
+                {{ selectedBatch ? 'Pilih fase untuk batch' : 'Pilih batch terlebih dahulu' }}
               </span>
             </div>
 
@@ -877,7 +896,7 @@ onBeforeUnmount(() => stopCamera());
                     {{ getLocationName(selectedLocation) }}
                   </span>
                   <span v-else class="text-gray-400 text-sm">
-                    Scan QR Code untuk mengisi
+                    Scan Kode QR untuk mengisi
                   </span>
                 </div>
                 <div v-if="selectedLocation" class="absolute right-3 top-1/2 -translate-y-1/2">
@@ -885,7 +904,7 @@ onBeforeUnmount(() => stopCamera());
                 </div>
               </div>
               <span class="text-xs text-gray-500 mt-2">
-                {{ selectedLocation ? '✓ Lokasi terdeteksi' : 'Gunakan tombol Scan QR Code' }}
+                {{ selectedLocation ? '✓ Lokasi terdeteksi' : 'Gunakan tombol Scan Kode QR' }}
               </span>
             </div>
 
@@ -902,7 +921,7 @@ onBeforeUnmount(() => stopCamera());
                     {{ getBatchName(selectedBatch) }}
                   </span>
                   <span v-else class="text-gray-400 text-sm">
-                    Scan QR Code untuk mengisi
+                    Scan Kode QR untuk mengisi
                   </span>
                 </div>
                 <div v-if="selectedBatch" class="absolute right-3 top-1/2 -translate-y-1/2">
@@ -910,7 +929,7 @@ onBeforeUnmount(() => stopCamera());
                 </div>
               </div>
               <span class="text-xs text-gray-500 mt-2">
-                {{ selectedBatch ? '✓ Batch terdeteksi' : 'Gunakan tombol Scan QR Code' }}
+                {{ selectedBatch ? '✓ Batch terdeteksi' : 'Gunakan tombol Scan Kode QR' }}
               </span>
             </div>
           </div>
@@ -920,7 +939,7 @@ onBeforeUnmount(() => stopCamera());
       <div v-if="selectedLocation" class="mb-8">
         <h2 class="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-3 flex items-center gap-2">
           <span class="text-lg">🌡️</span>
-          Environment Log (Kondisi Lingkungan)
+          Catatan Lingkungan (Kondisi Lingkungan)
         </h2>
         
         <div v-if="loadingEnv" class="py-10 text-center text-gray-500 bg-white rounded-2xl border-2 border-gray-100">Sedang memuat data lingkungan...</div>
@@ -977,7 +996,7 @@ onBeforeUnmount(() => stopCamera());
                         @click="openUploadSelector(sessionKey, type)"
                         class="w-[44px] h-[44px] flex-shrink-0 rounded-lg border flex items-center justify-center transition overflow-hidden shadow-sm hover:shadow-md"
                         :class="sessionData[`img_${type}`] ? 'border-green-300 bg-white ring-2 ring-green-100' : 'bg-gray-50 border-gray-300 hover:border-blue-400 hover:text-blue-500 text-gray-400'"
-                        title="Upload Bukti Foto"
+                        title="Unggah Bukti Foto"
                      >
                         <img v-if="sessionData[`img_${type}`]" :src="sessionData[`img_${type}`]" class="w-full h-full object-cover">
                         <svg v-else class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M15 13a3 3 0 11-6 0 3 3 0 016 0z"></path></svg>
@@ -987,13 +1006,13 @@ onBeforeUnmount(() => stopCamera());
               </div>
             </div>
         </div>
-        <p class="text-xs text-gray-400 mt-3 text-right">*Data lingkungan akan disimpan bersamaan saat tombol Submit Report ditekan.</p>
+        <p class="text-xs text-gray-400 mt-3 text-right">*Data lingkungan akan disimpan bersamaan saat tombol Kirim Laporan ditekan.</p>
       </div>
 
       <div v-if="showPlanningSection && planningData" class="mb-8">
         <h2 class="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-3 flex items-center gap-2">
           <span class="text-lg">📋</span>
-          Planning Hari Ini
+          Perencanaan Hari Ini
         </h2>
         <div class="bg-gradient-to-br from-blue-50 to-indigo-50 rounded-2xl border-2 border-blue-200 shadow-lg p-6">
           <div class="flex items-center justify-between mb-6 pb-4 border-b-2 border-blue-200">
@@ -1004,13 +1023,13 @@ onBeforeUnmount(() => stopCamera());
                 </svg>
               </div>
               <div>
-                <h3 class="text-xl font-bold text-gray-900">Planning Activities</h3>
+                <h3 class="text-xl font-bold text-gray-900">Aktivitas Perencanaan</h3>
                 <p class="text-sm text-gray-600">{{ formatDate(planningData.planning_date) }}</p>
               </div>
             </div>
             <div class="flex items-center gap-2">
               <span class="px-3 py-1.5 bg-blue-100 text-blue-700 rounded-lg text-sm font-semibold">
-                Phase: {{ planningData.phase_plan }}
+                Fase: {{ planningData.phase_plan }}
               </span>
               <span class="px-3 py-1.5 bg-green-100 text-green-700 rounded-lg text-sm font-semibold">
                 {{ planningData.status }}
@@ -1033,13 +1052,13 @@ onBeforeUnmount(() => stopCamera());
                     <h4 class="font-bold text-gray-900 text-lg">{{ activity.act_name }}</h4>
                     <div class="flex items-center gap-4 mt-1">
                       <span class="text-sm text-gray-600">
-                        <span class="font-semibold">CoA:</span> {{ activity.coa || 'N/A' }}
+                        <span class="font-semibold">CoA:</span> {{ activity.coa || 'Tidak Tersedia' }}
                       </span>
                       <span class="text-sm text-gray-600 flex items-center gap-1">
                         <svg class="w-4 h-4" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512" fill="currentColor">
                           <path d="M224 256A128 128 0 1 0 224 0a128 128 0 1 0 0 256zm-45.7 48C79.8 304 0 383.8 0 482.3C0 498.7 13.3 512 29.7 512l388.6 0c16.4 0 29.7-13.3 29.7-29.7C448 383.8 368.2 304 269.7 304l-91.4 0z"/>
                         </svg>
-                        <span class="font-semibold">Manpower:</span> {{ activity.manpower }}
+                        <span class="font-semibold">Tenaga Kerja:</span> {{ activity.manpower }}
                       </span>
                     </div>
                   </div>
@@ -1051,15 +1070,15 @@ onBeforeUnmount(() => stopCamera());
                   <svg class="w-4 h-4 text-blue-600" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" fill="currentColor">
                     <path d="M234.5 5.7c13.9-5 29.1-5 43.1 0l192 68.6C495 83.4 512 107.5 512 134.6l0 242.9c0 27-17 51.2-42.5 60.3l-192 68.6c-13.9 5-29.1 5-43.1 0l-192-68.6C17 428.6 0 404.5 0 377.4L0 134.6c0-27 17-51.2 42.5-60.3l192-68.6zM256 66L82.3 128 256 190l173.7-62L256 66zm32 368.6l160-57.1 0-188L288 246.6l0 188z"/>
                   </svg>
-                  Materials Needed
+                  Bahan yang Diperlukan
                 </h5>
                 <div class="bg-gray-50 rounded-lg overflow-hidden border border-gray-200">
                   <table class="w-full">
                     <thead class="bg-gray-100">
                       <tr>
                         <th class="px-4 py-2 text-left text-xs font-semibold text-gray-700 uppercase">Material</th>
-                        <th class="px-4 py-2 text-center text-xs font-semibold text-gray-700 uppercase">Quantity</th>
-                        <th class="px-4 py-2 text-center text-xs font-semibold text-gray-700 uppercase">Unit</th>
+                        <th class="px-4 py-2 text-center text-xs font-semibold text-gray-700 uppercase">Jumlah</th>
+                        <th class="px-4 py-2 text-center text-xs font-semibold text-gray-700 uppercase">Satuan</th>
                       </tr>
                     </thead>
                     <tbody class="divide-y divide-gray-200">
@@ -1087,7 +1106,7 @@ onBeforeUnmount(() => stopCamera());
             <svg class="w-6 h-6 text-blue-600 animate-spin" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" fill="currentColor">
               <path d="M304 48a48 48 0 1 0 -96 0 48 48 0 1 0 96 0zm0 416a48 48 0 1 0 -96 0 48 48 0 1 0 96 0zM48 304a48 48 0 1 0 0-96 48 48 0 1 0 0 96zm464-48a48 48 0 1 0 -96 0 48 48 0 1 0 96 0zM142.9 437A48 48 0 1 0 75 369.1 48 48 0 1 0 142.9 437zm0-294.2A48 48 0 1 0 75 75a48 48 0 1 0 67.9 67.9zM369.1 437A48 48 0 1 0 437 369.1 48 48 0 1 0 369.1 437z"/>
             </svg>
-            <span class="text-gray-600 font-medium">Memuat data planning...</span>
+            <span class="text-gray-600 font-medium">Memuat data perencanaan...</span>
           </div>
         </div>
       </div>
@@ -1099,11 +1118,11 @@ onBeforeUnmount(() => stopCamera());
               <path d="M256 32c14.2 0 27.3 7.5 34.5 19.8l216 368c7.3 12.4 7.3 27.7 .2 40.1S486.3 480 472 480L40 480c-14.3 0-27.6-7.7-34.7-20.1s-7-27.8 .2-40.1l216-368C228.7 39.5 241.8 32 256 32zm0 128c-13.3 0-24 10.7-24 24l0 112c0 13.3 10.7 24 24 24s24-10.7 24-24l0-112c0-13.3-10.7-24-24-24zm32 224a32 32 0 1 0 -64 0 32 32 0 1 0 64 0z"/>
             </svg>
             <div>
-              <h3 class="font-bold text-yellow-800 mb-1">Tidak Ada Planning Untuk Hari Ini</h3>
+              <h3 class="font-bold text-yellow-800 mb-1">Tidak Ada Perencanaan Untuk Hari Ini</h3>
               <p class="text-sm text-yellow-700">
-                Tidak ditemukan planning untuk tanggal <span class="font-semibold">{{ formatDate(selectedDate) }}</span> 
+                Tidak ditemukan perencanaan untuk tanggal <span class="font-semibold">{{ formatDate(selectedDate) }}</span> 
                 di lokasi <span class="font-semibold">{{ getLocationName(selectedLocation) }}</span>.
-                Silakan isi form aktivitas secara manual.
+                Silakan isi formulir aktivitas secara manual.
               </p>
             </div>
           </div>
@@ -1124,7 +1143,7 @@ onBeforeUnmount(() => stopCamera());
               @click="removeTypeDamageRow(index)"
               v-if="typeDamages.length > 1"
               class="absolute top-4 right-4 bg-red-500 hover:bg-red-600 text-white w-8 h-8 rounded-lg flex items-center justify-center transition shadow-md hover:shadow-lg"
-              title="Hapus Row"
+              title="Hapus Baris"
             >
               <svg class="w-4 h-4" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512" fill="currentColor">
                 <path d="M135.2 17.7L128 32H32C14.3 32 0 46.3 0 64S14.3 96 32 96H416c17.7 0 32-14.3 32-32s-14.3-32-32-32H320l-7.2-14.3C307.4 6.8 296.3 0 284.2 0H163.8c-12.1 0-23.2 6.8-28.6 17.7zM416 128H32L53.2 467c1.6 25.3 22.6 45 47.9 45H346.9c25.3 0 46.3-19.7 47.9-45L416 128z"/>
@@ -1160,7 +1179,7 @@ onBeforeUnmount(() => stopCamera());
               <div class="flex flex-col">
                 <label class="text-sm font-semibold text-gray-700 mb-2 flex items-center gap-2">
                   <span class="w-6 h-6 bg-yellow-100 rounded-full flex items-center justify-center text-xs">🟡</span>
-                  Kuning (Qty)
+                  Kuning (Jumlah)
                 </label>
                 <input
                   v-model="damage.kuning"
@@ -1173,7 +1192,7 @@ onBeforeUnmount(() => stopCamera());
               <div class="flex flex-col">
                 <label class="text-sm font-semibold text-gray-700 mb-2 flex items-center gap-2">
                   <span class="w-6 h-6 bg-orange-100 rounded-full flex items-center justify-center text-xs">🟠</span>
-                  Kutilang (Qty)
+                  Kutilang (Jumlah)
                 </label>
                 <input
                   v-model="damage.kutilang"
@@ -1186,7 +1205,7 @@ onBeforeUnmount(() => stopCamera());
               <div class="flex flex-col">
                 <label class="text-sm font-semibold text-gray-700 mb-2 flex items-center gap-2">
                   <span class="w-6 h-6 bg-red-100 rounded-full flex items-center justify-center text-xs">🔴</span>
-                  Busuk (Qty)
+                  Busuk (Jumlah)
                 </label>
                 <input
                   v-model="damage.busuk"
@@ -1223,20 +1242,20 @@ onBeforeUnmount(() => stopCamera());
               <div class="w-10 h-10 bg-gradient-to-br from-[#0071f3] to-[#8FABD4] rounded-lg flex items-center justify-center text-white font-bold">
                 {{ index + 1 }}
               </div>
-              <h3 class="text-lg font-bold text-gray-900">Activity {{ index + 1 }}</h3>
+              <h3 class="text-lg font-bold text-gray-900">Aktivitas {{ index + 1 }}</h3>
               <span v-if="selectedPhase" class="ml-auto px-3 py-1 bg-green-100 text-green-700 rounded-lg text-sm font-semibold">
-                Phase: {{ selectedPhase }}
+                Fase: {{ selectedPhase }}
               </span>
             </div>
 
             <div class="grid grid-cols-1 md:grid-cols-2 gap-5 mb-6">
               <div class="flex flex-col">
-                <label class="text-sm font-semibold text-gray-700 mb-2">Pilih Activity</label>
+                <label class="text-sm font-semibold text-gray-700 mb-2">Pilih Aktivitas</label>
                 <select
                   v-model="section.activity_id"
                   class="px-4 py-3 border-2 border-gray-200 rounded-xl bg-white text-gray-700 font-medium focus:outline-none focus:border-[#0071f3] focus:ring-2 focus:ring-[#0071f3]/20 transition appearance-none cursor-pointer"
                 >
-                  <option value="" disabled>Pilih Activity</option>
+                  <option value="" disabled>Pilih Aktivitas</option>
                   <option
                     v-for="a in potatoActivities"
                     :key="a.activity_id"
@@ -1252,11 +1271,24 @@ onBeforeUnmount(() => stopCamera());
                 <input
                   v-model="section.coa"
                   type="text"
-                  placeholder="Auto-filled"
+                  placeholder="Diisi otomatis"
                   readonly
                   class="px-4 py-3 border-2 border-gray-200 rounded-xl bg-gray-50 text-gray-700 font-medium focus:outline-none cursor-not-allowed"
                 />
               </div>
+            </div>
+
+            <div class="flex flex-col mb-6">
+              <label class="text-sm font-semibold text-gray-700 mb-2">
+                Catatan Aktivitas (Opsional)
+              </label>
+              <textarea
+                v-model="section.notes"
+                rows="3"
+                placeholder="Tulis catatan tambahan untuk aktivitas ini (misalnya: kondisi khusus, tantangan, detail pelaksanaan, dll.)"
+                class="px-4 py-3 border-2 border-gray-200 rounded-xl bg-white text-gray-700 font-medium focus:outline-none focus:border-[#0071f3] focus:ring-2 focus:ring-[#0071f3]/20 transition resize-none"
+              ></textarea>
+              <p class="text-xs text-gray-500 mt-2">Catatan ini akan disimpan bersama dengan aktivitas dan dapat dilihat oleh tim approval.</p>
             </div>
             
             <ImageUploadComponent
@@ -1294,7 +1326,7 @@ onBeforeUnmount(() => stopCamera());
                         class="px-4 py-2.5 border-2 border-gray-200 rounded-lg bg-white text-gray-700 text-sm font-medium focus:outline-none focus:border-[#0071f3] focus:ring-2 focus:ring-[#0071f3]/20 transition appearance-none cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
                       >
                         <option value="" disabled>
-                          {{ materialLoading ? '⏳ Loading materials...' : 'Pilih Material' }}
+                          {{ materialLoading ? '⏳ Memuat material...' : 'Pilih Material' }}
                         </option>
                         <option
                           v-for="mat in availableMaterials"
@@ -1307,7 +1339,7 @@ onBeforeUnmount(() => stopCamera());
                     </div>
 
                     <div class="flex flex-col">
-                      <label class="text-xs font-semibold text-gray-600 mb-2">Qty</label>
+                      <label class="text-xs font-semibold text-gray-600 mb-2">Jumlah</label>
                       <input
                         v-model="material.qty"
                         type="number"
@@ -1320,12 +1352,12 @@ onBeforeUnmount(() => stopCamera());
 
                   <div class="grid grid-cols-2 md:grid-cols-3 gap-3">
                     <div class="flex flex-col">
-                      <label class="text-xs font-semibold text-gray-600 mb-2">UoM</label>
+                      <label class="text-xs font-semibold text-gray-600 mb-2">Satuan</label>
                       <input
                         v-model="material.uom"
                         type="text"
                         readonly
-                        placeholder="UoM"
+                        placeholder="Satuan"
                         class="px-4 py-2.5 border-2 border-gray-200 rounded-lg bg-gray-100 text-gray-700 text-sm font-medium focus:outline-none cursor-not-allowed"
                       />
                     </div>
@@ -1406,7 +1438,7 @@ onBeforeUnmount(() => stopCamera());
           class="bg-gradient-to-r from-[#0071f3] to-[#0060d1] hover:from-[#0060d1] hover:to-[#0050b1] text-white font-bold px-12 py-4 rounded-xl shadow-lg hover:shadow-xl transition-all transform hover:-translate-y-0.5 text-lg"
         >
           <span v-if="isSubmitting">⏳ Menyimpan...</span>
-          <span v-else>📤 Submit Report</span>
+          <span v-else>📤 Kirim Laporan</span>
         </button>
       </div>
     </div>
@@ -1414,11 +1446,11 @@ onBeforeUnmount(() => stopCamera());
     <footer class="text-center py-10 mt-16 border-t border-gray-200">
         <div class="flex items-center justify-center gap-2 mb-2">
            <span class="w-6 h-6 p-0.5">
-             <img :src="logoPG" alt="Potato Grow Logo" class="w-full h-full object-contain" />
+             <img :src="logoPG" alt="Logo Potato Grow" class="w-full h-full object-contain" />
           </span>
           <p class="text-gray-400 font-bold text-sm">POTATO GROW</p>
         </div>
-        <p class="text-gray-400 text-xs">© 2025 All Rights Reserved</p>
+        <p class="text-gray-400 text-xs">© 2025 Hak Cipta Dilindungi</p>
       </footer>
 
     <div
@@ -1428,7 +1460,7 @@ onBeforeUnmount(() => stopCamera());
       <div class="bg-white rounded-2xl max-w-md w-full overflow-hidden">
         <div class="bg-gradient-to-r from-[#0071f3] to-[#0060d1] p-6 text-white">
           <div class="flex items-center justify-between mb-2">
-            <h2 class="text-xl font-bold">Scan QR Code</h2>
+            <h2 class="text-xl font-bold">Scan Kode QR</h2>
             <button
               @click="stopScanner"
               class="w-8 h-8 bg-white bg-opacity-20 hover:bg-opacity-30 rounded-lg flex items-center justify-center transition"
@@ -1438,7 +1470,7 @@ onBeforeUnmount(() => stopCamera());
               </svg>
             </button>
           </div>
-          <p class="text-sm text-blue-100">Arahkan kamera ke QR Code</p>
+          <p class="text-sm text-blue-100">Arahkan kamera ke Kode QR</p>
         </div>
         
         <div class="p-6">
@@ -1447,7 +1479,7 @@ onBeforeUnmount(() => stopCamera());
             
             <div v-if="isScanning" class="absolute top-4 left-4 bg-green-500 text-white px-3 py-1.5 rounded-full text-xs font-semibold flex items-center gap-2 z-10">
               <div class="w-2 h-2 bg-white rounded-full animate-pulse"></div>
-              Scanning...
+              Memindai...
             </div>
             
             <div class="absolute inset-0 flex items-center justify-center pointer-events-none">
@@ -1464,7 +1496,7 @@ onBeforeUnmount(() => stopCamera());
             </button>
             
             <p class="text-xs text-gray-500 text-center">
-              💡 Pastikan QR Code berada dalam frame putih dan pencahayaan cukup
+              💡 Pastikan Kode QR berada dalam frame putih dan pencahayaan cukup
             </p>
           </div>
         </div>
@@ -1474,7 +1506,7 @@ onBeforeUnmount(() => stopCamera());
     <div v-if="showSelectionModal" class="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm" @click.self="showSelectionModal = false">
       <div class="bg-white w-full max-w-sm rounded-2xl p-6 shadow-2xl relative animate-fade-in">
         <button @click="showSelectionModal = false" class="absolute top-4 right-4 text-gray-400 hover:text-gray-600 transition">✕</button>
-        <h3 class="font-bold text-gray-900 mb-6 text-center text-lg">Upload Bukti Foto</h3>
+        <h3 class="font-bold text-gray-900 mb-6 text-center text-lg">Unggah Bukti Foto</h3>
         
         <div class="space-y-3">
           <button @click="openCamera" class="w-full flex items-center justify-center gap-3 bg-blue-600 text-white py-3.5 rounded-xl font-semibold hover:bg-blue-700 transition shadow-md">

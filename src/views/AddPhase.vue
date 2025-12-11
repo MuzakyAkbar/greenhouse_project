@@ -3,7 +3,6 @@ import { ref, onMounted, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { supabase } from '@/lib/supabase.js'
 import { usePhaseStore } from "@/stores/phase";
-import logoPG from '../assets/logoPG.svg'
 
 const phaseStore = usePhaseStore();
 
@@ -194,9 +193,9 @@ const goBack = () => {
               <span class="w-10 h-10 bg-gradient-to-br from-white to-white rounded-lg flex items-center justify-center text-2xl">
                 🌱
               </span>
-              Form Input Data
+              Formulir Masukan Data
             </h1>
-            <p class="text-sm text-gray-500 mt-1">Tambah data produksi greenhouse</p>
+            <p class="text-sm text-gray-500 mt-1">Tambah data produksi Potato Grow</p>
           </div>
         </div>
       </div>
@@ -239,7 +238,7 @@ const goBack = () => {
                 v-model="formData.location"
                 class="w-full px-4 py-3.5 bg-gray-50 border-2 border-gray-200 rounded-xl text-gray-900 font-medium focus:border-blue-500 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-200 transition appearance-none cursor-pointer hover:border-gray-300"
               >
-                    <option value="" disabled>Pilih Location</option>
+                    <option value="" disabled>Pilih Lokasi</option>
                     <option v-for="loc in locations" :key="loc.id" :value="loc.id">
                     {{ loc.name }}
                     </option>
@@ -309,14 +308,5 @@ const goBack = () => {
         </div>
       </div>
     </div>
-    <footer class="text-center py-10 mt-16 border-t border-gray-200">
-        <div class="flex items-center justify-center gap-2 mb-2">
-           <span class="w-6 h-6 p-0.5">
-             <img :src="logoPG" alt="Potato Grow Logo" class="w-full h-full object-contain" />
-          </span>
-          <p class="text-gray-400 font-bold text-sm">POTATO GROW</p>
-        </div>
-        <p class="text-gray-400 text-xs">© 2025 All Rights Reserved</p>
-      </footer>
   </div>
 </template>

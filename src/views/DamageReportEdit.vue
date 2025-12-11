@@ -3,7 +3,6 @@ import { ref, onMounted, computed } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { supabase } from '@/lib/supabase'
 import { useAuthStore } from '@/stores/auth'
-import logoPG from '../assets/logoPG.svg'
 
 const router = useRouter()
 const route = useRoute()
@@ -512,8 +511,8 @@ const submitReport = async () => {
             </button>
           </div>
       </div>
-      <footer class="text-center py-10 mt-16 border-t border-gray-200">
-        <div class="flex items-center justify-center gap-2 mb-2">
+      <footer class="text-center py-10 mt-8 border-t border-gray-200 bg-white">
+         <div class="flex items-center justify-center gap-2 mb-2">
            <span class="w-6 h-6 p-0.5">
              <img :src="logoPG" alt="Potato Grow Logo" class="w-full h-full object-contain" />
           </span>

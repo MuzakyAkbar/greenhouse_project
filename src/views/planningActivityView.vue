@@ -146,9 +146,9 @@ onMounted(async () => {
                 <span class="w-10 h-10 bg-gradient-to-br from-blue-500 to-blue-600 rounded-lg flex items-center justify-center text-white text-lg">
                   📄
                 </span>
-                Planning Report View
+                Laporan Perencanaan Tampilan
               </h1>
-              <p class="text-sm text-gray-500 mt-1 ml-13">Planning #{{ planningId }}</p>
+              <p class="text-sm text-gray-500 mt-1 ml-13">Perencanaan #{{ planningId }}</p>
             </div>
           </div>
 
@@ -170,7 +170,7 @@ onMounted(async () => {
     <div v-if="isLoading" class="flex items-center justify-center py-20">
       <div class="text-center">
         <div class="inline-block w-12 h-12 border-4 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
-        <p class="mt-4 text-gray-600 font-semibold">Loading planning data...</p>
+        <p class="mt-4 text-gray-600 font-semibold">Memuat data perencanaan...</p>
       </div>
     </div>
 
@@ -182,7 +182,7 @@ onMounted(async () => {
         <div class="border-b-2 border-gray-200 pb-6 mb-6">
           <div class="flex items-start justify-between">
             <div>
-              <h2 class="text-3xl font-bold text-gray-900 mb-2 print:text-2xl">Activity Planning Report</h2>
+              <h2 class="text-3xl font-bold text-gray-900 mb-2 print:text-2xl">Laporan Perencanaan Kegiatan</h2>
               <p class="text-lg text-gray-600 print:text-base">Planning ID: #{{ planningId }}</p>
             </div>
             <div class="text-right">
@@ -211,7 +211,7 @@ onMounted(async () => {
             <p class="text-base font-bold text-gray-900 print:text-sm">{{ planningData?.gh_batch?.batch_name || '-' }}</p>
           </div>
           <div>
-            <p class="text-sm text-gray-500 font-semibold mb-1">🌱 Phase</p>
+            <p class="text-sm text-gray-500 font-semibold mb-1">🌱 Fase</p>
             <p class="text-base font-bold text-gray-900 print:text-sm">{{ planningData?.phase_plan || '-' }}</p>
           </div>
         </div>
@@ -281,7 +281,7 @@ onMounted(async () => {
 
             <!-- No Materials -->
             <div v-else class="mt-6 bg-gray-50 border-2 border-gray-200 rounded-lg p-4 print:mt-4 print:p-3">
-              <p class="text-sm text-gray-500 text-center print:text-xs">Tidak ada material untuk aktivitas ini</p>
+              <p class="text-sm text-gray-500 text-center print:text-xs">Tidak ada bahan baku untuk aktivitas ini</p>
             </div>
           </div>
         </div>
@@ -298,7 +298,7 @@ onMounted(async () => {
               <p class="font-bold text-gray-900">{{ formatDateTime(planningData?.created_at) }}</p>
             </div>
             <div>
-              <p class="text-gray-500 font-semibold">Terakhir Diupdate:</p>
+              <p class="text-gray-500 font-semibold">Terakhir Diperbarui:</p>
               <p class="font-bold text-gray-900">{{ formatDateTime(planningData?.updated_at) }}</p>
             </div>
           </div>

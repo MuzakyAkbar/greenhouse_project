@@ -573,9 +573,9 @@ onMounted(async () => {
                 <span class="w-10 h-10 bg-gradient-to-br from-yellow-400 to-yellow-500 rounded-lg flex items-center justify-center text-white text-lg">
                   📊
                 </span>
-                Review Production & Sales Report
+                Tinjau Laporan Produksi & Penjualan
               </h1>
-              <p class="text-sm text-gray-500 mt-1">Record ID: #{{ record_id }}</p>
+              <p class="text-sm text-gray-500 mt-1">ID Rekam: #{{ record_id }}</p>
             </div>
           </div>
         </div>
@@ -619,7 +619,7 @@ onMounted(async () => {
                 <p class="text-lg font-bold text-gray-900">{{ formatDate(reportInfo.report_date) }}</p>
               </div>
               <div>
-                <p class="text-sm text-gray-600 font-semibold mb-1">📊 Overall Status</p>
+                <p class="text-sm text-gray-600 font-semibold mb-1">📊 Status Keseluruhan</p>
                 <span 
                   :class="getStatusBadge(reportInfo.overall_status).class"
                   class="inline-block px-3 py-1 rounded-lg font-bold text-xs border-2"
@@ -634,14 +634,14 @@ onMounted(async () => {
                 <p class="text-sm text-gray-600 font-semibold mb-2">🏭 Total Produksi</p>
                 <div class="flex items-center gap-3">
                   <span class="text-2xl font-bold text-gray-900">{{ reportInfo.totalProduction }}</span>
-                  <span class="text-sm text-gray-500">items</span>
+                  <span class="text-sm text-gray-500">item</span>
                 </div>
               </div>
               <div class="bg-white rounded-lg p-4">
                 <p class="text-sm text-gray-600 font-semibold mb-2">💰 Total Penjualan</p>
                 <div class="flex items-center gap-3">
                   <span class="text-2xl font-bold text-gray-900">{{ reportInfo.totalSales }}</span>
-                  <span class="text-sm text-gray-500">items</span>
+                  <span class="text-sm text-gray-500">item</span>
                 </div>
               </div>
               <div class="bg-gradient-to-br from-green-50 to-emerald-50 rounded-lg p-4 border-2 border-green-200">
@@ -658,13 +658,13 @@ onMounted(async () => {
               <div class="bg-red-50 border-2 border-red-200 rounded-lg p-4">
                 <p class="text-sm font-bold text-red-900 mb-2 flex items-center gap-2">
                   <span class="text-lg">🔄</span>
-                  Catatan Revisi Report
+                  Catatan Revisi Laporan
                 </p>
                 <p class="text-sm text-red-900 whitespace-pre-wrap">
                   {{ reportInfo.revision_notes || 'Revisi diminta.' }}
                 </p>
                 <p class="text-xs text-red-600 mt-2">
-                  Requested by: {{ reportInfo.revisor_name || 'System' }} 
+                  Diminta oleh: {{ reportInfo.revisor_name || 'Sistem' }} 
                   • {{ formatDateTime(reportInfo.revision_requested_at) }}
                 </p>
               </div>
@@ -675,10 +675,10 @@ onMounted(async () => {
               <div class="bg-green-50 border-2 border-green-200 rounded-lg p-4">
                 <p class="text-sm font-bold text-green-900 mb-2 flex items-center gap-2">
                   <span class="text-lg">✅</span>
-                  Report Fully Approved
+                  Laporan Disetujui Sepenuhnya
                 </p>
                 <p class="text-sm text-green-900">
-                  Semua item Production dan Sales telah disetujui.
+                  Semua item Produksi dan Penjualan telah disetujui.
                 </p>
               </div>
             </div>
@@ -687,7 +687,7 @@ onMounted(async () => {
 
         <div v-if="approvalProgress.length > 0" class="mb-6">
           <h2 class="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-3">
-            📊 Approval Progress
+            📊 Proses Persetujuan
           </h2>
           <div class="bg-white rounded-2xl border-2 border-gray-100 shadow-sm p-6">
             <div class="space-y-3">
@@ -716,16 +716,16 @@ onMounted(async () => {
                   <p class="font-bold text-gray-900">{{ level.level_name || `Level ${level.level_order}` }}</p>
                   <p class="text-sm text-gray-600">
                     <span v-if="level.level_status === 'approved'">
-                      ✅ Approved by {{ level.approver_name || 'Admin' }}
+                      ✅ Disetujui oleh {{ level.approver_name || 'Admin' }}
                     </span>
                     <span v-else-if="level.level_status === 'needRevision'">
-                      🔄 Revision requested by {{ level.revisor_name || 'Admin' }}
+                      🔄 Revisi diminta oleh {{ level.revisor_name || 'Admin' }}
                     </span>
                     <span v-else-if="level.level_order === currentUserLevel?.level_order">
-                      ⏳ Menunggu approval Anda
+                      ⏳ Menunggu persetujuan Anda
                     </span>
                     <span v-else>
-                      ⏸️ Pending
+                      ⏸️ Tertunda
                     </span>
                   </p>
                   <p v-if="level.approved_at" class="text-xs text-gray-500">
@@ -753,14 +753,14 @@ onMounted(async () => {
                   class="flex-1 bg-green-500 hover:bg-green-600 text-white font-bold py-3 rounded-xl transition disabled:opacity-50"
                   
                 >
-                  ✅ Approve Level {{ currentUserLevel.level_order }}
+                  ✅ Setujui Level {{ currentUserLevel.level_order }}
                 </button>
                 <button
                   @click="openRevisionModal"
                   :disabled="processing"
                   class="flex-1 bg-red-500 hover:bg-red-600 text-white font-bold py-3 rounded-xl transition disabled:opacity-50"
                 >
-                  🔄 Request Revision Report
+                  🔄 Minta Revisi Laporan
                 </button>
               </div>
             </div>
@@ -854,7 +854,7 @@ onMounted(async () => {
                         </tbody>
                         <tfoot>
                             <tr class="border-t-2 border-gray-300 bg-gray-50">
-                                <td colspan="5" class="py-3 px-4 text-right font-bold text-gray-700">Grand Total Penjualan:</td>
+                                <td colspan="5" class="py-3 px-4 text-right font-bold text-gray-700">Total Keseluruhan Penjualan:</td>
                                 <td class="py-3 px-4 text-right font-bold text-green-700 text-base">
                                     {{ formatCurrency(totalSalesValue) }}
                                 </td>
@@ -871,7 +871,7 @@ onMounted(async () => {
               <span class="text-3xl">⚠️</span>
               <div>
                 <p class="font-bold text-yellow-900">Tidak Ada Data</p>
-                <p class="text-sm text-yellow-700 mt-1">Tidak ditemukan data Production maupun Sales terkait Approval Record ini.</p>
+                <p class="text-sm text-yellow-700 mt-1">Tidak ditemukan data Produksi maupun Penjualan terkait Rekam Persetujuan ini.</p>
               </div>
             </div>
         </div>
@@ -885,7 +885,7 @@ onMounted(async () => {
           </span>
           <p class="text-gray-400 font-bold text-sm">POTATO GROW</p>
         </div>
-        <p class="text-gray-400 text-xs">© 2025 All Rights Reserved</p>
+        <p class="text-gray-400 text-xs">© 2025 Hak Cipta Dilindungi</p>
       </footer>
     </div>
 
@@ -894,7 +894,7 @@ onMounted(async () => {
         <div class="flex items-center justify-between mb-4">
           <h3 class="text-xl font-bold text-gray-900 flex items-center gap-2">
             <span class="text-2xl">🔄</span>
-            Request Revision
+            Minta Revisi
           </h3>
           <button 
             @click="closeRevisionModal" 
@@ -909,10 +909,10 @@ onMounted(async () => {
         
         <div class="mb-6">
           <label class="block text-sm font-semibold text-gray-700 mb-2">
-            Item Type
+            Jenis Item
           </label>
           <div class="px-4 py-3 border-2 border-gray-200 rounded-xl bg-gray-50 text-gray-700 font-medium">
-            📋 Production & Sales Report (Level {{ currentUserLevel?.level_order }})
+            📋 Laporan Produksi & Penjualan (Level {{ currentUserLevel?.level_order }})
           </div>
         </div>
 
@@ -923,7 +923,7 @@ onMounted(async () => {
           <textarea
             v-model="revisionModal.notes"
             rows="6"
-            placeholder="Tuliskan dengan jelas apa yang perlu diperbaiki...&#10;&#10;Contoh:&#10;- Quantity produksi G1 terlalu besar, mohon cek ulang.&#10;- Harga jual G0 tidak sesuai dengan kesepakatan."
+            placeholder="Tuliskan dengan jelas apa yang perlu diperbaiki...&#10;&#10;Contoh:&#10;- Kuantitas produksi G1 terlalu besar, mohon cek ulang.&#10;- Harga jual G0 tidak sesuai dengan kesepakatan."
             class="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:border-[#0071f3] focus:outline-none transition resize-none"
             :disabled="processing"
           ></textarea>

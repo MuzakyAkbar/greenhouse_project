@@ -31,7 +31,7 @@
               <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
                 <path fill-rule="evenodd" d="M10 3a1 1 0 011 1v5h5a1 1 0 110 2h-5v5a1 1 0 11-2 0v-5H4a1 1 0 110-2h5V4a1 1 0 011-1z" clip-rule="evenodd"/>
               </svg>
-              Add Phase
+              Tambah Fase
             </router-link>
             <router-link
               to="/add-location"
@@ -63,7 +63,7 @@
               <path d="M64 0C28.7 0 0 28.7 0 64V448c0 35.3 28.7 64 64 64H320c35.3 0 64-28.7 64-64V160H256c-17.7 0-32-14.3-32-32V0H64zM256 0V128H384L256 0zM216 232V334.1l31-31c9.4-9.4 24.6-9.4 33.9 0s9.4 24.6 0 33.9l-72 72c-9.4 9.4-24.6 9.4-33.9 0l-72-72c-9.4-9.4-9.4-24.6 0-33.9s24.6-9.4 33.9 0l31 31V232c0-13.3 10.7-24 24-24s24 10.7 24 24z"/>
             </svg>
             <div v-else class="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
-            {{ isGenerating ? 'Generating...' : 'Download All QR (PDF)' }}
+            {{ isGenerating ? 'Membuat...' : 'Unduh Semua QR (PDF)' }}
           </button>
         </div>
         <div class="grid grid-cols-1 sm:grid-cols-3 gap-5">
@@ -164,9 +164,9 @@
                       <div class="flex-1">
                         <p class="font-semibold text-gray-900 group-hover:text-[#0071f3] transition">{{ batch.batch_name }}</p>
                         <p class="text-xs text-gray-500 mt-0.5">Status: {{ batch.status || 'Aktif' }}</p>
-                        <!-- Phase Name -->
+                        <!-- Nama Fase -->
                         <p class="text-xs text-gray-500 mt-1">
-                          Phase:
+                          Fase:
                           <span v-if="phasesForBatch[batch.batch_id]?.length > 0" class="font-semibold text-gray-900">
                             {{ phasesForBatch[batch.batch_id].map(p => p.phase_name).join(", ") }}
                           </span>
@@ -197,11 +197,11 @@
       <footer class="text-center py-10 mt-16 border-t border-gray-200">
         <div class="flex items-center justify-center gap-2 mb-2">
            <span class="w-6 h-6 p-0.5">
-             <img :src="logoPG" alt="Potato Grow Logo" class="w-full h-full object-contain" />
+             <img :src="logoPG" alt="Logo Potato Grow" class="w-full h-full object-contain" />
           </span>
           <p class="text-gray-400 font-bold text-sm">POTATO GROW</p>
         </div>
-        <p class="text-gray-400 text-xs">© 2025 All Rights Reserved</p>
+        <p class="text-gray-400 text-xs">© 2025 Hak Cipta Dilindungi</p>
       </footer>
     </div>
 
@@ -323,8 +323,8 @@
             </svg>
           </div>
           
-          <h2 class="text-2xl font-bold text-gray-900 mb-2">QR Code</h2>
-          <p class="text-sm text-gray-500 mb-6">Scan untuk auto-fill lokasi & batch</p>
+          <h2 class="text-2xl font-bold text-gray-900 mb-2">Kode QR</h2>
+          <p class="text-sm text-gray-500 mb-6">Pindai untuk mengisi otomatis lokasi & batch</p>
           
           <div class="bg-gray-50 rounded-xl p-6 mb-6">
             <canvas ref="qrCanvas" class="mx-auto border-4 border-white shadow-lg rounded-lg"></canvas>
@@ -344,7 +344,7 @@
                 <path d="M64 0C28.7 0 0 28.7 0 64V448c0 35.3 28.7 64 64 64H320c35.3 0 64-28.7 64-64V160H256c-17.7 0-32-14.3-32-32V0H64zM256 0V128H384L256 0zM216 232V334.1l31-31c9.4-9.4 24.6-9.4 33.9 0s9.4 24.6 0 33.9l-72 72c-9.4 9.4-24.6 9.4-33.9 0l-72-72c-9.4-9.4-9.4-24.6 0-33.9s24.6-9.4 33.9 0l31 31V232c0-13.3 10.7-24 24-24s24 10.7 24 24z"/>
               </svg>
               <div v-else class="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
-              {{ isGenerating ? 'Generating...' : 'Download PDF' }}
+              {{ isGenerating ? 'Membuat...' : 'Unduh PDF' }}
             </button>
             <button
               @click="downloadQR"
@@ -353,7 +353,7 @@
               <svg class="w-5 h-5" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" fill="currentColor">
                 <path d="M288 32c0-17.7-14.3-32-32-32s-32 14.3-32 32V274.7l-73.4-73.4c-12.5-12.5-32.8-12.5-45.3 0s-12.5 32.8 0 45.3l128 128c12.5 12.5 32.8 12.5 45.3 0l128-128c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0L288 274.7V32zM64 352c-35.3 0-64 28.7-64 64v32c0 35.3 28.7 64 64 64H448c35.3 0 64-28.7 64-64V416c0-35.3-28.7-64-64-64H346.5l-45.3 45.3c-25 25-65.5 25-90.5 0L165.5 352H64zm368 56a24 24 0 1 1 0 48 24 24 0 1 1 0-48z"/>
               </svg>
-              Download PNG
+              Unduh PNG
             </button>
             <button
               @click="showQRModal = false"

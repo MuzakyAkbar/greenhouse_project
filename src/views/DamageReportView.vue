@@ -2,7 +2,6 @@
 import { ref, computed, onMounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { supabase } from '@/lib/supabase'
-import logoPG from '../assets/logoPG.svg'
 
 const router = useRouter()
 const route = useRoute()
@@ -206,14 +205,15 @@ const printReport = () => window.print()
             <div>
               <h1 class="text-2xl font-bold text-gray-900 flex items-center gap-3">
                 <span class="w-10 h-10 bg-gradient-to-br from-green-500 to-green-600 rounded-lg flex items-center justify-center text-white text-lg">✅</span>
-                View {{ isRepairView ? 'Perbaikan' : 'Laporan' }}
+                Lihat {{ isRepairView ? 'Perbaikan' : 'Laporan' }}
               </h1>
-              <p class="text-sm text-gray-500 mt-1 ml-13">Data telah disetujui dan diverifikasi</p>
+              <!-- PERBAIKAN: "Data telah disetujui dan diverifikasi" lebih baik jadi "Data telah disetujui dan terverifikasi" -->
+              <p class="text-sm text-gray-500 mt-1 ml-13">Data telah disetujui dan terverifikasi</p>
             </div>
           </div>
           <button @click="printReport" class="bg-gradient-to-r from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700 text-white font-semibold px-6 py-2.5 rounded-xl transition-all shadow-md hover:shadow-lg flex items-center gap-2">
             <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z"></path></svg>
-            Print
+            Cetak
           </button>
         </div>
       </div>
@@ -230,9 +230,10 @@ const printReport = () => window.print()
       
       <div class="bg-gradient-to-r from-green-500 to-green-600 text-white rounded-2xl p-6 mb-6 text-center shadow-lg print:shadow-none print:border-2 print:border-green-600 print:text-green-800 print:bg-white print:p-2 print:mb-4">
         <div class="text-5xl mb-2 print:text-2xl print:mb-0">✅</div>
-        <h2 class="text-2xl font-bold print:text-lg">APPROVED REPORT</h2>
+        <h2 class="text-2xl font-bold print:text-lg">LAPORAN DISETUJUI</h2>
+        <!-- PERBAIKAN: "Diselesaikan pada" bisa lebih tepat jadi "Selesai pada" -->
         <p class="text-sm opacity-90 mt-1 print:text-xs print:mt-0 text-black">
-          Diselesaikan pada {{ damageData.updated_at ? new Date(damageData.updated_at).toLocaleString('id-ID') : 'N/A' }}
+          Selesai pada {{ damageData.updated_at ? new Date(damageData.updated_at).toLocaleString('id-ID') : 'Tidak Tersedia' }}
         </p>
       </div>
 
@@ -241,18 +242,18 @@ const printReport = () => window.print()
         <div class="grid grid-cols-1 md:grid-cols-4 gap-4 print:grid-cols-4 print:gap-2">
           <div class="bg-gray-50 rounded-lg p-4 print:p-2 print:border print:border-gray-200">
             <p class="text-xs text-gray-500 font-semibold mb-1">📍 Lokasi</p>
-            <p class="text-sm font-bold text-gray-900 print:text-xs">{{ damageData.gh_report?.gh_location?.location || 'N/A' }}</p>
+            <p class="text-sm font-bold text-gray-900 print:text-xs">{{ damageData.gh_report?.gh_location?.location || 'Tidak Tersedia' }}</p>
           </div>
           <div class="bg-blue-50 rounded-lg p-4 print:p-2 print:border print:border-blue-100 print:bg-white">
             <p class="text-xs text-blue-600 font-semibold mb-1">📦 Batch</p>
-            <p class="text-sm font-bold text-blue-900 print:text-xs">{{ damageData.gh_report?.gh_batch?.batch_name || 'N/A' }}</p>
+            <p class="text-sm font-bold text-blue-900 print:text-xs">{{ damageData.gh_report?.gh_batch?.batch_name || 'Tidak Tersedia' }}</p>
           </div>
           <div class="bg-purple-50 rounded-lg p-4 print:p-2 print:border print:border-purple-100 print:bg-white">
             <p class="text-xs text-purple-600 font-semibold mb-1">🌱 Fase</p>
-            <p class="text-sm font-bold text-purple-900 print:text-xs">{{ damageData.gh_report?.gh_phase?.phase_name || 'N/A' }}</p>
+            <p class="text-sm font-bold text-purple-900 print:text-xs">{{ damageData.gh_report?.gh_phase?.phase_name || 'Tidak Tersedia' }}</p>
           </div>
           <div class="bg-green-50 rounded-lg p-4 print:p-2 print:border print:border-green-100 print:bg-white">
-            <p class="text-xs text-green-600 font-semibold mb-1">📅 Tanggal</p>
+            <p class="text-xs text-green-600 font-semibold mb-1">📅 Tanggal Laporan</p>
             <p class="text-sm font-bold text-green-900 print:text-xs">{{ new Date(damageData.report_date).toLocaleDateString('id-ID') }}</p>
           </div>
         </div>
@@ -265,8 +266,9 @@ const printReport = () => window.print()
             <span class="text-2xl print:text-sm">🟡</span>
           </div>
           <p class="text-4xl font-bold mb-2 print:text-xl print:mb-1">{{ totalDamage.kuning.toLocaleString('id-ID') }}</p>
+          <!-- PERBAIKAN: "Bersih:" bisa jadi "Jumlah Bersih:" untuk lebih jelas -->
           <div class="flex items-center justify-between text-sm pt-2 border-t border-yellow-300 print:text-[10px] print:pt-1">
-            <span class="opacity-75">Nett:</span>
+            <span class="opacity-75">Jumlah Bersih:</span>
             <span class="font-bold">{{ nettDamage.kuning.toLocaleString('id-ID') }}</span>
           </div>
         </div>
@@ -278,7 +280,7 @@ const printReport = () => window.print()
           </div>
           <p class="text-4xl font-bold mb-2 print:text-xl print:mb-1">{{ totalDamage.kutilang.toLocaleString('id-ID') }}</p>
           <div class="flex items-center justify-between text-sm pt-2 border-t border-orange-300 print:text-[10px] print:pt-1">
-            <span class="opacity-75">Nett:</span>
+            <span class="opacity-75">Jumlah Bersih:</span>
             <span class="font-bold">{{ nettDamage.kutilang.toLocaleString('id-ID') }}</span>
           </div>
         </div>
@@ -290,7 +292,7 @@ const printReport = () => window.print()
           </div>
           <p class="text-4xl font-bold mb-2 print:text-xl print:mb-1">{{ totalDamage.busuk.toLocaleString('id-ID') }}</p>
           <div class="flex items-center justify-between text-sm pt-2 border-t border-red-400 print:text-[10px] print:pt-1">
-            <span class="opacity-75">Total Loss</span>
+            <span class="opacity-75">Total Kerugian</span>
           </div>
         </div>
       </div>
@@ -311,8 +313,8 @@ const printReport = () => window.print()
               </span>
             </div>
             <div class="grid grid-cols-2 gap-3 mb-2 print:gap-1 print:mb-1">
-              <div class="text-sm print:text-xs"><span class="text-gray-600">Fix Kuning:</span> <strong class="text-yellow-600 ml-1">{{ repair.kuning_repaired }}</strong></div>
-              <div class="text-sm print:text-xs"><span class="text-gray-600">Fix Kutilang:</span> <strong class="text-orange-600 ml-1">{{ repair.kutilang_repaired }}</strong></div>
+              <div class="text-sm print:text-xs"><span class="text-gray-600">Perbaikan Kuning:</span> <strong class="text-yellow-600 ml-1">{{ repair.kuning_repaired }}</strong></div>
+              <div class="text-sm print:text-xs"><span class="text-gray-600">Perbaikan Kutilang:</span> <strong class="text-orange-600 ml-1">{{ repair.kutilang_repaired }}</strong></div>
             </div>
             <p v-if="repair.repair_notes" class="text-sm text-gray-700 mt-2 bg-white/50 p-2 rounded print:text-xs print:p-1 print:border print:border-gray-100">{{ repair.repair_notes }}</p>
             
@@ -335,7 +337,7 @@ const printReport = () => window.print()
         </h3>
         <div class="space-y-4 print:space-y-2">
           <div v-for="type in damageData.type_damage_details" :key="type.typedamage_id" class="border-2 border-gray-100 rounded-xl p-4 print:p-2 print:border-gray-200">
-            <h4 class="font-bold text-gray-900 mb-3 print:text-sm print:mb-1">{{ type.type_damage || 'Unspecified' }}</h4>
+            <h4 class="font-bold text-gray-900 mb-3 print:text-sm print:mb-1">{{ type.type_damage || 'Tidak Ditentukan' }}</h4>
             <div class="grid grid-cols-3 gap-4 mb-3 text-center print:gap-2 print:mb-2">
               <div><p class="text-xs text-gray-500">Kuning</p><p class="font-bold text-yellow-600 print:text-sm">{{ type.kuning }}</p></div>
               <div><p class="text-xs text-gray-500">Kutilang</p><p class="font-bold text-orange-600 print:text-sm">{{ type.kutilang }}</p></div>
@@ -348,7 +350,7 @@ const printReport = () => window.print()
                 :key="idx"
                 :src="img.url"
                 class="h-32 w-32 object-cover rounded-lg border border-gray-200 print:h-20 print:w-20 print:border-gray-300"
-                alt="Damage image"
+                alt="Gambar kerusakan"
               />
             </div>
           </div>
@@ -356,13 +358,13 @@ const printReport = () => window.print()
       </div>
 
       <div v-if="approvalHistory.length > 0" class="bg-white rounded-2xl border-2 border-gray-100 shadow-sm p-6 print:shadow-none print:border print:border-gray-300 print:p-3">
-        <h3 class="text-lg font-bold text-gray-900 mb-4 flex items-center gap-2 print:text-base print:mb-2"><span>📜</span> Riwayat Approval</h3>
+        <h3 class="text-lg font-bold text-gray-900 mb-4 flex items-center gap-2 print:text-base print:mb-2"><span>📜</span> Riwayat Persetujuan</h3>
         <div class="space-y-3 print:space-y-1">
           <div v-for="history in approvalHistory" :key="history.history_id" class="flex items-start gap-4 p-4 rounded-lg border-2 border-gray-100 print:p-2 print:border print:gap-2">
             <div class="flex-shrink-0 text-2xl print:text-lg">{{ getActionIcon(history.action) }}</div>
             <div class="flex-1">
               <div class="flex justify-between items-start mb-1">
-                <p class="font-bold text-gray-900 print:text-xs">{{ history.user?.username || 'Unknown' }}</p>
+                <p class="font-bold text-gray-900 print:text-xs">{{ history.user?.username || 'Tidak Diketahui' }}</p>
                 <p class="text-xs text-gray-500 print:text-[10px]">{{ new Date(history.action_at).toLocaleString('id-ID') }}</p>
               </div>
               <p class="text-sm text-gray-600 print:text-xs">{{ getActionText(history.action) }} <span v-if="history.level_name">• {{ history.level_name }}</span></p>
@@ -377,15 +379,15 @@ const printReport = () => window.print()
       </div>
     </div>
 
-    <footer class="text-center py-10 mt-16 border-t border-gray-200">
+    <footer class="text-center py-10 mt-8 border-t border-gray-200 bg-white">
         <div class="flex items-center justify-center gap-2 mb-2">
            <span class="w-6 h-6 p-0.5">
              <img :src="logoPG" alt="Potato Grow Logo" class="w-full h-full object-contain" />
           </span>
           <p class="text-gray-400 font-bold text-sm">POTATO GROW</p>
         </div>
-        <p class="text-gray-400 text-xs">© 2025 All Rights Reserved</p>
-      </footer>
+        <p class="text-gray-400 text-xs">© 2025 Hak Cipta Dilindungi</p>
+    </footer>
   </div>
 </template>
 

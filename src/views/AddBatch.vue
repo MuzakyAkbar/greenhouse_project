@@ -2,7 +2,6 @@
 import { ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { supabase } from "@/lib/supabase.js"
-import logoPG from '../assets/logoPG.svg'
 
 const router = useRouter()
 
@@ -110,7 +109,7 @@ const saveBatch = async () => {
         </div>
         <div class="flex-1">
           <p class="text-sm text-gray-700 font-semibold mb-1">Informasi Penting</p>
-          <p class="text-sm text-gray-600">Pastikan nama batch menggunakan konvensi yang konsisten dan tanggal yang akurat untuk tracking produksi yang efektif.</p>
+          <p class="text-sm text-gray-600">Pastikan nama batch menggunakan konvensi yang konsisten dan tanggal yang akurat untuk pelacakan produksi yang efektif.</p>
         </div>
       </div>
 
@@ -263,7 +262,7 @@ const saveBatch = async () => {
 
       <!-- Preview Card -->
       <div v-if="newBatch.nama" class="mt-8">
-        <h3 class="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-3">Preview Batch</h3>
+        <h3 class="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-3">Pratinjau Batch</h3>
         <div class="bg-white rounded-2xl border-2 border-gray-100 shadow-sm p-6">
           <div class="flex items-center gap-4">
             <div class="w-14 h-14 bg-gradient-to-br from-[#0071f3] to-[#8FABD4] rounded-xl flex items-center justify-center text-3xl flex-shrink-0 shadow-lg">
@@ -291,7 +290,7 @@ const saveBatch = async () => {
               <div class="w-16 h-16 bg-gray-50 rounded-xl flex items-center justify-center border-2 border-gray-200">
                 <span class="text-2xl font-bold text-gray-400">0%</span>
               </div>
-              <p class="text-xs text-gray-500 mt-1">Progress</p>
+              <p class="text-xs text-gray-500 mt-1">Kemajuan</p>
             </div>
           </div>
         </div>

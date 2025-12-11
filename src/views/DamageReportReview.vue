@@ -3,7 +3,6 @@ import { ref, onMounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { supabase } from '@/lib/supabase'
 import { useAuthStore } from '@/stores/auth'
-import logoPG from '../assets/logoPG.svg'
 
 const router = useRouter()
 const route = useRoute()
@@ -315,7 +314,7 @@ const handleRequestRevision = async () => {
               <span class="w-10 h-10 bg-gradient-to-br from-blue-500 to-indigo-600 rounded-lg flex items-center justify-center text-white text-lg">
                 🌱
               </span>
-              Review Perbaikan (Repair)
+              Tinjauan Perbaikan
             </h1>
             <p class="text-sm text-gray-500 mt-1 ml-13">
               Tinjau hasil perbaikan kerusakan #{{ repairData?.repair_id }}
@@ -338,15 +337,15 @@ const handleRequestRevision = async () => {
         <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
           <div class="bg-gray-50 rounded-lg p-4">
             <p class="text-xs text-gray-500 font-semibold mb-1">📍 Lokasi</p>
-            <p class="text-sm font-bold text-gray-900">{{ repairData.location }}</p>
+            <p class="text-sm font-bold text-gray-900">{{ repairData.location || 'Tidak Tersedia' }}</p>
           </div>
           <div class="bg-blue-50 rounded-lg p-4">
             <p class="text-xs text-blue-600 font-semibold mb-1">📦 Batch</p>
-            <p class="text-sm font-bold text-blue-900">{{ repairData.batch_name }}</p>
+            <p class="text-sm font-bold text-blue-900">{{ repairData.batch_name || 'Tidak Tersedia' }}</p>
           </div>
           <div class="bg-purple-50 rounded-lg p-4">
             <p class="text-xs text-purple-600 font-semibold mb-1">🌱 Fase</p>
-            <p class="text-sm font-bold text-purple-900">{{ repairData.phase_name }}</p>
+            <p class="text-sm font-bold text-purple-900">{{ repairData.phase_name || 'Tidak Tersedia' }}</p>
           </div>
           <div class="bg-green-50 rounded-lg p-4">
             <p class="text-xs text-green-600 font-semibold mb-1">📅 Tanggal Perbaikan</p>
@@ -361,7 +360,7 @@ const handleRequestRevision = async () => {
             <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
                 <div class="bg-gradient-to-br from-yellow-400 to-yellow-500 text-white rounded-2xl p-6 shadow-lg">
                 <div class="flex items-center justify-between mb-2">
-                    <p class="text-sm font-semibold opacity-90">Diperbaiki Kuning</p>
+                    <p class="text-sm font-semibold opacity-90">Kuning Diperbaiki</p>
                     <span class="text-2xl">🟡</span>
                 </div>
                 <p class="text-4xl font-bold mb-1">{{ repairData.kuning_repaired?.toLocaleString('id-ID') || 0 }}</p>
@@ -370,7 +369,7 @@ const handleRequestRevision = async () => {
 
                 <div class="bg-gradient-to-br from-orange-400 to-orange-500 text-white rounded-2xl p-6 shadow-lg">
                 <div class="flex items-center justify-between mb-2">
-                    <p class="text-sm font-semibold opacity-90">Diperbaiki Kutilang</p>
+                    <p class="text-sm font-semibold opacity-90">Kutilang Diperbaiki</p>
                     <span class="text-2xl">🟠</span>
                 </div>
                 <p class="text-4xl font-bold mb-1">{{ repairData.kutilang_repaired?.toLocaleString('id-ID') || 0 }}</p>
@@ -387,13 +386,13 @@ const handleRequestRevision = async () => {
                         <div>
                             <label class="text-xs font-bold text-gray-500 uppercase block mb-1">Metode Perbaikan</label>
                             <div class="bg-blue-50 text-blue-800 px-3 py-2 rounded-lg font-bold border border-blue-100">
-                                {{ repairData.repair_method }}
+                                {{ repairData.repair_method || 'Tidak Ditentukan' }}
                             </div>
                         </div>
                         <div>
                             <label class="text-xs font-bold text-gray-500 uppercase block mb-1">Dilakukan Oleh</label>
                             <div class="bg-gray-50 text-gray-800 px-3 py-2 rounded-lg font-medium border border-gray-200">
-                                {{ repairData.repaired_by }}
+                                {{ repairData.repaired_by || 'Tidak Diketahui' }}
                             </div>
                         </div>
                     </div>
@@ -427,7 +426,7 @@ const handleRequestRevision = async () => {
         <div class="space-y-6">
             <div v-if="canTakeAction" class="bg-white rounded-2xl border-2 border-blue-100 shadow-md p-6 sticky top-24">
                 <h3 class="text-lg font-bold text-gray-900 mb-4 flex items-center gap-2">
-                    <span>⚡</span> Tindakan Approval
+                    <span>⚡</span> Tindakan Persetujuan
                 </h3>
                 
                 <div v-if="approvalAction === 'revise'" class="mb-4 animate-fade-in">
@@ -464,14 +463,14 @@ const handleRequestRevision = async () => {
                         class="w-full bg-gradient-to-r from-red-500 to-red-600 hover:from-red-600 hover:to-red-700 text-white font-bold py-3 px-6 rounded-xl transition-all shadow-md hover:shadow-lg disabled:opacity-50 flex items-center justify-center gap-2"
                     >
                         <span>📤</span>
-                        Kirim Revisi
+                        Kirim Permintaan Revisi
                     </button>
 
                     <button
                         @click="approvalAction = approvalAction === 'revise' ? '' : 'revise'"
                         class="w-full bg-white border-2 border-orange-500 text-orange-600 hover:bg-orange-50 font-bold py-3 px-6 rounded-xl transition-all flex items-center justify-center gap-2"
                     >
-                        <span>{{ approvalAction === 'revise' ? '❌ Batal' : '📝 Minta Revisi' }}</span>
+                        <span>{{ approvalAction === 'revise' ? '❌ Batalkan' : '📝 Minta Revisi' }}</span>
                     </button>
                 </div>
             </div>
@@ -481,12 +480,12 @@ const handleRequestRevision = async () => {
                  Status saat ini: <span class="font-bold uppercase">{{ repairData.overall_status }}</span>
                 </p>
                 <p class="text-gray-500 text-xs mt-2">
-                 Anda tidak memiliki akses approval di level ini atau proses sudah selesai.
+                 Anda tidak memiliki akses persetujuan di level ini atau proses sudah selesai.
                 </p>
             </div>
 
             <div class="bg-white rounded-2xl border border-gray-200 shadow-sm p-6">
-                <h3 class="font-bold text-gray-800 mb-4 text-sm uppercase tracking-wide">Riwayat Approval</h3>
+                <h3 class="font-bold text-gray-800 mb-4 text-sm uppercase tracking-wide">Riwayat Persetujuan</h3>
                 <div class="space-y-4">
                     <div v-for="step in approvalProgress" :key="step.level_order" class="flex gap-3">
                         <div class="flex flex-col items-center">
@@ -500,13 +499,13 @@ const handleRequestRevision = async () => {
                             <p class="font-bold text-sm text-gray-800">{{ step.level_name }}</p>
                             
                             <div v-if="step.level_status === 'approved'" class="text-xs text-green-600 mt-1">
-                                Disetujui oleh <span class="font-semibold">{{ step.approved_by_name }}</span>
+                                Disetujui oleh <span class="font-semibold">{{ step.approved_by_name || 'Tidak Diketahui' }}</span>
                                 <br>
                                 <span class="opacity-75">{{ new Date(step.approved_at).toLocaleString('id-ID') }}</span>
                             </div>
                             
                             <div v-else-if="step.level_status === 'needRevision'" class="text-xs text-red-600 mt-1 bg-red-50 p-2 rounded border border-red-100">
-                                <strong>Revisi diminta:</strong> "{{ step.revision_notes }}"
+                                <strong>Revisi diminta:</strong> "{{ step.revision_notes || 'Tidak ada catatan' }}"
                             </div>
                             
                             <div v-else class="text-xs text-gray-400 italic mt-1">
@@ -521,15 +520,15 @@ const handleRequestRevision = async () => {
       </div>
     </div>
 
-    <footer class="text-center py-10 mt-16 border-t border-gray-200">
+    <footer class="text-center py-10 mt-8 border-t border-gray-200 bg-white">
         <div class="flex items-center justify-center gap-2 mb-2">
            <span class="w-6 h-6 p-0.5">
-             <img :src="logoPG" alt="Potato Grow Logo" class="w-full h-full object-contain" />
+             <img :src="logoPG" alt="Logo Potato Grow" class="w-full h-full object-contain" />
           </span>
           <p class="text-gray-400 font-bold text-sm">POTATO GROW</p>
         </div>
-        <p class="text-gray-400 text-xs">© 2025 All Rights Reserved</p>
-      </footer>
+        <p class="text-gray-400 text-xs">© 2025 Hak Cipta Dilindungi</p>
+    </footer>
   </div>
 </template>
 

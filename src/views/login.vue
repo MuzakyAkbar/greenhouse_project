@@ -2,7 +2,7 @@
 import { ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAuthStore } from '../stores/auth'
-import logoPG from '../assets/logoPG.svg' 
+import logoPG from '../assets/logoPG.svg' // IMPORT LOGO BARU
 
 const router = useRouter()
 const authStore = useAuthStore()
@@ -21,6 +21,8 @@ const handleLogin = async () => {
       router.push('/dashboard-staff')
     } else if (userRole === 'manager' || userRole === 'admin') {
       router.push('/dashboard')
+    } else if (userRole === 'kepalagudang' || userRole === 'kepalagudang') {
+      router.push('/dashboardWarehouse')
     } else {
       router.push('/dashboard')
     }
@@ -32,12 +34,6 @@ const handleLogin = async () => {
 
 <template>
   <div class="min-h-screen flex flex-col items-center justify-center bg-gradient-to-br from-green-50 to-white px-4 py-10">
-    
-    <!-- 
-      PERUBAHAN UTAMA: 
-      - md:max-w-6xl (Sebelumnya 4xl) -> Membuat kartu sangat lebar di desktop 
-      - max-w-lg (Sebelumnya md) -> Membuat kartu sedikit lebih lebar di tablet/mobile besar
-    -->
     <div class="w-full max-w-lg md:max-w-6xl flex flex-col md:flex-row rounded-[2.5rem] overflow-hidden shadow-2xl border-2 border-gray-100 bg-white/70 backdrop-blur-sm transition-all duration-300">
       
       <!-- KOLOM KIRI (Logo & Fitur) -->
@@ -94,7 +90,7 @@ const handleLogin = async () => {
           <div>
             <!-- Label lebih besar: text-base -->
             <label for="email" class="block text-base font-bold text-gray-700 mb-2 ml-1">
-              Email / Username
+              Email / Nama Pengguna
             </label>
             <div class="relative">
               <div class="absolute left-5 top-1/2 -translate-y-1/2 text-gray-400">
@@ -116,7 +112,7 @@ const handleLogin = async () => {
 
           <div>
             <label for="password" class="block text-base font-bold text-gray-700 mb-2 ml-1">
-              Password
+              Kata Sandi
             </label>
             <div class="relative">
               <div class="absolute left-5 top-1/2 -translate-y-1/2 text-gray-400">
@@ -197,7 +193,7 @@ const handleLogin = async () => {
       </div>
     </div>
 
-    <footer class="text-center py-10 mt-16 border-t border-gray-200">
+     <footer class="text-center py-10 mt-16 border-t border-gray-200">
         <div class="flex items-center justify-center gap-2 mb-2">
            <span class="w-6 h-6 p-0.5">
              <img :src="logoPG" alt="Potato Grow Logo" class="w-full h-full object-contain" />

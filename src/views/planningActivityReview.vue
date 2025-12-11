@@ -341,7 +341,7 @@ const saveDirectRevision = async () => {
           <div>
             <h1 class="text-xl font-bold text-gray-900 flex items-center gap-2">
               <span class="text-2xl">📋</span>
-              Review Planning #{{ report_id }}
+              Rencana Peninjauan #{{ report_id }}
             </h1>
           </div>
         </div>
@@ -377,7 +377,7 @@ const saveDirectRevision = async () => {
       </div>
 
       <div v-if="approvalProgress.length" class="bg-white rounded-xl border border-gray-200 p-6 shadow-sm">
-        <h3 class="font-bold text-gray-800 mb-4 flex items-center gap-2"><span class="text-xl">📊</span> Approval Progress</h3>
+        <h3 class="font-bold text-gray-800 mb-4 flex items-center gap-2"><span class="text-xl">📊</span>Progres Persetujuan</h3>
         <div class="space-y-3">
           <div v-for="level in approvalProgress" :key="level.level_order"
                class="flex items-center gap-4 p-3 rounded-lg border transition-all duration-200"
@@ -403,7 +403,7 @@ const saveDirectRevision = async () => {
                   <p class="text-sm text-gray-600 mt-0.5">
                     <span v-if="level.level_status === 'approved'">✅ Approved by {{ level.approver_name || 'Unknown' }}</span>
                     <span v-else-if="level.level_status === 'needRevision'">🔄 Revision requested by {{ level.revisor_name || 'Unknown' }}</span>
-                    <span v-else-if="level.level_order === currentUserLevel?.level_order" class="text-blue-600 font-medium">⏳ Menunggu Approval Anda</span>
+                    <span v-else-if="level.level_order === currentUserLevel?.level_order" class="text-blue-600 font-medium">⏳ Menunggu Disetujui Anda</span>
                     <span v-else>⏳ Pending</span>
                   </p>
                 </div>
@@ -417,7 +417,7 @@ const saveDirectRevision = async () => {
       </div>
 
       <div class="bg-white rounded-xl border border-gray-200 p-6 shadow-sm">
-        <h3 class="font-bold text-gray-800 mb-4 flex items-center gap-2"><span class="text-xl">⚙️</span> Planned Activities ({{ currentReport.activities.length }})</h3>
+        <h3 class="font-bold text-gray-800 mb-4 flex items-center gap-2"><span class="text-xl">⚙️</span> Kegiatan yang Direncanakan ({{ currentReport.activities.length }})</h3>
 
         <div class="grid gap-4">
           <div v-for="(act, index) in currentReport.activities" :key="act.activity_id" class="border border-gray-200 rounded-xl overflow-hidden">
@@ -434,12 +434,12 @@ const saveDirectRevision = async () => {
             </div>
 
             <div class="p-4">
-               <p class="text-sm font-bold text-gray-700 mb-2 flex items-center gap-1">📦 Materials Used</p>
+               <p class="text-sm font-bold text-gray-700 mb-2 flex items-center gap-1">📦 Bahan yang Digunakan</p>
                <div v-if="act.materials?.length" class="border rounded-lg overflow-hidden">
                   <table class="w-full text-sm text-left">
                     <thead class="bg-gray-100 text-gray-600">
                       <tr>
-                        <th class="p-3 font-semibold">Material Name</th>
+                        <th class="p-3 font-semibold">Nama Bahan</th>
                         <th class="p-3 text-right font-semibold">Qty</th>
                         <th class="p-3 text-center font-semibold">Unit</th>
                       </tr>
@@ -506,7 +506,7 @@ const saveDirectRevision = async () => {
 
           <div class="bg-white px-4 pt-5 pb-4 sm:p-6">
             <h3 class="text-xl font-bold text-gray-900 mb-4 flex items-center gap-2">
-              <span class="text-blue-600">✏️</span> Koreksi Data Planning
+              <span class="text-blue-600">✏️</span> Koreksi Data Perencanaan
             </h3>
             
             <div class="max-h-[60vh] overflow-y-auto pr-2 space-y-6">
@@ -516,7 +516,7 @@ const saveDirectRevision = async () => {
                 </div>
                 
                 <div class="mb-4">
-                  <label class="block text-xs font-bold text-gray-500 mb-1">Total Workers</label>
+                  <label class="block text-xs font-bold text-gray-500 mb-1">Jumlah Pekerja</label>
                   <input type="text" v-model="act.manpower" class="w-full border border-gray-300 rounded-lg p-2 text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none">
                 </div>
 
@@ -530,7 +530,7 @@ const saveDirectRevision = async () => {
                     <span class="w-12 text-xs text-gray-500">{{ mat.uom }}</span>
                   </div>
                 </div>
-                <div v-else class="text-xs text-gray-400 italic">No materials.</div>
+                <div v-else class="text-xs text-gray-400 italic">Tidak ada bahan baku.</div>
               </div>
             </div>
 
@@ -543,7 +543,7 @@ const saveDirectRevision = async () => {
           <div class="bg-gray-100 px-4 py-3 sm:px-6 sm:flex sm:flex-row-reverse gap-2">
             <button type="button" @click="saveDirectRevision" :disabled="processing"
                     class="w-full inline-flex justify-center rounded-xl border border-transparent shadow-sm px-4 py-2 bg-blue-600 text-base font-medium text-white hover:bg-blue-700 focus:outline-none sm:ml-3 sm:w-auto sm:text-sm disabled:opacity-50">
-              <span v-if="processing">Saving...</span>
+              <span v-if="processing">Menyimpan...</span>
               <span v-else>Simpan Koreksi</span>
             </button>
             <button type="button" @click="closeEditModal" :disabled="processing"

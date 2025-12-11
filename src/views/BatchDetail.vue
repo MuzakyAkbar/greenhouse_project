@@ -771,7 +771,7 @@ const getPhaseColors = (phaseKey) => {
                 <path d="M9 2a2 2 0 00-2 2v8a2 2 0 002 2h6a2 2 0 002-2V6.414A2 2 0 0016.414 5L14 2.586A2 2 0 0012.586 2H9z"/>
                 <path d="M3 8a2 2 0 012-2v10h8a2 2 0 01-2 2H5a2 2 0 01-2-2V8z"/>
               </svg>
-              Export Excel
+              Ekspor Excel
             </button>
             <button 
               @click="exportToPDF" 
@@ -780,7 +780,7 @@ const getPhaseColors = (phaseKey) => {
               <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
                 <path fill-rule="evenodd" d="M6 2a2 2 0 00-2 2v12a2 2 0 002 2h8a2 2 0 002-2V7.414A2 2 0 0015.414 6L12 2.586A2 2 0 0010.586 2H6zm5 6a1 1 0 10-2 0v3.586l-1.293-1.293a1 1 0 10-1.414 1.414l3 3a1 1 0 001.414 0l3-3a1 1 0 00-1.414-1.414L11 11.586V8z" clip-rule="evenodd"/>
               </svg>
-              Export PDF
+              Ekspor PDF
             </button>
           </div>
         </div>
@@ -902,7 +902,7 @@ const getPhaseColors = (phaseKey) => {
             <div class="relative">
               <p class="text-sm font-semibold opacity-90 mb-2">Tingkat Keberhasilan</p>
               <h2 class="text-4xl font-bold mb-1">{{ batchSummary.sukses }}%</h2>
-              <p class="text-xs opacity-75">📊 Success rate keseluruhan</p>
+              <p class="text-xs opacity-75">📊 Tingkat keberhasilan keseluruhan</p>
             </div>
           </div>
         </div>
@@ -1018,12 +1018,12 @@ const getPhaseColors = (phaseKey) => {
                 <tr>
                   <th class="px-6 py-4 text-left text-xs font-semibold text-white uppercase tracking-wider">Lokasi</th>
                   <th class="px-6 py-4 text-left text-xs font-semibold text-white uppercase tracking-wider">Aktivitas</th>
-                  <th class="px-6 py-4 text-left text-xs font-semibold text-white uppercase tracking-wider">Material</th>
-                  <th class="px-6 py-4 text-right text-xs font-semibold text-white uppercase tracking-wider">Qty</th>
+                  <th class="px-6 py-4 text-left text-xs font-semibold text-white uppercase tracking-wider">Bahan Baku</th>
+                  <th class="px-6 py-4 text-right text-xs font-semibold text-white uppercase tracking-wider">Jumlah</th>
                   <th class="px-6 py-4 text-center text-xs font-semibold text-white uppercase tracking-wider">UoM</th>
-                  <th class="px-6 py-4 text-right text-xs font-semibold text-white uppercase tracking-wider">Unit Price</th>
+                  <th class="px-6 py-4 text-right text-xs font-semibold text-white uppercase tracking-wider">HArga satuan</th>
                   <th class="px-6 py-4 text-right text-xs font-semibold text-white uppercase tracking-wider">Total</th>
-                  <th class="px-6 py-4 text-center text-xs font-semibold text-white uppercase tracking-wider">Manpower</th>
+                  <th class="px-6 py-4 text-center text-xs font-semibold text-white uppercase tracking-wider">Tenaga Kerja</th>
                 </tr>
               </thead>
               <tbody class="bg-white divide-y divide-gray-200">
@@ -1070,7 +1070,7 @@ const getPhaseColors = (phaseKey) => {
               </tbody>
               <tfoot>
                 <tr class="bg-gradient-to-r from-blue-50 to-white">
-                  <td colspan="6" class="px-6 py-4 text-right text-sm font-bold text-gray-900">Total Biaya Activities:</td>
+                  <td colspan="6" class="px-6 py-4 text-right text-sm font-bold text-gray-900">Total Biaya Kegiatan:</td>
                   <td class="px-6 py-4 whitespace-nowrap text-sm font-bold text-green-600 text-right">
                     Rp {{ activityReport.reduce((sum, item) => sum + (item.activity_total || 0), 0).toLocaleString('id-ID') }}
                   </td>
@@ -1083,9 +1083,9 @@ const getPhaseColors = (phaseKey) => {
       </div>
 
       <div class="mb-8">
-        <h2 class="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-3">Material yang Digunakan (Summary)</h2>
+        <h2 class="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-3">Bahan Baku yang Digunakan (Ringkasan)</h2>
         <div v-if="materialList.length === 0" class="bg-white rounded-2xl border-2 border-gray-100 p-8 text-center text-gray-500">
-          Belum ada data material
+          Belum ada data bahan baku
         </div>
         <div v-else class="bg-white rounded-2xl border-2 border-gray-100 shadow-sm hover:shadow-lg transition-all overflow-hidden">
           <div class="overflow-x-auto">
@@ -1093,9 +1093,9 @@ const getPhaseColors = (phaseKey) => {
               <thead class="bg-gradient-to-r from-[#0071f3] to-[#0060d1]">
                 <tr>
                   <th class="px-6 py-4 text-left text-xs font-semibold text-white uppercase tracking-wider">Nama Material</th>
-                  <th class="px-6 py-4 text-right text-xs font-semibold text-white uppercase tracking-wider">Total Qty</th>
+                  <th class="px-6 py-4 text-right text-xs font-semibold text-white uppercase tracking-wider">Jumlah Total</th>
                   <th class="px-6 py-4 text-center text-xs font-semibold text-white uppercase tracking-wider">UoM</th>
-                  <th class="px-6 py-4 text-right text-xs font-semibold text-white uppercase tracking-wider">Avg Unit Price</th>
+                  <th class="px-6 py-4 text-right text-xs font-semibold text-white uppercase tracking-wider">Harga Satuan Rata-Rata</th>
                   <th class="px-6 py-4 text-right text-xs font-semibold text-white uppercase tracking-wider">Total Harga</th>
                 </tr>
               </thead>

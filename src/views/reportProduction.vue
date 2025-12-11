@@ -389,7 +389,7 @@ function resetForm() {
 
             <!-- location -->
             <div class="flex flex-col">
-              <label class="text-sm font-semibold text-gray-700 mb-2">Pilih Location</label>
+              <label class="text-sm font-semibold text-gray-700 mb-2">Pilih Lokasi</label>
               <div class="relative">
                 <div class="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none">
                   <svg class="w-5 h-5" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" fill="currentColor">
@@ -400,7 +400,7 @@ function resetForm() {
                   v-model.number="report.location"
                   class="w-full pl-12 pr-4 py-3 rounded-xl border-2 border-gray-200 bg-gray-50 text-gray-800 focus:outline-none focus:ring-2 focus:ring-[#0071f3] focus:border-transparent focus:bg-white transition-all appearance-none cursor-pointer"
                 >
-                  <option :value="null" disabled>Pilih Location</option>
+                  <option :value="null" disabled>Pilih Lokasi</option>
                   <option v-for="loc in locations" :key="loc.location_id" :value="loc.location_id">
                     {{ loc.location }}
                   </option>
@@ -427,7 +427,7 @@ function resetForm() {
                   class="w-full pl-12 pr-4 py-3 rounded-xl border-2 border-gray-200 bg-gray-50 text-gray-800 focus:outline-none focus:ring-2 focus:ring-[#0071f3] focus:border-transparent focus:bg-white transition-all appearance-none cursor-pointer"
                 >
                   <option :value="null" disabled>
-                    {{ report.location ? "Pilih Batch" : "Pilih Location Terlebih Dahulu" }}
+                    {{ report.location ? "Pilih Batch" : "Pilih Lokasi Terlebih Dahulu" }}
                   </option>
                   <option
                     v-for="batch in filteredBatches"
@@ -682,7 +682,7 @@ function resetForm() {
           <svg class="w-5 h-5" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" fill="currentColor">
             <path d="M125.7 160l50.3 0c17.7 0 32 14.3 32 32s-14.3 32-32 32L48 224c-17.7 0-32-14.3-32-32L16 64c0-17.7 14.3-32 32-32s32 14.3 32 32l0 51.2L97.6 97.6c87.5-87.5 229.3-87.5 316.8 0s87.5 229.3 0 316.8s-229.3 87.5-316.8 0c-12.5-12.5-12.5-32.8 0-45.3s32.8-12.5 45.3 0c62.5 62.5 163.8 62.5 226.3 0s62.5-163.8 0-226.3s-163.8-62.5-226.3 0L125.7 160z"/>
           </svg>
-          Reset Form
+          Reset Formulir
         </button>
         <button
           @click.prevent="submitReport"
