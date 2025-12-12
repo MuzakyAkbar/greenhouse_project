@@ -1,11 +1,32 @@
 <script setup>
-import { ref } from 'vue'
+import { ref, onMounted } from 'vue' // Tambah onMounted
 import { useRouter } from 'vue-router'
 import { useAuthStore } from '../stores/auth'
-import logoPG from '../assets/logoPG.svg' // IMPORT LOGO BARU
+import logoPG from '../assets/logoPG.svg'
+import { useI18n } from 'vue-i18n' //
 
 const router = useRouter()
 const authStore = useAuthStore()
+
+// --- BAGIAN PENTING: FIX ERROR "locale is not defined" ---
+const { t, locale } = useI18n() 
+
+// Cek apakah ada bahasa yang tersimpan sebelumnya di LocalStorage
+onMounted(() => {
+  const savedLocale = localStorage.getItem('user-locale')
+  if (savedLocale) {
+    locale.value = savedLocale
+  }
+})
+
+// Fungsi Ganti Bahasa
+const toggleLanguage = () => {
+  // Ubah nilai locale (id <-> en)
+  locale.value = locale.value === 'id' ? 'en' : 'id'
+  // Simpan ke LocalStorage agar "mengikuti" meskipun di-refresh
+  localStorage.setItem('user-locale', locale.value)
+}
+// ---------------------------------------------------------
 
 const email = ref('')
 const password = ref('')
@@ -14,30 +35,36 @@ const showPassword = ref(false)
 const handleLogin = async () => {
   const success = await authStore.login(email.value, password.value)
   if (success) {
-    // Redirect berdasarkan role
     const userRole = authStore.user?.role?.toLowerCase()
 
     if (userRole === 'staff') {
       router.push('/dashboard-staff')
     } else if (userRole === 'manager' || userRole === 'admin') {
       router.push('/dashboard')
-    } else if (userRole === 'kepalagudang' || userRole === 'kepalagudang') {
+    } else if (userRole === 'kepalagudang') {
       router.push('/dashboardWarehouse')
     } else {
       router.push('/dashboard')
     }
   } else {
-    alert(authStore.error || 'Gagal login. Periksa kembali email dan password.')
+    // Gunakan t() untuk pesan error
+    alert(authStore.error || t('login.error_msg')) 
   }
 }
 </script>
 
 <template>
-  <div class="min-h-screen flex flex-col items-center justify-center bg-gradient-to-br from-green-50 to-white px-4 py-10">
+  <div class="min-h-screen flex flex-col items-center justify-center bg-gradient-to-br from-green-50 to-white px-4 py-10 relative">
+    
+    <!-- <button 
+      @click="toggleLanguage" 
+      class="absolute top-5 right-5 bg-white border border-gray-200 px-4 py-2 rounded-xl shadow-sm hover:shadow-md font-bold text-gray-600 transition-all z-50 flex items-center gap-2"
+    >
+      <span>{{ locale === 'id' ? '🇺🇸 English' : '🇮🇩 Indonesia' }}</span>
+    </button> -->
+
     <div class="w-full max-w-lg md:max-w-6xl flex flex-col md:flex-row rounded-[2.5rem] overflow-hidden shadow-2xl border-2 border-gray-100 bg-white/70 backdrop-blur-sm transition-all duration-300">
       
-      <!-- KOLOM KIRI (Logo & Fitur) -->
-      <!-- Padding diperbesar jadi p-12 sm:p-16 -->
       <div class="
         w-full md:w-1/2 p-10 sm:p-16 flex flex-col justify-center items-center 
         bg-white md:bg-gradient-to-br md:from-green-50 md:to-green-100/50
@@ -46,34 +73,29 @@ const handleLogin = async () => {
       ">
         
         <div class="mb-8 md:mb-12 text-center">
-          <!-- Logo diperbesar drastis: sm:w-52 sm:h-52 -->
           <div class="inline-flex items-center justify-center w-32 h-32 sm:w-52 sm:h-52 bg-white rounded-[2rem] shadow-xl transform hover:scale-105 transition-transform p-6">
             <img :src="logoPG" alt="Potato Grow Logo" class="w-full h-full object-contain" />
           </div>
         </div>
         
-        <!-- Grid Icon Fitur Diperbesar -->
         <div class="grid grid-cols-3 gap-4 w-full max-w-md mt-4">
           <div class="bg-white rounded-2xl p-5 text-center border border-gray-100 shadow-sm hover:shadow-md transition-shadow">
-            <div class="text-4xl mb-2">🌱</div>
-            <p class="text-base font-bold text-gray-600">Monitoring</p>
-          </div>
-          <div class="bg-white rounded-2xl p-5 text-center border border-gray-100 shadow-sm hover:shadow-md transition-shadow">
             <div class="text-4xl mb-2">📊</div>
-            <p class="text-base font-bold text-gray-600">Analisis</p>
+            <p class="text-base font-bold text-gray-600">{{ t('menu.monitoring') }}</p>
           </div>
           <div class="bg-white rounded-2xl p-5 text-center border border-gray-100 shadow-sm hover:shadow-md transition-shadow">
             <div class="text-4xl mb-2">📈</div>
-            <p class="text-base font-bold text-gray-600">Laporan</p>
+            <p class="text-base font-bold text-gray-600">{{ t('menu.analysis') }}</p>
+          </div>
+          <div class="bg-white rounded-2xl p-5 text-center border border-gray-100 shadow-sm hover:shadow-md transition-shadow">
+            <div class="text-4xl mb-2">📑</div>
+            <p class="text-base font-bold text-gray-600">{{ t('menu.report') }}</p>
           </div>
         </div>
       </div>
 
-      <!-- KOLOM KANAN (Form Login) -->
-      <!-- Padding diperbesar jadi p-12 sm:p-16 -->
       <div class="w-full md:w-1/2 p-8 sm:p-16 bg-white/80 flex flex-col justify-center">
         
-        <!-- Logo Mobile -->
         <div class="text-center mb-8 md:hidden">
             <div class="inline-flex items-center justify-center w-32 h-32 bg-white rounded-[2rem] shadow-xl p-5">
                 <img :src="logoPG" alt="Potato Grow Logo" class="w-full h-full object-contain" />
@@ -81,16 +103,14 @@ const handleLogin = async () => {
         </div>
 
         <div class="text-center mb-10">
-          <!-- Font Judul Diperbesar: text-4xl -->
-          <h2 class="text-3xl md:text-4xl font-extrabold text-gray-900 mb-3 tracking-tight">Selamat Datang</h2>
-          <p class="text-gray-500 text-lg">Masuk untuk melanjutkan ke dashboard</p>
+          <h2 class="text-3xl md:text-4xl font-extrabold text-gray-900 mb-3 tracking-tight">{{ t('login.welcome') }}</h2>
+          <p class="text-gray-500 text-lg">{{ t('login.subtitle') }}</p>
         </div>
 
         <form @submit.prevent="handleLogin" class="space-y-6">
           <div>
-            <!-- Label lebih besar: text-base -->
             <label for="email" class="block text-base font-bold text-gray-700 mb-2 ml-1">
-              Email / Nama Pengguna
+              {{ t('login.email_label') }}
             </label>
             <div class="relative">
               <div class="absolute left-5 top-1/2 -translate-y-1/2 text-gray-400">
@@ -98,12 +118,11 @@ const handleLogin = async () => {
                   <path d="M48 64C21.5 64 0 85.5 0 112c0 15.1 7.1 29.3 19.2 38.4L236.8 313.6c11.4 8.5 27 8.5 38.4 0L492.8 150.4c12.1-9.1 19.2-23.3 19.2-38.4c0-26.5-21.5-48-48-48L48 64zM0 176L0 384c0 35.3 28.7 64 64 64l384 0c35.3 0 64-28.7 64-64l0-208L294.4 339.2c-22.8 17.1-54 17.1-76.8 0L0 176z"/>
                 </svg>
               </div>
-              <!-- Input lebih tinggi (py-4) dan font lebih besar (text-lg) -->
               <input
                 id="email"
                 v-model="email"
                 type="text"
-                placeholder="Masukkan email atau username"
+                :placeholder="t('login.email_placeholder')"
                 required
                 class="w-full pl-14 pr-5 py-4 text-lg rounded-2xl border-2 border-gray-200 bg-gray-50 text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-4 focus:ring-green-100 focus:border-[#0071f3] focus:bg-white transition-all"
               />
@@ -112,7 +131,7 @@ const handleLogin = async () => {
 
           <div>
             <label for="password" class="block text-base font-bold text-gray-700 mb-2 ml-1">
-              Kata Sandi
+              {{ t('login.password_label') }}
             </label>
             <div class="relative">
               <div class="absolute left-5 top-1/2 -translate-y-1/2 text-gray-400">
@@ -124,7 +143,7 @@ const handleLogin = async () => {
                 id="password"
                 v-model="password"
                 :type="showPassword ? 'text' : 'password'"
-                placeholder="Masukkan password"
+                :placeholder="t('login.password_placeholder')"
                 required
                 class="w-full pl-14 pr-12 py-4 text-lg rounded-2xl border-2 border-gray-200 bg-gray-50 text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-4 focus:ring-green-100 focus:border-[#0071f3] focus:bg-white transition-all"
               />
@@ -141,28 +160,24 @@ const handleLogin = async () => {
             </div>
           </div>
 
-          <div
-            v-if="authStore.error"
-            class="bg-red-50 border-l-4 border-red-500 p-4 rounded-xl animate-shake"
-          >
+          <div v-if="authStore.error" class="bg-red-50 border-l-4 border-red-500 p-4 rounded-xl animate-shake">
             <div class="flex items-start gap-3">
               <svg class="w-6 h-6 text-red-500 flex-shrink-0 mt-0.5" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" fill="currentColor">
                 <path d="M256 512A256 256 0 1 0 256 0a256 256 0 1 0 0 512zm0-384c13.3 0 24 10.7 24 24l0 112c0 13.3-10.7 24-24 24s-24-10.7-24-24l0-112c0-13.3 10.7-24 24-24zM224 352a32 32 0 1 1 64 0 32 32 0 1 1 -64 0z"/>
               </svg>
               <div>
-                <p class="text-base font-semibold text-red-700 mb-1">Login Gagal</p>
+                <p class="text-base font-semibold text-red-700 mb-1">{{ t('login.error_title') }}</p>
                 <p class="text-sm text-red-600">{{ authStore.error }}</p>
               </div>
             </div>
           </div>
 
-          <!-- Tombol diperbesar: py-5 dan text-lg -->
           <button
             type="submit"
             :disabled="authStore.loading"
             class="w-full bg-gradient-to-r from-[#0071f3] to-[#0060d1] hover:from-[#0060d1] hover:to-[#0050b1] text-white font-bold py-5 rounded-2xl shadow-lg hover:shadow-xl hover:shadow-blue-500/30 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-3 transform hover:scale-[1.01] active:scale-[0.98]"
           >
-            <svg
+             <svg
               v-if="authStore.loading"
               class="animate-spin h-6 w-6"
               xmlns="http://www.w3.org/2000/svg"
@@ -172,24 +187,24 @@ const handleLogin = async () => {
               <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
               <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
             </svg>
-            <span class="text-lg tracking-wide">{{ authStore.loading ? 'Memproses...' : 'Masuk ke Dashboard' }}</span>
+            <span class="text-lg tracking-wide">{{ authStore.loading ? t('login.processing') : t('login.button') }}</span>
           </button>
         </form>
       </div>
     </div>
-
+    
     <div class="mt-8 grid grid-cols-3 gap-3 w-full max-w-lg md:hidden px-4">
       <div class="bg-white rounded-2xl p-4 text-center border border-gray-100 shadow-sm">
-        <div class="text-3xl mb-1">🌱</div>
-        <p class="text-xs font-bold text-gray-600">Monitoring</p>
-      </div>
-      <div class="bg-white rounded-2xl p-4 text-center border border-gray-100 shadow-sm">
         <div class="text-3xl mb-1">📊</div>
-        <p class="text-xs font-bold text-gray-600">Analisis</p>
+        <p class="text-xs font-bold text-gray-600">{{ t('menu.monitoring') }}</p>
       </div>
       <div class="bg-white rounded-2xl p-4 text-center border border-gray-100 shadow-sm">
         <div class="text-3xl mb-1">📈</div>
-        <p class="text-xs font-bold text-gray-600">Laporan</p>
+        <p class="text-xs font-bold text-gray-600">{{ t('menu.analysis') }}</p>
+      </div>
+      <div class="bg-white rounded-2xl p-4 text-center border border-gray-100 shadow-sm">
+        <div class="text-3xl mb-1">📑</div>
+        <p class="text-xs font-bold text-gray-600">{{ t('menu.report') }}</p>
       </div>
     </div>
 
@@ -216,9 +231,7 @@ const handleLogin = async () => {
   animation: shake 0.5s ease-in-out;
 }
 
-/* Penyesuaian Mobile */
 @media (max-width: 767px) {
-  /* Pastikan logo kiri sembunyi */
   .md\:flex {
     display: none !important;
   }

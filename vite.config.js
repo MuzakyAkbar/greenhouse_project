@@ -4,6 +4,7 @@ import vue from '@vitejs/plugin-vue'
 import vueDevTools from 'vite-plugin-vue-devtools'
 
 export default defineConfig({
+  base: '/plantara/',
   plugins: [vue(), vueDevTools()],
   resolve: {
     alias: {
@@ -14,8 +15,8 @@ export default defineConfig({
     proxy: {
       // 1. Proxy untuk Data (Port 80 standard)
       // Call ke /api-ob/... akan diteruskan ke http://202.59.169.85/openbravo/...
-      '/api-ob': {
-        target: 'http://202.59.169.85',
+      '/plantara/api-ob': {
+        target: 'https://mhnob.pirantisolusi.com',
         changeOrigin: true,
         secure: false,
         rewrite: (p) => p.replace(/^\/api-ob/, '/openbravo'),
@@ -25,8 +26,8 @@ export default defineConfig({
       },
       // 2. Proxy KHUSUS untuk Process (Port 8090)
       // Call ke /api-process/... akan diteruskan ke http://202.59.169.85:8090/api/...
-      '/api-process': {
-        target: 'http://202.59.169.85:8090',
+      '/plantara/api-process': {
+        target: 'https://mhnproc.pirantisolusi.com',
         changeOrigin: true,
         secure: false,
         rewrite: (p) => p.replace(/^\/api-process/, '/api'),

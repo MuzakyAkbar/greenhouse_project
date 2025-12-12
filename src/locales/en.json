@@ -1,0 +1,132 @@
+{
+  "global": {
+    "app_name": "POTATO GROW",
+    "copyright": "© 2025 All Rights Reserved",
+    "save": "Save",
+    "cancel": "Cancel",
+    "back": "Back",
+    "delete": "Delete",
+    "edit": "Edit",
+    "view": "View",
+    "close": "Close",
+    "loading": "Loading...",
+    "processing": "Processing...",
+    "success": "Success",
+    "error": "Error",
+    "warning": "Warning",
+    "date": "Date",
+    "status": "Status",
+    "actions": "Actions",
+    "search": "Search...",
+    "logout": "Logout",
+    "dashboard": "Dashboard",
+    "location": "Location",
+    "batch": "Batch",
+    "phase": "Phase",
+    "submit": "Submit",
+    "download": "Download"
+  },
+  "login": {
+    "welcome": "Welcome",
+    "subtitle": "Sign in to continue to dashboard",
+    "email_label": "Email / Username",
+    "email_placeholder": "Enter email or username",
+    "password_label": "Password",
+    "password_placeholder": "Enter password",
+    "btn_login": "Sign in to Dashboard",
+    "error_title": "Login Failed",
+    "error_msg": "Please check your email and password.",
+    "menu_monitoring": "Monitoring",
+    "menu_analysis": "Analysis",
+    "menu_report": "Reports"
+  },
+  "dashboard": {
+    "title": "MHN Potato Grow Dashboard",
+    "subtitle": "Production Monitoring & Analysis",
+    "quick_action": "Quick Actions",
+    "summary": "Production Summary",
+    "success_rate": "Success Rate",
+    "analysis": "Analysis & Visualization",
+    "location_data": "Location Data",
+    "btn_planning": "Planning List",
+    "btn_form_plan": "Planning Form",
+    "btn_form_activity": "Activity Form",
+    "btn_prod_report": "Production Report",
+    "btn_movement": "Goods Movement",
+    "btn_env": "Environment",
+    "cards": {
+      "planlet": "Total Planlets",
+      "stock": "Total Stock",
+      "g0_sold": "G0 Sold",
+      "g0_prod": "G0 Produced",
+      "g2_prod": "Total G2 Produced",
+      "g2_sold": "Total G2 Sold",
+      "revenue": "Total Revenue"
+    },
+    "charts": {
+      "phase": "Production by Phase",
+      "owner": "Ownership Distribution",
+      "sales": "Monthly Sales & Revenue",
+      "label_qty": "Quantity Sold",
+      "label_revenue": "Revenue (Million Rp)"
+    },
+    "repair": "Repair Damage",
+    "no_damage": "No damage"
+  },
+  "staff": {
+    "welcome": "Welcome, Staff!",
+    "subtitle": "Manage your activities and reports",
+    "stats_today": "Today's Tasks",
+    "stats_done": "Completed Tasks",
+    "stats_pending": "Pending Reports",
+    "tips_title": "Today's Tip",
+    "tips_desc": "Ensure forms are filled before 4:00 PM WIB."
+  },
+  "location": {
+    "title": "Location & Batch Management",
+    "subtitle": "Manage garden locations and production batches",
+    "add_phase": "Add Phase",
+    "add_loc": "Add Location",
+    "btn_qr": "Download All QR (PDF)",
+    "summary_loc": "Total Locations",
+    "summary_batch": "Total Batches",
+    "avg": "Avg Batch/Location",
+    "empty_title": "No Locations Yet",
+    "empty_desc": "Add your first location",
+    "list_title": "Location List",
+    "modal_add_loc": "Add Location",
+    "modal_edit_loc": "Edit Location",
+    "modal_add_batch": "Add Batch",
+    "qr_title": "QR Code",
+    "qr_inst": "Scan to autofill"
+  },
+  "movement": {
+    "title": "Goods Movement",
+    "subtitle": "Inter-warehouse logistics",
+    "add_btn": "Add Movement",
+    "list": "Movement List",
+    "load_more": "Load More",
+    "empty": "No movement data",
+    "status": {
+      "approved": "Approved",
+      "revision": "Need Revision",
+      "review": "On Review"
+    }
+  },
+  "env": {
+    "title": "Environment Log",
+    "subtitle": "Temp & Humidity History",
+    "add": "Log New Data",
+    "weather": "Weather",
+    "avg_temp": "Avg Temp"
+  },
+  "batch": {
+    "add_title": "Add New Batch",
+    "form_name": "Batch Name",
+    "form_start": "Start Date",
+    "form_end": "End Date",
+    "duration": "Batch Duration",
+    "alert_fill": "Please fill all data",
+    "alert_date": "Start date cannot be later than end date"
+  }
+}

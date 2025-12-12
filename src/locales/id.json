@@ -1,0 +1,132 @@
+{
+  "global": {
+    "app_name": "POTATO GROW",
+    "copyright": "© 2025 Hak Cipta Dilindungi",
+    "save": "Simpan",
+    "cancel": "Batal",
+    "back": "Kembali",
+    "delete": "Hapus",
+    "edit": "Edit",
+    "view": "Lihat",
+    "close": "Tutup",
+    "loading": "Memuat...",
+    "processing": "Memproses...",
+    "success": "Berhasil",
+    "error": "Gagal",
+    "warning": "Peringatan",
+    "date": "Tanggal",
+    "status": "Status",
+    "actions": "Aksi",
+    "search": "Cari...",
+    "logout": "Keluar",
+    "dashboard": "Dashboard",
+    "location": "Lokasi",
+    "batch": "Batch",
+    "phase": "Fase",
+    "submit": "Kirim",
+    "download": "Unduh"
+  },
+  "login": {
+    "welcome": "Selamat Datang",
+    "subtitle": "Masuk untuk melanjutkan ke dashboard",
+    "email_label": "Email / Nama Pengguna",
+    "email_placeholder": "Masukkan email atau username",
+    "password_label": "Kata Sandi",
+    "password_placeholder": "Masukkan password",
+    "btn_login": "Masuk ke Dashboard",
+    "error_title": "Login Gagal",
+    "error_msg": "Periksa kembali email dan password.",
+    "menu_monitoring": "Monitoring",
+    "menu_analysis": "Analisis",
+    "menu_report": "Laporan"
+  },
+  "dashboard": {
+    "title": "Dashboard MHN Potato Grow",
+    "subtitle": "Monitoring & Analisis Produksi",
+    "quick_action": "Aksi Cepat",
+    "summary": "Ringkasan Produksi",
+    "success_rate": "Tingkat Keberhasilan",
+    "analysis": "Analisis & Visualisasi",
+    "location_data": "Data Setiap Lokasi",
+    "btn_planning": "Daftar Perencanaan",
+    "btn_form_plan": "Form Perencanaan",
+    "btn_form_activity": "Form Aktivitas",
+    "btn_prod_report": "Laporan Produksi",
+    "btn_movement": "Perpindahan Barang",
+    "btn_env": "Lingkungan",
+    "cards": {
+      "planlet": "Total Planlet",
+      "stock": "Stok Keseluruhan",
+      "g0_sold": "G0 Terjual",
+      "g0_prod": "G0 Diproduksi",
+      "g2_prod": "Total G2 Diproduksi",
+      "g2_sold": "Total G2 Terjual",
+      "revenue": "Pendapatan Total"
+    },
+    "charts": {
+      "phase": "Produksi Per Fase",
+      "owner": "Distribusi Kepemilikan",
+      "sales": "Penjualan & Pendapatan Bulanan",
+      "label_qty": "Jumlah Terjual",
+      "label_revenue": "Pendapatan (Juta Rp)"
+    },
+    "repair": "Perbaiki Kerusakan",
+    "no_damage": "Tidak ada kerusakan"
+  },
+  "staff": {
+    "welcome": "Selamat Datang, Staf!",
+    "subtitle": "Kelola aktivitas dan laporan Anda",
+    "stats_today": "Tugas Hari Ini",
+    "stats_done": "Tugas Selesai",
+    "stats_pending": "Laporan Tertunda",
+    "tips_title": "Tips Hari Ini",
+    "tips_desc": "Pastikan mengisi formulir sebelum pukul 16.00 WIB."
+  },
+  "location": {
+    "title": "Manajemen Lokasi & Batch",
+    "subtitle": "Kelola lokasi kebun dan batch produksi",
+    "add_phase": "Tambah Fase",
+    "add_loc": "Tambah Lokasi",
+    "btn_qr": "Unduh Semua QR (PDF)",
+    "summary_loc": "Total Lokasi",
+    "summary_batch": "Total Batch",
+    "avg": "Rata-rata Batch/Lokasi",
+    "empty_title": "Belum Ada Lokasi",
+    "empty_desc": "Tambahkan lokasi pertama Anda",
+    "list_title": "Daftar Lokasi",
+    "modal_add_loc": "Tambah Lokasi",
+    "modal_edit_loc": "Edit Lokasi",
+    "modal_add_batch": "Tambah Batch",
+    "qr_title": "Kode QR",
+    "qr_inst": "Pindai untuk mengisi otomatis"
+  },
+  "movement": {
+    "title": "Perpindahan Barang",
+    "subtitle": "Manajemen logistik antar gudang",
+    "add_btn": "Tambah Movement",
+    "list": "Daftar Movement",
+    "load_more": "Muat Lebih Banyak",
+    "empty": "Belum ada data movement",
+    "status": {
+      "approved": "Disetujui",
+      "revision": "Perlu Revisi",
+      "review": "Dalam Tinjauan"
+    }
+  },
+  "env": {
+    "title": "Catatan Lingkungan",
+    "subtitle": "Riwayat Suhu & Kelembapan",
+    "add": "Catat Data Baru",
+    "weather": "Cuaca",
+    "avg_temp": "Rata-rata Suhu"
+  },
+  "batch": {
+    "add_title": "Tambah Batch Baru",
+    "form_name": "Nama Batch",
+    "form_start": "Tanggal Mulai",
+    "form_end": "Tanggal Selesai",
+    "duration": "Durasi Batch",
+    "alert_fill": "Mohon isi semua data",
+    "alert_date": "Tanggal mulai tidak boleh lebih besar dari selesai"
+  }
+}

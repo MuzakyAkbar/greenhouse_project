@@ -482,16 +482,17 @@ const createAndProcessMovement = async (materials, activityName) => {
       throw new Error(`Gagal insert item: ${errors.join(', ')}`);
     }
 
+   // ============================================
+    // STEP 3: PROCESS (UPDATED: PROXY DOMAIN)
     // ============================================
-    // STEP 3: PROCESS (FIXED TO MATCH USER REQUEST)
-    // ============================================
-    console.log('\n🔄 STEP 3: Processing (Custom API)...');
+    console.log('\n🔄 STEP 3: Processing (Via Proxy)...');
     
-    // Gunakan Env Vars untuk Auth Process API
+    // Gunakan Env Vars untuk Auth Process API (Credentials tetap diambil dari ENV)
     const apiUser = import.meta.env.VITE_API_USER;
     const apiPass = import.meta.env.VITE_API_PASS;
-    const apiUrl = import.meta.env.VITE_OPENBRAVO_URL?.trim() || 'http://202.59.169.85';
-    const processPort = import.meta.env.VITE_API_PORT?.trim() || '8090';
+
+    // UPDATE: URL sekarang menggunakan domain proxy khusus, tidak lagi rakitan IP:Port
+    const endpoint = 'https://mhnproc.pirantisolusi.com/api/process';
 
     if (!apiUser || !apiPass) {
       return {
@@ -500,9 +501,6 @@ const createAndProcessMovement = async (materials, activityName) => {
         warning: 'Credential ENV missing for Processing.'
       };
     }
-
-    const baseUrl = apiUrl.replace(/\/+$/, '').replace(/:\d+$/, '');
-    const endpoint = `${baseUrl}:${processPort}/api/process`;
     
     // Basic Auth
     const authToken = btoa(unescape(encodeURIComponent(`${apiUser}:${apiPass}`)));
@@ -517,6 +515,7 @@ const createAndProcessMovement = async (materials, activityName) => {
       ]
     };
 
+    console.log('🔗 Endpoint:', endpoint);
     console.log('📤 Sending Payload:', JSON.stringify(processPayload, null, 2));
 
     try {
