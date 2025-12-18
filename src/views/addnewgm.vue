@@ -637,7 +637,7 @@ onMounted(async () => {
 const loadWarehouses = async () => {
   try {
     const { data } = await openbravoApi.get(
-      "/org.openbravo.service.json.jsonrest/Warehouse"
+      "/Warehouse"
     );
     warehouses.value = data.response.data.map((w) => ({
       id: w.id,
@@ -662,7 +662,7 @@ const loadFirstBinForWarehouse = async (warehouseId) => {
   binLoading.value = true;
   try {
     const { data } = await openbravoApi.get(
-      "/org.openbravo.service.json.jsonrest/Locator",
+      "/Locator",
       { params: { _where: `M_Warehouse_ID='${warehouseId}'` } }
     );
     const list = data?.response?.data || [];
@@ -683,7 +683,7 @@ const loadFirstBinForWarehouseTo = async (warehouseId) => {
   binLoadingTo.value = true;
   try {
     const { data } = await openbravoApi.get(
-      "/org.openbravo.service.json.jsonrest/Locator",
+      "/Locator",
       { params: { _where: `M_Warehouse_ID='${warehouseId}'` } }
     );
     const list = data?.response?.data || [];
@@ -707,7 +707,7 @@ const loadMaterialsByBin = async (locatorId) => {
   modalLoading.value = true;
   try {
     const { data } = await openbravoApi.get(
-      "/org.openbravo.service.json.jsonrest/MaterialMgmtStorageDetail",
+      "/MaterialMgmtStorageDetail",
       {
         params: {
           _where: `M_Locator_ID='${locatorId}' AND quantityOnHand > 0`,
@@ -956,7 +956,7 @@ const submitAll = async () => {
     };
 
     const headerRes = await openbravoApi.post(
-      "/org.openbravo.service.json.jsonrest/MaterialMgmtInternalMovement",
+      "/MaterialMgmtInternalMovement",
       headerPayload
     );
 
@@ -975,7 +975,7 @@ const submitAll = async () => {
     }));
 
     const lineRes = await openbravoApi.post(
-      "/org.openbravo.service.json.jsonrest/MaterialMgmtInternalMovementLine",
+      "/MaterialMgmtInternalMovementLine",
       { data: obLines }
     );
 

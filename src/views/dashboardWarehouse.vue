@@ -7,15 +7,15 @@
       class="bg-white/80 backdrop-blur-md border-b border-gray-200 sticky top-0 z-50 shadow-sm"
     >
       <div
-        class="max-w-7xl mx-auto px-6 py-4 flex items-center justify-between"
+        class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-3 sm:py-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 sm:gap-0"
       >
-        <div class="flex items-center gap-3">
+        <div class="flex items-center gap-3 w-full sm:w-auto">
           <div
-            class="w-11 h-11 bg-gradient-to-br from-blue-600 to-indigo-600 rounded-xl flex items-center justify-center shadow-lg shadow-blue-200"
+            class="w-10 h-10 sm:w-11 sm:h-11 bg-gradient-to-br from-blue-600 to-indigo-600 rounded-xl flex items-center justify-center shadow-lg shadow-blue-200"
           >
             <svg
               xmlns="http://www.w3.org/2000/svg"
-              class="w-6 h-6 text-white"
+              class="w-5 h-5 sm:w-6 sm:h-6 text-white"
               fill="none"
               viewBox="0 0 24 24"
               stroke="currentColor"
@@ -28,31 +28,32 @@
               />
             </svg>
           </div>
-          <div>
-            <h1 class="text-xl font-bold text-gray-900">Sistem Gudang</h1>
+          <div class="flex-1 sm:flex-none">
+            <h1 class="text-lg sm:text-xl font-bold text-gray-900 leading-tight">Sistem Gudang</h1>
             <p class="text-xs text-gray-500">Manajemen Persediaan Cerdas</p>
           </div>
         </div>
 
-        <div class="flex items-center gap-4">
+        <div class="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 sm:gap-4 w-full sm:w-auto">
           <!-- Refresh Button -->
           <button
             @click="refreshAllData"
-            class="bg-white hover:bg-gray-50 text-gray-700 px-4 py-2.5 rounded-lg border border-gray-300 transition font-medium text-sm shadow-sm hover:shadow flex items-center gap-2"
+            class="bg-white hover:bg-gray-50 text-gray-700 px-3 py-2 sm:px-4 sm:py-2.5 rounded-lg border border-gray-300 transition font-medium text-xs sm:text-sm shadow-sm hover:shadow flex items-center justify-center gap-2 w-full sm:w-auto"
             title="Refresh Data"
           >
-            <svg class="w-4 h-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <svg class="w-3.5 h-3.5 sm:w-4 sm:h-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
             </svg>
-            Refresh
+            <span class="hidden sm:inline">Refresh</span>
+            <span class="sm:hidden">Refresh</span>
           </button>
 
           <button
-            class="bg-white hover:bg-gray-50 text-gray-700 px-4 py-2.5 rounded-lg border border-gray-300 transition font-medium text-sm shadow-sm hover:shadow flex items-center gap-2"
+            class="bg-white hover:bg-gray-50 text-gray-700 px-3 py-2 sm:px-4 sm:py-2.5 rounded-lg border border-gray-300 transition font-medium text-xs sm:text-sm shadow-sm hover:shadow flex items-center justify-center gap-2 w-full sm:w-auto"
             @click="logout()"
           >
             <svg
-              class="w-4 h-4"
+              class="w-3.5 h-3.5 sm:w-4 sm:h-4"
               xmlns="http://www.w3.org/2000/svg"
               fill="currentColor"
               viewBox="0 0 512 512"
@@ -61,59 +62,28 @@
                 d="M505 273c9.4-9.4 9.4-24.6 0-33.9L361 95c-6.9-6.9-17.2-8.9-26.2-5.2S320 102.3 320 112l0 80-112 0c-26.5 0-48 21.5-48 48l0 32c0 26.5 21.5 48 48 48l112 0 0 80c0 9.7 5.8 18.5 14.8 22.2s19.3 1.7 26.2-5.2L505 273zM160 96c17.7 0 32-14.3 32-32s-14.3-32-32-32L96 32C43 32 0 75 0 128L0 384c0 53 43 96 96 96l64 0c17.7 0 32-14.3 32-32s-14.3-32-32-32l-64 0c-17.7 0-32-14.3-32-32l0-256c0-17.7 14.3-32 32-32l64 0z"
               />
             </svg>
-            Logout
+            <span class="hidden sm:inline">Logout</span>
+            <span class="sm:hidden">Keluar</span>
           </button>
         </div>
       </div>
     </header>
 
     <!-- MAIN -->
-    <div class="max-w-7xl mx-auto px-6 py-6">
+    <div class="max-w-7xl mx-auto px-3 sm:px-4 lg:px-6 py-4 sm:py-6">
       <!-- STATS CARDS -->
-      <div class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
-        <!-- TOTAL ITEMS -->
-        <div
-          class="bg-gradient-to-br from-blue-600 to-indigo-600 rounded-xl p-5 text-white shadow-lg shadow-blue-200 cursor-pointer hover:shadow-xl hover:scale-[1.02] transition-all duration-200"
-          @click="viewEmptyWarehouses"
-          title="Klik untuk melihat gudang dengan stok kosong"
-        >
-          <div class="flex items-center justify-between">
-            <div>
-              <!-- Tampilkan jumlah gudang dengan stok 0 -->
-              <h3 class="text-3xl font-bold">{{ emptyWarehousesCount }}</h3>
-              <p class="text-sm opacity-90">Gudang Kosong</p>
-              <p class="text-xs opacity-80 mt-1">Klik untuk detail →</p>
-            </div>
-            <svg
-              class="w-8 h-8 opacity-80"
-              fill="none"
-              stroke="currentColor"
-              viewBox="0 0 24 24"
-            >
-              <!-- Ikon warehouse dengan tanda peringatan -->
-              <path
-                stroke-linecap="round"
-                stroke-linejoin="round"
-                stroke-width="1.5"
-                d="M20 13V6a2 2 0 00-2-2H6a2 2 0 00-2 2v7m16 0v5a2 2 0 01-2 2H6a2 2 0 01-2-2v-5m16 0h-2.586a1 1 0 00-.707.293l-2.414 2.414a1 1 0 01-.707.293h-3.172a1 1 0 01-.707-.293l-2.414-2.414A1 1 0 006.586 13H4"
-              />
-              <!-- Tanda seru di atas ikon -->
-              <circle cx="12" cy="8" r="1" fill="currentColor" />
-              <path stroke-linecap="round" stroke-linejoin="round" d="M12 11v3" />
-            </svg>
-          </div>
-        </div>
+      <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4 mb-4 sm:mb-6">
         <!-- TOTAL TRANSFERS -->
-        <div class="bg-white rounded-xl p-5 border border-gray-200 shadow-sm">
+        <div class="bg-white rounded-xl p-4 sm:p-5 border border-gray-200 shadow-sm">
           <div class="flex items-center justify-between">
             <div>
-              <h3 class="text-3xl font-bold text-gray-900">
+              <h3 class="text-2xl sm:text-3xl font-bold text-gray-900">
                 {{ totalTransfers }}
               </h3>
-              <p class="text-sm text-gray-600">Total Transfers</p>
+              <p class="text-xs sm:text-sm text-gray-600">Total Transfers</p>
             </div>
             <svg
-              class="w-8 h-8 text-gray-400"
+              class="w-6 h-6 sm:w-8 sm:h-8 text-gray-400"
               fill="none"
               stroke="currentColor"
               viewBox="0 0 24 24"
@@ -130,15 +100,15 @@
 
         <!-- NEED APPROVAL -->
         <div
-          class="bg-gradient-to-br from-amber-500 to-orange-500 rounded-xl p-5 text-white shadow-lg"
+          class="bg-gradient-to-br from-amber-500 to-orange-500 rounded-xl p-4 sm:p-5 text-white shadow-lg"
         >
           <div class="flex items-center justify-between">
             <div>
-              <h3 class="text-3xl font-bold">{{ needWarehouseApproval }}</h3>
-              <p class="text-sm opacity-90">Need Approval</p>
+              <h3 class="text-2xl sm:text-3xl font-bold">{{ needWarehouseApproval }}</h3>
+              <p class="text-xs sm:text-sm opacity-90">Need Approval</p>
             </div>
             <svg
-              class="w-8 h-8 opacity-80"
+              class="w-6 h-6 sm:w-8 sm:h-8 opacity-80"
               fill="none"
               stroke="currentColor"
               viewBox="0 0 24 24"
@@ -155,15 +125,15 @@
 
         <!-- WAREHOUSES -->
         <div
-          class="bg-gradient-to-br from-emerald-500 to-teal-600 rounded-xl p-5 text-white shadow-lg"
+          class="bg-gradient-to-br from-emerald-500 to-teal-600 rounded-xl p-4 sm:p-5 text-white shadow-lg"
         >
           <div class="flex items-center justify-between">
             <div>
-              <h3 class="text-3xl font-bold">{{ warehouseList.length }}</h3>
-              <p class="text-sm opacity-90">Gudang</p>
+              <h3 class="text-2xl sm:text-3xl font-bold">{{ warehouseList.length }}</h3>
+              <p class="text-xs sm:text-sm opacity-90">Gudang</p>
             </div>
             <svg
-              class="w-8 h-8 opacity-80"
+              class="w-6 h-6 sm:w-8 sm:h-8 opacity-80"
               fill="none"
               stroke="currentColor"
               viewBox="0 0 24 24"
@@ -181,156 +151,149 @@
 
       <!-- TABS -->
       <div
-        class="flex gap-2 mb-6 bg-white rounded-xl p-1.5 border border-gray-200 shadow-sm"
+        class="flex flex-wrap gap-1 sm:gap-2 mb-4 sm:mb-6 bg-white rounded-xl p-1.5 border border-gray-200 shadow-sm"
       >
         <button
           v-for="tab in tabs"
           :key="tab.id"
           @click="activeTab = tab.id"
-          class="relative flex-1 px-4 py-5 rounded-lg font-medium text-sm transition-all duration-200 flex items-center justify-center"
+          class="relative flex-1 min-w-[calc(50%-0.25rem)] sm:min-w-0 px-2 sm:px-3 py-2.5 sm:py-5 rounded-lg font-medium text-xs sm:text-sm transition-all duration-200 flex items-center justify-center"
           :class="[
             activeTab === tab.id
               ? 'bg-gradient-to-r from-blue-600 to-indigo-600 text-white shadow-sm'
               : 'text-gray-600 hover:bg-gray-100',
           ]"
         >
-          <span>{{ tab.label }}</span>
+          <span class="truncate">{{ tab.label }}</span>
 
           <!-- Badge -->
           <span
             v-if="tab.id === 'approvals' && needWarehouseApproval > 0"
-            class="absolute -top-1 -right-1 bg-red-500 text-white text-xs font-semibold rounded-full w-5 h-5 flex items-center justify-center shadow"
+            class="absolute -top-1 -right-1 bg-red-500 text-white text-xs font-semibold rounded-full w-4 h-4 sm:w-5 sm:h-5 flex items-center justify-center shadow text-[10px] sm:text-xs"
           >
-            {{ needWarehouseApproval }}
+            {{ needWarehouseApproval > 9 ? '9+' : needWarehouseApproval }}
           </span>
         </button>
       </div>
 
       <!-- LOADING STATE -->
-      <div v-if="loading[activeTab]" class="text-center py-12">
+      <div v-if="loading[activeTab]" class="text-center py-8 sm:py-12">
         <div
-          class="inline-block animate-spin rounded-full h-12 w-12 border-4 border-blue-600 border-t-transparent"
+          class="inline-block animate-spin rounded-full h-10 w-10 sm:h-12 sm:w-12 border-4 border-blue-600 border-t-transparent"
         ></div>
-        <p class="mt-4 text-gray-600">Memuat data...</p>
+        <p class="mt-3 sm:mt-4 text-sm sm:text-base text-gray-600">Memuat data...</p>
       </div>
 
       <!-- OVERVIEW TAB -->
-      <div v-else-if="activeTab === 'overview'" class="space-y-6">
+      <div v-else-if="activeTab === 'overview'" class="space-y-4 sm:space-y-6">
         <!-- Quick Stats -->
-        <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-6">
           <!-- Warehouse Summary Section di Overview Tab -->
-          <div class="bg-white rounded-xl border border-gray-200 p-6">
-            <h3 class="text-lg font-semibold text-gray-800 mb-4">
-              Warehouse Summary
-            </h3>
-            <div class="space-y-3">
+          <div class="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
+            
+            <div class="px-4 sm:px-6 py-3 sm:py-4 border-b border-gray-100 flex justify-between items-center bg-gray-50/50">
+              <h3 class="font-semibold text-gray-800 text-sm sm:text-base">Warehouse Top Value Items</h3>
+              <span class="text-[10px] font-semibold text-gray-500 bg-white border border-gray-200 px-1.5 sm:px-2 py-0.5 sm:py-1 rounded uppercase tracking-wider">
+                Highest Price Product
+              </span>
+            </div>
+          
+            <div class="divide-y divide-gray-100">
               <div
-                v-for="summary in warehouseStockSummary"
+                v-for="summary in warehouseStockSummaryT"
                 :key="summary.warehouse"
-                class="flex items-center justify-between p-3 rounded-lg border"
-                :class="
-                  summary.isWarehouseEmpty 
-                    ? 'bg-gray-50 border-gray-200' 
-                    : 'bg-gradient-to-r from-blue-50 to-indigo-50 border-blue-100'
-                "
+                class="p-4 sm:p-5 hover:bg-gray-50 transition-colors group"
               >
-                <div class="flex items-center gap-3">
-                  <div>
-                    <p class="font-medium">{{ summary.warehouse }}</p>
-                    <p class="text-sm text-gray-500">
-                      {{ summary.uniqueProducts }} produk
-                      <span v-if="summary.isWarehouseEmpty" class="text-amber-600">
-                        • Empty
-                      </span>
+                <div class="flex flex-col sm:flex-row sm:items-center gap-3 sm:gap-4 justify-between">
+                  
+                  <div class="sm:w-1/3 flex items-center gap-2 sm:gap-3">
+                    <div 
+                      class="w-8 h-8 sm:w-10 sm:h-10 rounded-lg flex items-center justify-center shrink-0 transition-colors"
+                      :class="summary.isWarehouseEmpty ? 'bg-gray-100 text-gray-400' : 'bg-blue-50 text-blue-600 group-hover:bg-blue-100'"
+                    >
+                       <svg class="w-4 h-4 sm:w-5 sm:h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4"></path></svg>
+                    </div>
+                    <p class="font-medium text-gray-700 text-xs sm:text-sm leading-tight truncate" :title="summary.warehouse">
+                      {{ summary.warehouse }}
                     </p>
                   </div>
-                </div>
-                <div class="text-right">
-                  <p class="text-xl font-bold" 
-                    :class="summary.totalQty === 0 ? 'text-gray-500' : 'text-blue-600'">
-                    {{ formatNumber(summary.totalQty) }}
-                  </p>
-                  <p class="text-xs text-gray-500">total qty</p>
+          
+                  <div class="flex-1 sm:pl-3 sm:pl-4 sm:border-l sm:border-gray-100">
+                    
+                    <div v-if="!summary.isWarehouseEmpty && summary.highestPriceProduct">
+                      <p class="text-xs sm:text-sm font-semibold text-gray-900 mb-1 truncate" :title="summary.highestPriceProduct.name">
+                        {{ summary.highestPriceProduct.name }}
+                      </p>
+          
+                      <div class="flex flex-wrap items-center gap-2 sm:gap-3 mt-1 sm:mt-2">
+                        <div class="bg-amber-50 border border-amber-100 text-amber-700 px-1.5 sm:px-2 py-0.5 rounded text-xs font-bold">
+                          {{ formatCurrency(summary.highestPriceProduct.price) }}
+                        </div>
+                        <div class="text-xs text-gray-400 flex items-center gap-1">
+                          <span>Stock:</span>
+                          <span class="text-gray-700 font-medium bg-gray-100 px-1 sm:px-1.5 rounded">
+                            {{ summary.highestPriceProduct.qty }}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                    
+                    <div v-else class="flex items-center gap-2 text-xs text-gray-400 italic h-full">
+                      <span class="w-1.5 h-1.5 bg-gray-300 rounded-full"></span>
+                      Empty warehouse
+                    </div>
+          
+                  </div>
+          
                 </div>
               </div>
             </div>
             
-            <div v-if="warehouseStockSummary.length === 0" class="text-center py-4 text-gray-500">
+            <div v-if="warehouseStockSummary.length === 0" class="text-center py-6 sm:py-8 text-gray-400 text-xs sm:text-sm">
               No warehouse data available
             </div>
+            
           </div>
+
           <!-- Recent Transfers -->
-          <div class="bg-white rounded-xl border border-gray-200 p-6">
-            <h3 class="text-lg font-semibold text-gray-800 mb-4">
-              Recent Transfers
-            </h3>
-            <div class="space-y-3">
+          <div class="bg-white rounded-xl border border-gray-200 shadow-sm">
+            <div class="px-4 sm:px-6 py-3 sm:py-4 border-b border-gray-100">
+              <h3 class="text-sm sm:text-base font-semibold text-gray-800">
+                Recent Transfers
+              </h3>
+            </div>
+            <div class="space-y-2 sm:space-y-3 max-h-[400px] sm:max-h-[500px] overflow-y-auto p-2 sm:p-3">
               <div
-                v-for="transfer in transferList.slice(0, 5)"
+                v-for="transfer in filteredStockList"
                 :key="transfer.movement_id"
-                class="p-3 border border-gray-100 rounded-lg hover:bg-gray-50"
+                class="p-2 sm:p-3 border border-gray-100 rounded-lg hover:bg-gray-50 transition-colors"
               >
-                <div class="flex justify-between items-start">
-                  <div>
-                    <p class="font-medium">{{ transfer.reference_no }}</p>
-                    <p class="text-sm text-gray-500">
+                <div class="flex flex-col sm:flex-row sm:justify-between sm:items-start gap-2 sm:gap-0">
+                  <div class="flex-1">
+                    <p class="font-medium text-sm sm:text-base">{{ transfer.reference_no }}</p>
+                    <p class="text-xs sm:text-sm text-gray-500 truncate">
                       {{ transfer.source_name }} → {{ transfer.target_name }}
                     </p>
+                    <p class="text-xs text-gray-500 mt-0.5 sm:mt-1">
+                      {{ formatDate(transfer.created_at) }}
+                    </p>
                   </div>
-                  <span
-                    :class="[
-                      'px-2 py-1 text-xs rounded-full',
-                      getStatusBadgeClass(transfer.status),
-                    ]"
-                  >
-                    {{ transfer.status }}
-                  </span>
-                </div>
-                <p class="text-xs text-gray-500 mt-1">
-                  {{ formatDate(transfer.created_at) }}
-                </p>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <!-- Approval Required -->
-        <div
-          v-if="pendingApprovals.length > 0"
-          class="bg-amber-50 border border-amber-200 rounded-xl p-6"
-        >
-          <h3 class="text-lg font-semibold text-amber-800 mb-4">
-            ⚠️ Menunggu Approval Anda
-          </h3>
-          <div class="space-y-4">
-            <div
-              v-for="transfer in pendingApprovals"
-              :key="transfer.movement_id"
-              class="bg-white rounded-lg border border-amber-100 p-4"
-            >
-              <div class="flex justify-between items-center">
-                <div>
-                  <h4 class="font-bold">{{ transfer.reference_no }}</h4>
-                  <p class="text-sm text-gray-600">
-                    {{ transfer.source_name }} → {{ transfer.target_name }}
-                  </p>
-                  <p class="text-xs text-gray-500">
-                    {{ transfer.items.length }} barang
-                  </p>
-                </div>
-                <div class="flex gap-2">
-                  <button
-                    @click="approveWarehouse(transfer)"
-                    class="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 font-medium"
-                  >
-                    Approve
-                  </button>
-                  <button
-                    @click="rejectWarehouse(transfer)"
-                    class="px-4 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 font-medium"
-                  >
-                    Reject
-                  </button>
+                  <div class="flex flex-col sm:flex-col justify-center items-start sm:items-end gap-1 sm:gap-2">
+                    <span
+                      :class="[
+                        'px-2 py-1 text-xs rounded-full whitespace-nowrap',
+                        getStatusBadgeClass(transfer.status),
+                      ]"
+                    >
+                      {{ transfer.status }}
+                    </span>
+                    <button
+                      @click="viewTransferDetail(transfer)"
+                      class="px-2 sm:px-3 py-1 sm:py-1.5 bg-blue-100 text-blue-700 rounded-lg hover:bg-blue-200 font-medium text-xs sm:text-sm w-full sm:w-auto text-center"
+                    >
+                      Lihat Detail
+                    </button>
+                  </div>
                 </div>
               </div>
             </div>
@@ -339,127 +302,133 @@
       </div>
 
       <!-- STOCK TAB -->
-      <div v-else-if="activeTab === 'stock'" class="space-y-6">
+      <div v-else-if="activeTab === 'stock'" class="space-y-4 sm:space-y-6">
         <!-- Stock Summary -->
-        <div class="bg-white rounded-xl border border-gray-200 p-6">
-          <div class="flex justify-between items-center mb-6">
-            <div>
-              <h3 class="text-lg font-semibold text-gray-800">
-                Stock Inventory (Real-time from OpenBravo)
-              </h3>
-              <span class="text-sm text-gray-500">
-                Showing {{ filteredStock.length }} of {{ stockList.length }} items
-                <span v-if="selectedWarehouse" class="text-blue-600 font-medium">
-                  • Filtered by: {{ selectedWarehouse }}
-                </span>
-              </span>
-            </div>
-            <div class="flex items-center gap-2">
-              <div class="relative">
-                <Dropdown @select="filteredWarehouse" />
+        <div class="bg-white rounded-xl border border-gray-200 shadow-sm">
+          <div class="px-4 sm:px-6 py-3 sm:py-4 border-b border-gray-100">
+            <div class="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3 sm:gap-0">
+              <div class="flex-1">
+                <h3 class="text-sm sm:text-base font-semibold text-gray-800">
+                  Stock Inventory
+                </h3>
+                <div class="text-xs sm:text-sm text-gray-500 mt-1">
+                  Showing {{ filteredStock.length }} of {{ stockList.length }} items
+                  <span v-if="selectedWarehouse" class="text-blue-600 font-medium">
+                    • Filtered by: {{ selectedWarehouse }}
+                  </span>
+                </div>
               </div>
-              <button 
-                @click="refreshAllData"
-                class="px-3 py-2.5 bg-blue-50 text-blue-600 rounded-lg hover:bg-blue-100 text-sm font-medium flex items-center gap-2"
-                title="Refresh data"
-              >
-                <svg class="w-4 h-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                </svg>
-              </button>
+              <div class="flex items-center gap-2">
+                <div class="relative w-full sm:w-auto">
+                  <!-- Dropdown component here -->
+                  <Dropdown @select="filteredWarehouse" class="w-full sm:w-48" />
+                </div>
+                <button 
+                  @click="refreshAllData"
+                  class="px-2.5 py-2 sm:px-3 sm:py-2.5 bg-blue-50 text-blue-600 rounded-lg hover:bg-blue-100 text-xs sm:text-sm font-medium flex items-center justify-center gap-1 sm:gap-2"
+                  title="Refresh data"
+                >
+                  <svg class="w-3.5 h-3.5 sm:w-4 sm:h-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                  </svg>
+                  <span class="hidden sm:inline">Refresh</span>
+                </button>
+              </div>
             </div>
           </div>
 
-          <div class="overflow-x-auto">
-            <table class="w-full text-sm">
-              <thead class="bg-gray-50">
-                <tr>
-                  <th
-                    class="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase"
-                  >
-                    Bahan Baku
-                  </th>
-                  <th
-                    class="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase"
-                  >
-                    Gudang
-                  </th>
-                  <th
-                    class="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase"
-                  >
-                    Tersedia
-                  </th>
-                  <th
-                    class="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase"
-                  >
-                    UoM
-                  </th>
-                  <th
-                    class="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase"
-                  >
-                    Diperbarui Terakhir
-                  </th>
-                </tr>
-              </thead>
-              <tbody class="divide-y divide-gray-100">
-                <tr
-                  v-for="(item, index) in filteredStock"
-                  :key="index"
-                  class="hover:bg-blue-50/50"
-                >
-                  <td class="px-4 py-3">
-                    <div>
-                      <p class="font-medium text-gray-800">
-                        {{ item.productName }}
-                      </p>
-                      <p class="text-xs text-gray-500">
-                        ID: {{ item.productId || '-' }}
-                      </p>
-                    </div>
-                  </td>
-
-                  <td class="px-4 py-3">
-                    <span
-                      class="bg-blue-100 text-blue-700 px-2 py-1 rounded text-xs"
+          <div class="overflow-x-auto -mx-4 sm:mx-0">
+            <div class="min-w-full inline-block align-middle">
+              <table class="w-full text-xs sm:text-sm">
+                <thead class="bg-gray-50">
+                  <tr>
+                    <th
+                      class="px-3 py-2 sm:px-4 sm:py-3 text-left font-semibold text-gray-600 uppercase text-xs"
                     >
-                      {{ item.warehouse }}
-                    </span>
-                  </td>
-                  <td class="px-4 py-3">
-                    <span class="font-bold text-gray-800">{{
-                      formatNumber(item.qtyOnHand)
-                    }}</span>
-                  </td>
+                      Bahan Baku
+                    </th>
+                    <th
+                      class="px-3 py-2 sm:px-4 sm:py-3 text-left font-semibold text-gray-600 uppercase text-xs"
+                    >
+                      Gudang
+                    </th>
+                    <th
+                      class="px-3 py-2 sm:px-4 sm:py-3 text-left font-semibold text-gray-600 uppercase text-xs"
+                    >
+                      Tersedia
+                    </th>
+                    <th
+                      class="px-3 py-2 sm:px-4 sm:py-3 text-left font-semibold text-gray-600 uppercase text-xs"
+                    >
+                      UoM
+                    </th>
+                    <th
+                      class="px-3 py-2 sm:px-4 sm:py-3 text-left font-semibold text-gray-600 uppercase text-xs"
+                    >
+                      Diperbarui
+                    </th>
+                  </tr>
+                </thead>
+                <tbody class="divide-y divide-gray-100">
+                  <tr
+                    v-for="(item, index) in filteredStock"
+                    :key="index"
+                    class="hover:bg-blue-50/50 transition-colors"
+                  >
+                    <td class="px-3 py-2 sm:px-4 sm:py-3">
+                      <div class="min-w-[120px] sm:min-w-0">
+                        <p class="font-medium text-gray-800 text-xs sm:text-sm truncate" :title="item.productName">
+                          {{ item.productName }}
+                        </p>
+                        <p class="text-xs text-gray-500 truncate">
+                          ID: {{ item.productId || '-' }}
+                        </p>
+                      </div>
+                    </td>
 
-                  <td class="px-4 py-3">
-                    <span class="text-gray-600">{{ item.uom }}</span>
-                  </td>
-                  <td class="px-4 py-3">
-                    <span class="text-xs text-gray-500">
-                      {{ formatDate(item.lastUpdated) }}
-                    </span>
-                  </td>
-                </tr>
-              </tbody>
-            </table>
+                    <td class="px-3 py-2 sm:px-4 sm:py-3">
+                      <span
+                        class="bg-blue-100 text-blue-700 px-1.5 sm:px-2 py-0.5 sm:py-1 rounded text-xs whitespace-nowrap"
+                      >
+                        {{ item.warehouse }}
+                      </span>
+                    </td>
+                    <td class="px-3 py-2 sm:px-4 sm:py-3">
+                      <span class="font-bold text-gray-800 text-sm sm:text-base">{{
+                        formatNumber(item.qtyOnHand)
+                      }}</span>
+                    </td>
+
+                    <td class="px-3 py-2 sm:px-4 sm:py-3">
+                      <span class="text-gray-600 text-xs sm:text-sm">{{ item.uom }}</span>
+                    </td>
+                    <td class="px-3 py-2 sm:px-4 sm:py-3">
+                      <span class="text-xs text-gray-500 whitespace-nowrap">
+                        {{ formatDate(item.lastUpdated) }}
+                      </span>
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
           </div>
 
           <div
             v-if="stockList.length === 0"
-            class="text-center py-8 text-gray-500"
+            class="text-center py-6 sm:py-8 text-gray-500"
           >
-            <div class="text-4xl mb-2">📭</div>
-            <p>No stock data found</p>
-            <p class="text-sm mt-1">Coba perbarui data atau periksa koneksi OpenBravo</p>
+            <div class="text-3xl sm:text-4xl mb-2">📭</div>
+            <p class="text-sm sm:text-base">No stock data found</p>
+            <p class="text-xs sm:text-sm mt-1">Coba perbarui data atau periksa koneksi OpenBravo</p>
           </div>
         </div>
       </div>
 
       <!-- TRANSFERS TAB -->
-      <div v-else-if="activeTab === 'approvals'" class="space-y-4">
+      <div v-else-if="activeTab === 'approvals'" class="space-y-3 sm:space-y-4">
         <div
           v-if="transfersAwaitingMyApproval.length === 0"
-          class="text-center py-12 text-gray-500"
+          class="text-center py-8 sm:py-12 text-gray-500 text-sm sm:text-base"
         >
           Tidak ada transfer yang menunggu approval Anda
         </div>
@@ -467,29 +436,29 @@
         <div
           v-for="transfer in transfersAwaitingMyApproval"
           :key="transfer.movement_id"
-          class="bg-white rounded-xl border border-gray-200 p-6 shadow-sm hover:shadow-md transition-shadow"
+          class="bg-white rounded-xl border border-gray-200 p-4 sm:p-6 shadow-sm hover:shadow-md transition-shadow"
         >
           <div
-            class="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-4"
+            class="flex flex-col lg:flex-row lg:items-center justify-between gap-3 sm:gap-4 mb-3 sm:mb-4"
           >
-            <div>
-              <div class="flex items-center gap-3 mb-2">
-                <h3 class="text-lg font-bold text-gray-900">
+            <div class="flex-1">
+              <div class="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-3 mb-2">
+                <h3 class="text-base sm:text-lg font-bold text-gray-900 truncate">
                   {{ transfer.reference_no }}
                 </h3>
                 <span
                   :class="[
-                    'px-3 py-1 rounded-full text-xs font-medium',
+                    'px-2 sm:px-3 py-1 rounded-full text-xs font-medium whitespace-nowrap',
                     getStatusBadgeClass(transfer.status),
                   ]"
                 >
                   {{ transfer.status }}
                 </span>
               </div>
-              <div class="flex items-center gap-4 text-sm text-gray-600">
-                <span class="flex items-center gap-1">
+              <div class="flex flex-wrap items-center gap-2 sm:gap-3 text-xs sm:text-sm text-gray-600">
+                <span class="flex items-center gap-1 whitespace-nowrap">
                   <svg
-                    class="w-4 h-4"
+                    class="w-3.5 h-3.5 sm:w-4 sm:h-4"
                     fill="none"
                     stroke="currentColor"
                     viewBox="0 0 24 24"
@@ -503,43 +472,45 @@
                   </svg>
                   {{ transfer.source_name }} → {{ transfer.target_name }}
                 </span>
-                <span>•</span>
-                <span>{{ formatDate(transfer.created_at) }}</span>
-                <span>•</span>
-                <span>{{ transfer.items.length }} items</span>
+                <span class="hidden sm:inline">•</span>
+                <span class="whitespace-nowrap">{{ formatDate(transfer.created_at) }}</span>
+                <span class="hidden sm:inline">•</span>
+                <span class="whitespace-nowrap">{{ transfer.items.length }} items</span>
               </div>
             </div>
 
-            <div class="flex gap-2">
+            <div class="flex gap-2 pt-2 sm:pt-0">
               <button
                 @click="viewTransferDetail(transfer)"
-                class="px-4 py-2 bg-blue-100 text-blue-700 rounded-lg hover:bg-blue-200 font-medium text-sm"
+                class="px-3 sm:px-4 py-1.5 sm:py-2 bg-blue-100 text-blue-700 rounded-lg hover:bg-blue-200 font-medium text-xs sm:text-sm flex-1 sm:flex-none text-center"
               >
-                View Details
+                Lihat Detail
               </button>
             </div>
           </div>
 
           <!-- Transfer Items -->
-          <div class="border-t pt-4">
-            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div class="border-t pt-3 sm:pt-4">
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 sm:gap-3">
               <div
                 v-for="item in transfer.items.slice(0, 3)"
                 :key="item.movement_item_id"
-                class="bg-gray-50 rounded-lg p-3"
+                class="bg-gray-50 rounded-lg p-2 sm:p-3"
               >
                 <div class="flex justify-between items-center">
-                  <div>
-                    <p class="font-medium text-sm">{{ item.material_name }}</p>
-                    <p class="text-xs text-gray-500">
+                  <div class="flex-1 min-w-0">
+                    <p class="font-medium text-xs sm:text-sm truncate" :title="item.material_name">
+                      {{ item.material_name }}
+                    </p>
+                    <p class="text-xs text-gray-500 truncate">
                       {{ item.material_code }}
                     </p>
                   </div>
-                  <div class="text-right">
-                    <p class="font-bold text-gray-800">
+                  <div class="text-right pl-2">
+                    <p class="font-bold text-gray-800 text-xs sm:text-sm whitespace-nowrap">
                       {{ item.qty }} {{ item.uom }}
                     </p>
-                    <p v-if="item.qty_received" class="text-xs text-green-600">
+                    <p v-if="item.qty_received" class="text-xs text-green-600 whitespace-nowrap">
                       Received: {{ item.qty_received }}
                     </p>
                   </div>
@@ -548,9 +519,9 @@
 
               <div
                 v-if="transfer.items.length > 3"
-                class="bg-blue-50 rounded-lg p-3 flex items-center justify-center"
+                class="bg-blue-50 rounded-lg p-2 sm:p-3 flex items-center justify-center"
               >
-                <span class="text-blue-700 font-medium">
+                <span class="text-blue-700 font-medium text-xs sm:text-sm">
                   +{{ transfer.items.length - 3 }} more items
                 </span>
               </div>
@@ -558,15 +529,15 @@
           </div>
 
           <!-- Approval Status -->
-          <div v-if="transfer.approval_levels" class="border-t mt-4 pt-4">
-            <p class="text-sm font-medium text-gray-700 mb-2">
+          <div v-if="transfer.approval_levels" class="border-t mt-3 sm:mt-4 pt-3 sm:pt-4">
+            <p class="text-xs sm:text-sm font-medium text-gray-700 mb-2">
               Approval Status:
             </p>
-            <div class="flex items-center gap-4">
-              <div class="flex items-center gap-2">
+            <div class="flex flex-wrap items-center gap-3 sm:gap-4">
+              <div class="flex items-center gap-1.5 sm:gap-2">
                 <div
                   :class="[
-                    'w-3 h-3 rounded-full',
+                    'w-2.5 h-2.5 sm:w-3 sm:h-3 rounded-full',
                     transfer.manager_status === 'approved'
                       ? 'bg-green-500'
                       : transfer.manager_status === 'rejected'
@@ -578,10 +549,10 @@
                   >Manager: {{ transfer.manager_status || "pending" }}</span
                 >
               </div>
-              <div class="flex items-center gap-2">
+              <div class="flex items-center gap-1.5 sm:gap-2">
                 <div
                   :class="[
-                    'w-3 h-3 rounded-full',
+                    'w-2.5 h-2.5 sm:w-3 sm:h-3 rounded-full',
                     transfer.warehouse_status === 'approved'
                       ? 'bg-green-500'
                       : transfer.warehouse_status === 'rejected'
@@ -601,19 +572,19 @@
       <!-- WAREHOUSES TAB -->
       <div
         v-else-if="activeTab === 'warehouses'"
-        class="grid grid-cols-1 md:grid-cols-3 gap-6"
+        class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4 lg:gap-6"
       >
         <div
           v-for="warehouse in warehouseList"
           :key="warehouse.location_id || warehouse.id"
-          class="bg-white rounded-xl border border-gray-200 p-6 hover:shadow-lg transition-shadow"
+          class="bg-white rounded-xl border border-gray-200 p-4 sm:p-6 hover:shadow-lg transition-shadow"
         >
-          <div class="flex items-center gap-3 mb-4">
+          <div class="flex items-center gap-2 sm:gap-3 mb-3 sm:mb-4">
             <div
-              class="w-10 h-10 bg-gradient-to-br from-blue-500 to-indigo-500 rounded-lg flex items-center justify-center"
+              class="w-8 h-8 sm:w-10 sm:h-10 bg-gradient-to-br from-blue-500 to-indigo-500 rounded-lg flex items-center justify-center"
             >
               <svg
-                class="w-5 h-5 text-white"
+                class="w-4 h-4 sm:w-5 sm:h-5 text-white"
                 fill="none"
                 stroke="currentColor"
                 viewBox="0 0 24 24"
@@ -626,19 +597,19 @@
                 />
               </svg>
             </div>
-            <div>
-              <h3 class="font-bold text-gray-800">
+            <div class="flex-1 min-w-0">
+              <h3 class="font-bold text-gray-800 text-sm sm:text-base truncate" :title="warehouse._identifier || warehouse.name">
                 {{ warehouse._identifier || warehouse.name }}
               </h3>
             </div>
           </div>
 
-          <div class="space-y-2 text-sm">
+          <div class="space-y-1.5 sm:space-y-2 text-xs sm:text-sm">
             <div class="flex items-center justify-between">
               <span class="text-gray-500">Status:</span>
               <span
                 :class="[
-                  'px-2 py-0.5 rounded text-xs',
+                  'px-1.5 sm:px-2 py-0.5 rounded text-xs',
                   warehouse.active !== false
                     ? 'bg-green-100 text-green-800'
                     : 'bg-gray-100 text-gray-800',
@@ -652,7 +623,7 @@
 
         <div
           v-if="warehouseList.length === 0"
-          class="col-span-3 text-center py-12 text-gray-500"
+          class="col-span-full text-center py-8 sm:py-12 text-gray-500 text-sm sm:text-base"
         >
           Tidak ada data gudang yang tersedia
         </div>
@@ -663,7 +634,7 @@
 
 <script setup>
 import { ref, onMounted, computed, watch } from "vue";
-import { useRouter } from "vue-router";
+import { RouterLink, useRouter } from "vue-router";
 import { useAuthStore } from "@/stores/auth";
 import { supabase } from "@/lib/supabase";
 import openbravoApi from "@/lib/openbravo";
@@ -689,6 +660,45 @@ const loading = ref({
   approvals: false,
 });
 const selectedWarehouse = ref(null);
+
+const formatCurrency = (value) => {
+  return new Intl.NumberFormat('id-ID', {
+    style: 'currency',
+    currency: 'IDR',
+    minimumFractionDigits: 0
+  }).format(value);
+};
+
+// 2. Dummy Data (Sesuai request: Nama, Harga, Qty)
+const warehouseStockSummaryT = ref([
+  {
+    warehouse: 'Example Kentang',
+    isWarehouseEmpty: false,
+    highestPriceProduct: {
+      name: 'Chemicals', 
+      price: 42500000,
+      qty: 5 
+    }
+  },
+  {
+    warehouse: 'Kebun Example',
+    isWarehouseEmpty: false,
+    highestPriceProduct: {
+      name: 'Chemicals',
+      price: 38999000,
+      qty: 2
+    }
+  },
+  {
+    warehouse: 'Main Warehouse',
+    isWarehouseEmpty: false,
+    highestPriceProduct: {
+      name: 'Products',
+      price: 9600000,
+      qty: 150 
+    }
+  },
+]);
 
 /* ---------------------------------------------------
    COMPUTED PROPERTIES
@@ -976,17 +986,13 @@ const loadWarehouses = async () => {
   loading.value.warehouses = true;
   try {
     const { data } = await openbravoApi.get(
-      '/org.openbravo.service.json.jsonrest/Warehouse',
+      '/Warehouse',
     );
     
     if (data?.response?.data) {
-      warehouseList.value = data.response.data.map((w) => ({
-        id: w.id,
-        name: w.name,
-        _identifier: w._identifier,
-        active: w.active !== false,
-      }));
+      warehouseList.value = data.response.data
       console.log("🏭 Warehouse List loaded:", warehouseList.value.length, "warehouses");
+      console.log("🏭 Warehouse List loaded:", warehouseList.value, "warehouses");
     } else {
       console.warn("⚠️ Tidak ada data warehouse dari OpenBravo");
       warehouseList.value = [];
@@ -1026,7 +1032,7 @@ const loadMaterialsFromOpenBravo = async () => {
       try {
         // 1. Ambil locator/bin untuk warehouse ini
         const { data: locatorRes } = await openbravoApi.get(
-          '/org.openbravo.service.json.jsonrest/Locator',
+          '/Locator',
           { params: { _where: `M_Warehouse_ID='${warehouse.id}'` } }
         );
         
@@ -1058,7 +1064,7 @@ const loadMaterialsFromOpenBravo = async () => {
         
         // 3. Ambil SEMUA material dari locator ini (termasuk yang qty = 0)
         const { data: materialsRes } = await openbravoApi.get(
-          '/org.openbravo.service.json.jsonrest/MaterialMgmtStorageDetail',
+          '/MaterialMgmtStorageDetail',
           {
             params: { _where: `M_Locator_ID='${locatorId}'` }, // HAPUS: AND quantityOnHand > 0
           }
@@ -1168,7 +1174,7 @@ const loadMaterialsByWarehouseId = async (warehouseId) => {
     
     // 2. Ambil locator pertama untuk warehouse ini
     const { data: locatorRes } = await openbravoApi.get(
-      '/org.openbravo.service.json.jsonrest/Locator',
+      '/Locator',
       { params: { _where: `M_Warehouse_ID='${warehouse.id}'` } }
     );
     
@@ -1196,7 +1202,7 @@ const loadMaterialsByWarehouseId = async (warehouseId) => {
     
     // 3. Ambil SEMUA material dari locator ini (termasuk yang qty = 0)
     const { data: materialsRes } = await openbravoApi.get(
-      '/org.openbravo.service.json.jsonrest/MaterialMgmtStorageDetail',
+      '/MaterialMgmtStorageDetail',
       {
         params: { _where: `M_Locator_ID='${locatorId}'` }, // HAPUS filter quantityOnHand > 0
       }
@@ -1303,6 +1309,10 @@ const useFallbackData = () => {
     }
   });
 };
+
+const filteredStockList = computed(() => {
+  return transferList.value.filter(item => item.status === 'Approved');
+})
 
 /* ---------------------------------------------------
    LOAD MATERIAL STOCK FROM SUPABASE (FALLBACK)
@@ -1443,6 +1453,8 @@ const loadMovementTransfers = async () => {
       
       const needMyWarehouseAction =
         isAwaitingWarehouseApproval && isKepalaGudang;
+
+      
       
       return {
         ...movement,
@@ -1466,6 +1478,7 @@ const loadMovementTransfers = async () => {
     });
     
     console.log("🚚 Transfer List:", transferList.value.length, "transfers");
+    console.log("🚚 Transfer List:", transferList.value, "transfers");
   } catch (err) {
     console.error("❌ ERROR loadMovementTransfers:", err);
     alert("Gagal memuat data transfer");
@@ -1734,6 +1747,7 @@ const transfersAwaitingMyApproval = computed(() => {
 
 const warehouseStockSummary = computed(() => {
   const summary = {};
+
   
   // Inisialisasi semua warehouse terlebih dahulu
   warehouseList.value.forEach((warehouse) => {

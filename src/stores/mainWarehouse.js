@@ -14,7 +14,7 @@ export const useMainWarehouseStore = defineStore('mainWarehouse', () => {
     error.value = null
     try {
       const { data } = await openbravoApi.get(
-        '/org.openbravo.service.json.jsonrest/Warehouse',
+        '/Warehouse',
         {
           params: {
             _selectedProperties: 'id,name,searchKey,description',
@@ -46,7 +46,7 @@ export const useMainWarehouseStore = defineStore('mainWarehouse', () => {
   async function fetchById(id) {
     try {
       const { data } = await openbravoApi.get(
-        '/org.openbravo.service.json.jsonrest/Warehouse',
+        '/Warehouse',
         {
           params: {
             _where: `id='${id}'`,
@@ -79,7 +79,7 @@ export const useMainWarehouseStore = defineStore('mainWarehouse', () => {
   async function fetchLocators(warehouseId) {
     try {
       const { data } = await openbravoApi.get(
-        '/org.openbravo.service.json.jsonrest/Locator',
+        '/Locator',
         {
           params: {
             _where: `warehouse='${warehouseId}'`,
@@ -115,7 +115,7 @@ export const useMainWarehouseStore = defineStore('mainWarehouse', () => {
       }
 
       const { data } = await openbravoApi.get(
-        '/org.openbravo.service.json.jsonrest/MaterialMgmtStorageDetail',
+        '/MaterialMgmtStorageDetail',
         {
           params: {
             _where: whereClause,

@@ -19,6 +19,7 @@ import {
   Legend,
   BarController,
   BarElement,
+  Filler // ⬅️ TAMBAHKAN INI
 } from 'chart.js'
 
 Chart.register(
@@ -34,7 +35,9 @@ Chart.register(
   Legend,
   BarController,
   BarElement,
+  Filler // ⬅️ DAN INI
 )
+
 
 import { useAuthStore } from '../stores/auth'
 import { supabase } from '@/lib/supabase'
@@ -355,132 +358,141 @@ const loadBatchDetailData = async () => {
   await initCharts();
 }
 
-// NEW: Fungsi Load Activity & Material Data (MENGGUNAKAN gh_activity)
-const loadActivityAndMaterialData = async (batch_id) => {
-    // 1. Ambil Activity Reports
-    // ✅ PERBAIKAN: Menggunakan gh_activity karena gh_report_activity tidak ada relasi langsung ke gh_report
+  const loadActivityAndMaterialData = async (batch_id) => {
+  try {
+    activityReport.value = []
+    materialList.value = []
+    totalMaterial.value = 0
+
+    /**
+     * 1️⃣ Ambil REPORT APPROVED milik batch
+     * (INI WAJIB, karena gh_activity tidak punya FK ke gh_report)
+     */
+    const { data: reports, error: reportError } = await supabase
+      .from('gh_report')
+      .select('report_id, report_date')
+      .eq('batch_id', batch_id)
+      .eq('report_status', 'approved')
+
+    if (reportError || !reports?.length) return
+
+    // Map report_id → report_date
+    const reportMap = {}
+    reports.forEach(r => {
+      reportMap[r.report_id] = r.report_date
+    })
+
+    /**
+     * 2️⃣ Ambil ACTIVITY + MATERIAL
+     */
     const { data: activities, error: activityError } = await supabase
-        .from('gh_activity')
-        .select(`
-            *,
-            gh_report(location:gh_location(location), activity_total, manpower),
-            gh_material_used(material_name, unit_price, qty, uom)
-        `)
-        .eq('batch_id', batch_id); // Asumsi gh_activity memiliki batch_id, jika tidak, harus join ke gh_report
+      .from('gh_activity')
+      .select(`
+        activity_id,
+        act_name,
+        manpower,
+        report_id,
+        gh_material_used (
+          material_name,
+          qty,
+          uom,
+          unit_price
+        )
+      `)
+      .in('report_id', reports.map(r => r.report_id))
 
-    if (activityError) {
-        // Jika error PGRST200 tetap muncul, kemungkinan `gh_activity` tidak punya Foreign Key ke `gh_report`
-        // atau `batch_id` di `gh_activity` tidak ada (menurut skema, gh_activity punya FK ke gh_report, dan gh_report punya FK ke gh_batch)
-        console.error("Error loading activity reports:", activityError);
-        activityReport.value = [];
-        materialList.value = [];
-        return;
-    }
-    
-    // Asumsi: Kita harus melakukan *join* secara manual di frontend karena tidak ada relasi langsung dari gh_activity ke gh_batch
-    // Berdasarkan skema, gh_activity -> gh_report -> gh_batch. Query di atas sudah mengandalkan *join* otomatis.
-    // Jika Supabase tidak bisa *auto-join* lebih dari satu level, kita harus membatasi select.
+    if (activityError || !activities?.length) return
 
-    // Namun, mencoba memperbaiki format data berdasarkan struktur query yang diinginkan:
+    /**
+     * 3️⃣ Mapping FINAL ke UI (INI KUNCI)
+     */
+    activityReport.value = activities.map(act => {
+      const materials = act.gh_material_used || []
 
-    // Mengelompokkan aktivitas
-    const groupedActivities = activities.reduce((acc, current) => {
-        const reportId = current.report_id;
-        
-        // Ambil data material dari array gh_material_used
-        const materialsData = current.gh_material_used.map(mat => ({
-             material_name: mat.material_name,
-             qty: parseFloat(mat.qty) || 0,
-             uom: mat.uom,
-             unit_price: parseFloat(mat.unit_price) || 0,
-             total_price: (parseFloat(mat.qty) || 0) * (parseFloat(mat.unit_price) || 0)
-        }));
-        
-        // Gabungkan report data dengan activity data
-        const reportData = current.gh_report;
-        const locationName = reportData?.location?.location;
-        const activityTotal = reportData?.activity_total;
-        const manpower = reportData?.manpower;
+      const rowTotal = materials.reduce((sum, m) => {
+        const qty = Number(m.qty) || 0
+        const price = Number(m.unit_price) || 0
+        return qty > 0 ? sum + qty * price : sum
+      }, 0)
 
-        // Key unik adalah activity_id (bukan report_id, karena satu report bisa banyak activity)
-        const activityId = current.activity_id; 
-
-        if (!acc[activityId]) {
-            acc[activityId] = {
-                report_id: reportId,
-                activity_id: activityId,
-                location: locationName,
-                Activity: current.act_name, // Menggunakan act_name dari gh_activity
-                activity_total: activityTotal,
-                manpower: manpower,
-                materials: materialsData,
-                // Fallback untuk tabel satu baris
-                material_name: materialsData.length === 1 ? materialsData[0].material_name : '',
-                Qty: materialsData.length === 1 ? materialsData[0].qty : 0,
-                UoM: materialsData.length === 1 ? materialsData[0].uom : '',
-                unit_price: materialsData.length === 1 ? materialsData[0].unit_price : 0,
-            };
-        }
-        return acc;
-    }, {});
-    
-    // Konversi kembali ke array
-    activityReport.value = Object.values(groupedActivities).map(item => {
-        // Karena ada kolom activity_total di gh_report, kita bisa pakai itu untuk total biaya activity
-        return item;
-    });
+      return {
+        activity_id: act.activity_id,
+        tanggal: reportMap[act.report_id]
+          ? new Date(reportMap[act.report_id]).toLocaleDateString('id-ID')
+          : '-',
+        Activity: act.act_name || '-',
+        manpower: act.manpower ?? '-',
+        materials,
+        row_total: rowTotal // ✅ TOTAL FINAL PER BARIS
+      }
+    })
 
 
-    // 2. Hitung Summary Material (Menggunakan gh_material_used)
-    const { data: materialUsedData, error: materialUsedError } = await supabase
-        .from('gh_material_used')
-        .select(`
-            *,
-            gh_activity!inner(activity_id, report_id, batch_id)
-        `)
-        .eq('gh_activity.batch_id', batch_id); // Filter via join
+    /**
+     * 4️⃣ Ringkasan Material (UNTUK TABEL BAWAH)
+     */
+    /**
+ * 4️⃣ Ringkasan material (UNTUK TABEL BAWAH)
+ * + HITUNG HARGA SATUAN RATA-RATA
+ */
+const materialMap = {}
+let grandTotal = 0
 
-    if (materialUsedError) {
-        console.error("Error loading material used data:", materialUsedError);
-        materialList.value = [];
-        totalMaterial.value = 0;
-        return;
+activities.forEach(act => {
+  act.gh_material_used?.forEach(mat => {
+    const qty = Number(mat.qty) || 0
+    const price = Number(mat.unit_price) || 0
+    const total = qty * price
+
+    grandTotal += total
+
+    if (!materialMap[mat.material_name]) {
+      materialMap[mat.material_name] = {
+        material_name: mat.material_name,
+        Qty: 0,
+        UoM: mat.uom,
+        total_harga: 0,
+
+        // ➕ UNTUK RATA-RATA
+        total_unit_price: 0,
+        price_count: 0
+      }
     }
 
-    const materialSummary = {};
-    let grandTotal = 0;
+    materialMap[mat.material_name].Qty += qty
+    materialMap[mat.material_name].total_harga += total
 
-    materialUsedData.forEach(item => {
-        const matName = item.material_name;
-        const qty = parseFloat(item.qty) || 0;
-        const unitPrice = parseFloat(item.unit_price) || 0;
-        const totalHarga = qty * unitPrice;
-        grandTotal += totalHarga;
+    // ➕ SIMPAN HARGA SATUAN
+    if (price > 0) {
+      materialMap[mat.material_name].total_unit_price += price
+      materialMap[mat.material_name].price_count += 1
+    }
+  })
+})
 
-        if (!materialSummary[matName]) {
-            materialSummary[matName] = {
-                material_name: matName,
-                Qty: 0,
-                UoM: item.uom,
-                total_harga: 0,
-                // Untuk menghitung rata-rata harga
-                unit_price_sum: 0,
-                count: 0
-            };
-        }
-        
-        materialSummary[matName].Qty += qty;
-        materialSummary[matName].total_harga += totalHarga;
-        materialSummary[matName].unit_price_sum += unitPrice;
-        materialSummary[matName].count += 1;
-    });
+/**
+ * 5️⃣ Finalisasi data material
+ */
+materialList.value = Object.values(materialMap).map(mat => ({
+  material_name: mat.material_name,
+  Qty: mat.Qty,
+  UoM: mat.UoM,
+  total_harga: mat.total_harga,
 
-    materialList.value = Object.values(materialSummary).map(mat => {
-        mat.harga_satuan = mat.count > 0 ? mat.unit_price_sum / mat.count : 0;
-        return mat;
-    });
-    
-    totalMaterial.value = grandTotal;
+  // ✅ SESUAI TEMPLATE
+  harga_satuan: mat.Qty > 0
+    ? Math.round(mat.total_harga / mat.Qty)
+    : 0
+}))
+
+
+totalMaterial.value = grandTotal
+} catch (err) {
+    console.error('❌ loadActivityAndMaterialData:', err)
+    activityReport.value = []
+    materialList.value = []
+    totalMaterial.value = 0
+  }
 }
 
 
@@ -1016,63 +1028,100 @@ const getPhaseColors = (phaseKey) => {
             <table class="min-w-full">
               <thead class="bg-gradient-to-r from-[#0071f3] to-[#0060d1]">
                 <tr>
-                  <th class="px-6 py-4 text-left text-xs font-semibold text-white uppercase tracking-wider">Lokasi</th>
+                  <th class="px-6 py-4 text-left text-xs font-semibold text-white uppercase tracking-wider">Tanggal</th>
                   <th class="px-6 py-4 text-left text-xs font-semibold text-white uppercase tracking-wider">Aktivitas</th>
                   <th class="px-6 py-4 text-left text-xs font-semibold text-white uppercase tracking-wider">Bahan Baku</th>
                   <th class="px-6 py-4 text-right text-xs font-semibold text-white uppercase tracking-wider">Jumlah</th>
                   <th class="px-6 py-4 text-center text-xs font-semibold text-white uppercase tracking-wider">UoM</th>
-                  <th class="px-6 py-4 text-right text-xs font-semibold text-white uppercase tracking-wider">HArga satuan</th>
+                  <th class="px-6 py-4 text-right text-xs font-semibold text-white uppercase tracking-wider">Harga satuan</th>
                   <th class="px-6 py-4 text-right text-xs font-semibold text-white uppercase tracking-wider">Total</th>
                   <th class="px-6 py-4 text-center text-xs font-semibold text-white uppercase tracking-wider">Tenaga Kerja</th>
                 </tr>
               </thead>
               <tbody class="bg-white divide-y divide-gray-200">
-                <tr v-for="item in activityReport" :key="item.activity_id" class="hover:bg-blue-50 transition">
-                  <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900 font-medium">{{ item.location }}</td>
-                  <td class="px-6 py-4 text-sm text-gray-700">{{ item.Activity }}</td>
+                <tr
+                  v-for="item in activityReport"
+                  :key="item.activity_id"
+                  class="hover:bg-blue-50 transition"
+                >
+                  <td class="px-6 py-4 text-sm text-gray-900">
+                    {{ item.tanggal || '-' }}
+                  </td>
+
                   <td class="px-6 py-4 text-sm text-gray-700">
-                    <div v-if="item.materials && item.materials.length > 1" class="space-y-1">
-                      <div v-for="(mat, index) in item.materials" :key="index" class="text-xs">
+                    {{ item.Activity }}
+                  </td>
+
+                  <td class="px-6 py-4 text-sm text-gray-700">
+                    <div v-if="item.materials?.length">
+                      <div
+                        v-for="(mat, index) in item.materials"
+                        :key="index"
+                        class="text-xs"
+                      >
                         • {{ mat.material_name }}
                       </div>
                     </div>
-                    <div v-else>{{ item.material_name }}</div>
+                    <div v-else>-</div>
                   </td>
-                  <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900 font-semibold text-right">
-                    <div v-if="item.materials && item.materials.length > 1" class="space-y-1">
-                      <div v-for="(mat, index) in item.materials" :key="index" class="text-xs">
-                        {{ mat.qty.toLocaleString('id-ID') }}
+
+                  <td class="px-6 py-4 text-sm font-semibold text-right">
+                    <div v-if="item.materials?.length">
+                      <div
+                        v-for="(mat, index) in item.materials"
+                        :key="index"
+                        class="text-xs"
+                      >
+                        {{ Number(mat.qty ?? 0).toLocaleString('id-ID') }}
                       </div>
                     </div>
-                    <div v-else>{{ item.Qty.toLocaleString('id-ID') }}</div>
+                    <div v-else>0</div>
                   </td>
-                  <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-600 text-center">
-                    <div v-if="item.materials && item.materials.length > 1" class="space-y-1">
-                      <div v-for="(mat, index) in item.materials" :key="index" class="text-xs">
-                        {{ mat.uom }}
+
+                  <td class="px-6 py-4 text-sm text-center text-gray-600">
+                    <div v-if="item.materials?.length">
+                      <div
+                        v-for="(mat, index) in item.materials"
+                        :key="index"
+                        class="text-xs"
+                      >
+                        {{ mat.uom || '-' }}
                       </div>
                     </div>
-                    <div v-else>{{ item.UoM }}</div>
+                    <div v-else>-</div>
                   </td>
-                  <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-700 text-right">
-                    <div v-if="item.materials && item.materials.length > 1" class="space-y-1">
-                      <div v-for="(mat, index) in item.materials" :key="index" class="text-xs">
-                        Rp {{ (mat.unit_price || 0).toLocaleString('id-ID') }}
+
+                  <td class="px-6 py-4 text-sm text-right">
+                    <div v-if="item.materials?.length">
+                      <div
+                        v-for="(mat, index) in item.materials"
+                        :key="index"
+                        class="text-xs"
+                      >
+                        Rp {{ Number(mat.unit_price ?? 0).toLocaleString('id-ID') }}
                       </div>
                     </div>
-                    <div v-else>Rp {{ (item.unit_price || 0).toLocaleString('id-ID') }}</div>
+                    <div v-else>Rp 0</div>
                   </td>
-                  <td class="px-6 py-4 whitespace-nowrap text-sm font-bold text-blue-700 text-right">
-                    Rp {{ (item.activity_total || 0).toLocaleString('id-ID') }}
+
+                  <td class="px-6 py-4 text-sm font-bold text-blue-700 text-right">
+                    Rp {{ (item.row_total || 0).toLocaleString('id-ID') }}
                   </td>
-                  <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900 font-semibold text-center">{{ item.manpower }}</td>
+
+                  <td class="px-6 py-4 text-sm font-semibold text-center">
+                    {{ item.manpower ?? '-' }}
+                  </td>
                 </tr>
               </tbody>
               <tfoot>
                 <tr class="bg-gradient-to-r from-blue-50 to-white">
                   <td colspan="6" class="px-6 py-4 text-right text-sm font-bold text-gray-900">Total Biaya Kegiatan:</td>
                   <td class="px-6 py-4 whitespace-nowrap text-sm font-bold text-green-600 text-right">
-                    Rp {{ activityReport.reduce((sum, item) => sum + (item.activity_total || 0), 0).toLocaleString('id-ID') }}
+                    Rp {{
+                        activityReport
+                          .reduce((sum, item) => sum + (item.row_total || 0), 0)
+                          .toLocaleString('id-ID')
+                      }}
                   </td>
                   <td></td>
                 </tr>

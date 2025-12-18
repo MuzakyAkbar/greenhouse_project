@@ -265,7 +265,7 @@ const loadWarehouseAndBin = async (locationName) => {
 
   try {
     const warehouseRes = await openbravoApi.get(
-      '/org.openbravo.service.json.jsonrest/Warehouse',
+      '/Warehouse',
       { 
         params: { 
           _where: `name='${locationName}'`,
@@ -286,7 +286,7 @@ const loadWarehouseAndBin = async (locationName) => {
     selectedWarehouse.value = warehouse;
 
     const binRes = await openbravoApi.get(
-      '/org.openbravo.service.json.jsonrest/Locator',
+      '/Locator',
       { 
         params: { 
           _where: `warehouse.id='${warehouse.id}'`,
@@ -325,7 +325,7 @@ const loadMaterialsByBin = async (binId) => {
   materialLoading.value = true;
   try {
     const materialsRes = await openbravoApi.get(
-      '/org.openbravo.service.json.jsonrest/MaterialMgmtStorageDetail',
+      '/MaterialMgmtStorageDetail',
       {
         params: {
           _where: `storageBin.id='${binId}' AND quantityOnHand > 0`

@@ -219,7 +219,7 @@ async function fetchMenu() {
     error.value = null;
 
     const res = await openbravoApi.get(
-      "/org.openbravo.service.json.jsonrest/Warehouse"
+      "/Warehouse"
     );
 
     menuItems.value = res.data?.response?.data || [];

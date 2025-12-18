@@ -228,13 +228,13 @@ const loadWarehouseAndBin = async (locationId) => {
     const locationName = location.location
     warehouseInfo.value.location_name = locationName
     
-    const warehouseRes = await openbravoApi.get('/org.openbravo.service.json.jsonrest/Warehouse', { params: { _where: `name='${locationName}'` } })
+    const warehouseRes = await openbravoApi.get('/Warehouse', { params: { _where: `name='${locationName}'` } })
     const warehouses = warehouseRes?.data?.response?.data || []
     if (!warehouses.length) return
     const warehouse = warehouses[0]
     warehouseInfo.value.warehouse = warehouse
     
-    const binRes = await openbravoApi.get('/org.openbravo.service.json.jsonrest/Locator', { params: { _where: `M_Warehouse_ID='${warehouse.id}'` } })
+    const binRes = await openbravoApi.get('/Locator', { params: { _where: `M_Warehouse_ID='${warehouse.id}'` } })
     const bins = binRes?.data?.response?.data || []
     if (!bins.length) return
     warehouseInfo.value.bin = bins[0]
@@ -571,7 +571,7 @@ const createAndProcessMovement = async (materials, activityName) => {
       name: `Material Usage - ${activityName} - ${new Date().toLocaleDateString('id-ID')}`,
       description: `Auto-generated from Greenhouse Activity: ${activityName}`
     };
-    const createMovementRes = await openbravoApi.post('/org.openbravo.service.json.jsonrest/MaterialMgmtMaterialMovement', { data: movementPayload });
+    const createMovementRes = await openbravoApi.post('/MaterialMgmtMaterialMovement', { data: movementPayload });
     let movementId = null;
     let mData = createMovementRes?.data?.response?.data || createMovementRes?.data?.data || createMovementRes?.data;
     if (Array.isArray(mData) && mData.length > 0) movementId = mData[0].id;
@@ -583,7 +583,7 @@ const createAndProcessMovement = async (materials, activityName) => {
     for (const material of materials) {
         try {
             const escapedName = material.material_name.replace(/'/g, "''");
-            const productRes = await openbravoApi.get('/org.openbravo.service.json.jsonrest/Product', { 
+            const productRes = await openbravoApi.get('/Product', { 
                 params: { _where: `name='${escapedName}'`, _selectedProperties: 'id,name,uOM' } 
             });
             const products = productRes?.data?.response?.data || [];
@@ -604,20 +604,20 @@ const createAndProcessMovement = async (materials, activityName) => {
             description: `${material.material_name} - ${activityName}`
             };
 
-            const lineRes = await openbravoApi.post('/org.openbravo.service.json.jsonrest/MaterialMgmtMaterialMovementLine', { data: linePayload });
+            const lineRes = await openbravoApi.post('/MaterialMgmtMaterialMovementLine', { data: linePayload });
             if(lineRes.data) successCount++;
         } catch (lineErr) { errors.push(`${material.material_name}: ${lineErr.message}`); }
     }
 
     if (successCount > 0) {
       try {
-        await openbravoApi.post(`/org.openbravo.service.json.jsonrest/MaterialMgmtMaterialMovement/${movementId}`, { data: { documentAction: 'CO' } });
+        await openbravoApi.post(`/MaterialMgmtMaterialMovement/${movementId}`, { data: { documentAction: 'CO' } });
         return { success: true, movementId, successCount, errors: errors.length ? errors.join('; ') : null };
       } catch (pErr) {
         return { success: true, movementId, successCount, errors: `Movement created but processing failed. Manual check required.` };
       }
     } else {
-      try { await openbravoApi.delete(`/org.openbravo.service.json.jsonrest/MaterialMgmtMaterialMovement/${movementId}`); } catch(e){}
+      try { await openbravoApi.delete(`/MaterialMgmtMaterialMovement/${movementId}`); } catch(e){}
       return { success: false, movementId: null, errors: `All lines failed: ${errors.join('; ')}` };
     }
   } catch (err) {

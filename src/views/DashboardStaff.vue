@@ -288,7 +288,7 @@ onMounted(async () => {
           </button>
 
           <!-- Form Activity Planning -->
-          <router-link
+          <!-- <router-link
             to="/planningActivity"
             class="group bg-white border-2 border-gray-100 hover:border-[#0071f3] rounded-2xl p-6 text-left hover:shadow-xl transition-all transform hover:-translate-y-1"
           >
@@ -309,7 +309,7 @@ onMounted(async () => {
               <span class="text-xs font-semibold text-gray-400 uppercase tracking-wide">Perencanaan</span>
               <span class="text-[#0071f3] font-bold group-hover:translate-x-1 transition-transform">→</span>
             </div>
-          </router-link>
+          </router-link> -->
 
           <!-- Form Activity Report -->
           <button
@@ -408,7 +408,7 @@ onMounted(async () => {
           </router-link>
 
           <!-- Help & Support -->
-          <div class="group bg-gradient-to-br from-amber-50 to-orange-50 border-2 border-amber-200 rounded-2xl p-6 text-left hover:shadow-xl transition-all">
+          <!-- <div class="group bg-gradient-to-br from-amber-50 to-orange-50 border-2 border-amber-200 rounded-2xl p-6 text-left hover:shadow-xl transition-all">
             <div class="flex items-start gap-4">
               <div class="w-14 h-14 bg-gradient-to-br from-amber-500 to-orange-500 rounded-xl flex items-center justify-center text-white text-2xl shadow-md">
                 💡
@@ -426,7 +426,7 @@ onMounted(async () => {
               <span class="text-xs font-semibold text-amber-600 uppercase tracking-wide">Dukungan</span>
               <span class="text-amber-600 font-bold">📖</span>
             </div>
-          </div>
+          </div> -->
         </div>
       </div>
 

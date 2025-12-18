@@ -370,7 +370,7 @@ async function submitToOpenBravo() {
     console.log('Sending warehouse payload:', warehousePayload)
 
     const warehouseResponse = await openbravoApi.post(
-      '/org.openbravo.service.json.jsonrest/Warehouse',
+      '/Warehouse',
       warehousePayload
     )
 
@@ -403,7 +403,7 @@ async function submitToOpenBravo() {
     console.log('Sending locator payload:', locatorPayload)
 
     const locatorResponse = await openbravoApi.post(
-      '/org.openbravo.service.json.jsonrest/Locator',
+      '/Locator',
       locatorPayload
     )
 

@@ -322,7 +322,7 @@ const loadWarehouseAndBin = async (locationName) => {
     return;
   }
   try {
-    const warehouseRes = await openbravoApi.get('/org.openbravo.service.json.jsonrest/Warehouse', { params: { _where: `name='${locationName}'` } });
+    const warehouseRes = await openbravoApi.get('/Warehouse', { params: { _where: `name='${locationName}'` } });
     const warehouses = warehouseRes?.data?.response?.data || [];
     if (!warehouses.length) {
       selectedWarehouse.value = null;
@@ -331,7 +331,7 @@ const loadWarehouseAndBin = async (locationName) => {
     }
     const warehouse = warehouses[0];
     selectedWarehouse.value = warehouse;
-    const binRes = await openbravoApi.get('/org.openbravo.service.json.jsonrest/Locator', { params: { _where: `M_Warehouse_ID='${warehouse.id}'` } });
+    const binRes = await openbravoApi.get('/Locator', { params: { _where: `M_Warehouse_ID='${warehouse.id}'` } });
     const bins = binRes?.data?.response?.data || [];
     if (!bins.length) {
       selectedBin.value = null;
@@ -353,7 +353,7 @@ const loadMaterialsByBin = async (binId) => {
   }
   materialLoading.value = true;
   try {
-    const materialsRes = await openbravoApi.get('/org.openbravo.service.json.jsonrest/MaterialMgmtStorageDetail', { params: { _where: `M_Locator_ID='${binId}' AND quantityOnHand > 0` } });
+    const materialsRes = await openbravoApi.get('/MaterialMgmtStorageDetail', { params: { _where: `M_Locator_ID='${binId}' AND quantityOnHand > 0` } });
     const rows = materialsRes?.data?.response?.data || [];
     const materialsWithPrice = await Promise.all(rows.map(async (r) => {
       const price = await getMaterialPrice(r['product$_identifier'], r.product);
@@ -372,7 +372,7 @@ const getMaterialPrice = async (materialName) => {
   try {
     const stockItem = availableMaterials.value.find(m => m.material_name === materialName);
     if (!stockItem || !stockItem.productId) return 0;
-    const costingRes = await openbravoApi.get('/org.openbravo.service.json.jsonrest/MaterialMgmtCosting', { params: { _where: `product='${stockItem.productId}'`, _orderBy: 'updated desc', _maxResults: 50 } });
+    const costingRes = await openbravoApi.get('/MaterialMgmtCosting', { params: { _where: `product='${stockItem.productId}'`, _orderBy: 'updated desc', _maxResults: 50 } });
     const costings = costingRes?.data?.response?.data || [];
     if (costings.length > 0) {
       const latestCosting = costings[0];

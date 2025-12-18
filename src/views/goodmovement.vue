@@ -54,7 +54,7 @@
                   d="M256 80c0-17.7-14.3-32-32-32s-32 14.3-32 32l0 144L48 224c-17.7 0-32 14.3-32 32s14.3 32 32 32l144 0 0 144c0 17.7 14.3 32 32 32s32-14.3 32-32l0-144 144 0c17.7 0 32-14.3 32-32s-14.3-32-32-32l-144 0 0-144z"
                 />
               </svg>
-              Add New Movement
+              Tambah Perpindahan Barang
             </router-link>
           </div>
         </div>
@@ -319,38 +319,464 @@ const hasMore = ref(true);
 // ===== Realtime Subscription =====
 let realtimeChannel = null;
 
+/* -----------------------------
+   1. SETUP REALTIME SUBSCRIPTION (ENHANCED)
+------------------------------*/
+
 const setupRealtimeSubscription = () => {
-  // Subscribe to changes in gh_movement table
   realtimeChannel = supabase
     .channel("gh_movement_changes")
+    // ⭐ Subscribe ke perubahan gh_movement
     .on(
       "postgres_changes",
       {
-        event: "*", // Listen to all events (INSERT, UPDATE, DELETE)
+        event: "*",
         schema: "public",
         table: "gh_movement",
       },
       async (payload) => {
-        console.log("🔔 Realtime update received:", payload);
+        console.log("🔔 Movement update:", payload);
 
         if (payload.eventType === "INSERT") {
-          // Add new movement to the top of the list immediately
           await handleRealtimeInsert(payload.new);
         } else if (payload.eventType === "UPDATE") {
-          // Update specific movement in the list
+          // ⭐ PENTING: Update status real-time
           await handleRealtimeUpdate(payload.new);
         } else if (payload.eventType === "DELETE") {
-          // Remove deleted movement from list
           movements.value = movements.value.filter(
             (m) => m.movement_id !== payload.old.movement_id
           );
         }
       }
     )
+    // ⭐ TAMBAHAN: Subscribe ke gh_approve_record untuk deteksi approval cepat
+    .on(
+      "postgres_changes",
+      {
+        event: "UPDATE",
+        schema: "public",
+        table: "gh_approve_record",
+      },
+      async (payload) => {
+        console.log("🔔 Approval record updated:", payload);
+        
+        // Jika tipe referensi adalah movement, refresh data
+        if (payload.new.reference_type === "movement") {
+          await refreshMovementById(payload.new.reference_id);
+        }
+      }
+    )
+    // ⭐ TAMBAHAN: Subscribe ke gh_approval_level_status untuk update level
+    .on(
+      "postgres_changes",
+      {
+        event: "UPDATE",
+        schema: "public",
+        table: "gh_approval_level_status",
+      },
+      async (payload) => {
+        console.log("🔔 Approval level status changed:", payload);
+        
+        // Refresh movement berdasarkan perubahan approval level
+        await refreshMovementByApprovalLevel(payload.new);
+      }
+    )
     .subscribe((status) => {
       console.log("📡 Realtime subscription status:", status);
+      
+      if (status === "SUBSCRIBED") {
+        console.log("✅ Successfully subscribed to realtime updates");
+      } else if (status === "CHANNEL_ERROR") {
+        console.error("❌ Realtime subscription error, starting polling fallback...");
+        startPollingFallback();
+      }
     });
 };
+
+/* -----------------------------
+   2. HANDLE REALTIME UPDATE (ENHANCED)
+------------------------------*/
+
+const handleRealtimeUpdate = async (updatedRow) => {
+  try {
+    console.log("📝 Processing movement update:", updatedRow.movement_id);
+    
+    // Fetch location names
+    const locationIds = [
+      updatedRow.source_location_id,
+      updatedRow.target_location_id,
+    ].filter(Boolean);
+
+    const locMap = await fetchLocationNames(locationIds);
+
+    const sourceId = updatedRow.source_location_id;
+    const targetId = updatedRow.target_location_id;
+    const sourceLoc = sourceId ? locMap[sourceId] : null;
+    const targetLoc = targetId ? locMap[targetId] : null;
+
+    let locationText = "-";
+    if (sourceLoc && targetLoc) {
+      locationText = `${sourceLoc} → ${targetLoc}`;
+    } else if (sourceLoc && !targetLoc) {
+      locationText = `${sourceLoc} → ?`;
+    } else if (!sourceLoc && targetLoc) {
+      locationText = `? → ${targetLoc}`;
+    }
+
+    const updatedMovement = {
+      id: updatedRow.movement_id,
+      movement_id: updatedRow.movement_id,
+      documentNo: updatedRow.reference_no || "-",
+      requester: updatedRow.created_by || "-",
+      movementDateFmt: formatDateTime(updatedRow.created_at),
+      locationText: locationText,
+      status: updatedRow.status || "On Review", // ⭐ Status update otomatis
+      createdAt: updatedRow.created_at,
+      raw: updatedRow,
+    };
+
+    // Find and update in list
+    const index = movements.value.findIndex(
+      (m) => m.movement_id === updatedRow.movement_id
+    );
+
+    if (index !== -1) {
+      const oldStatus = movements.value[index].status;
+      
+      // ⭐ Update data
+      movements.value[index] = updatedMovement;
+      
+      // ⭐ Show notification jika status berubah
+      if (oldStatus !== updatedMovement.status) {
+        showStatusChangeNotification(updatedMovement, oldStatus);
+      }
+      
+      console.log(`✅ Movement ${updatedRow.movement_id} updated: ${oldStatus} → ${updatedMovement.status}`);
+    } else {
+      console.log("⚠️ Movement not in current view, might be in other page");
+    }
+  } catch (err) {
+    console.error("❌ Error handling realtime update:", err);
+  }
+};
+
+/* -----------------------------
+   3. REFRESH MOVEMENT BY ID
+------------------------------*/
+
+const refreshMovementById = async (movementId) => {
+  try {
+    console.log(`🔄 Refreshing movement ${movementId}...`);
+    
+    const { data: movement, error } = await supabase
+      .from("gh_movement")
+      .select("*")
+      .eq("movement_id", movementId)
+      .single();
+
+    if (error) throw error;
+
+    if (movement) {
+      await handleRealtimeUpdate(movement);
+    }
+  } catch (err) {
+    console.error("❌ Error refreshing movement by ID:", err);
+  }
+};
+
+/* -----------------------------
+   4. REFRESH MOVEMENT BY APPROVAL LEVEL
+------------------------------*/
+
+const refreshMovementByApprovalLevel = async (approvalLevel) => {
+  try {
+    // Get approval record
+    const { data: approvalRecord, error: recordError } = await supabase
+      .from("gh_approve_record")
+      .select("reference_id, reference_type")
+      .eq("record_id", approvalLevel.record_id)
+      .single();
+
+    if (recordError) throw recordError;
+
+    // Only process if it's a movement
+    if (approvalRecord && approvalRecord.reference_type === "movement") {
+      const movementId = approvalRecord.reference_id;
+      
+      console.log(`🔄 Approval level changed for movement ${movementId}, refreshing...`);
+      
+      // Fetch updated movement
+      const { data: movement, error: movementError } = await supabase
+        .from("gh_movement")
+        .select("*")
+        .eq("movement_id", movementId)
+        .single();
+
+      if (movementError) throw movementError;
+
+      if (movement) {
+        await handleRealtimeUpdate(movement);
+      }
+    }
+  } catch (err) {
+    console.error("❌ Error refreshing movement by approval level:", err);
+  }
+};
+
+/* -----------------------------
+   5. NOTIFICATION SYSTEM (TOAST)
+------------------------------*/
+
+const showStatusChangeNotification = (movement, oldStatus) => {
+  const currentUser = JSON.parse(localStorage.getItem("user"));
+  
+  // Cek apakah user adalah requester
+  const isRequester = 
+    currentUser?.email === movement.requester || 
+    currentUser?.username === movement.requester;
+  
+  // Prepare notification message
+  let message = "";
+  let icon = "";
+  let bgColor = "";
+  
+  switch(movement.status) {
+    case "Approved":
+      message = `Movement ${movement.documentNo} telah disetujui!`;
+      icon = "✅";
+      bgColor = "bg-green-100 text-green-800 border-green-300";
+      break;
+    case "Rejected":
+      message = `Movement ${movement.documentNo} ditolak`;
+      icon = "❌";
+      bgColor = "bg-red-100 text-red-800 border-red-300";
+      break;
+    case "Need Revision":
+      message = `Movement ${movement.documentNo} perlu revisi`;
+      icon = "✏️";
+      bgColor = "bg-amber-100 text-amber-800 border-amber-300";
+      break;
+    case "On Review":
+      message = `Movement ${movement.documentNo} sedang direview`;
+      icon = "⏳";
+      bgColor = "bg-blue-100 text-blue-800 border-blue-300";
+      break;
+    default:
+      return; // No notification for other statuses
+  }
+  
+  // Show console log
+  console.log(`${icon} ${message}`);
+  
+  // ⭐ TOAST NOTIFICATION (Simple implementation)
+  if (isRequester) {
+    createToastNotification(icon, message, bgColor);
+  }
+  
+  // ⭐ BROWSER NOTIFICATION (Optional - requires permission)
+  if ("Notification" in window && Notification.permission === "granted") {
+    new Notification("Status Movement Updated", {
+      body: message,
+      icon: "/favicon.ico",
+      badge: "/favicon.ico",
+      tag: `movement-${movement.movement_id}`, // Prevent duplicate notifications
+    });
+  }
+};
+
+/* -----------------------------
+   6. TOAST NOTIFICATION COMPONENT
+------------------------------*/
+
+const createToastNotification = (icon, message, bgColor) => {
+  // Create toast element
+  const toast = document.createElement('div');
+  toast.className = `fixed top-4 right-4 z-50 ${bgColor} px-6 py-4 rounded-xl shadow-2xl border-2 flex items-center gap-3 transform transition-all duration-300 animate-slide-in-right`;
+  toast.style.maxWidth = '400px';
+  
+  toast.innerHTML = `
+    <span class="text-2xl">${icon}</span>
+    <div class="flex-1">
+      <p class="font-semibold text-sm">${message}</p>
+      <p class="text-xs opacity-75 mt-1">Klik untuk melihat detail</p>
+    </div>
+    <button class="text-xl hover:scale-110 transition-transform" onclick="this.parentElement.remove()">×</button>
+  `;
+  
+  // Make it clickable
+  toast.style.cursor = 'pointer';
+  toast.onclick = (e) => {
+    if (e.target.tagName !== 'BUTTON') {
+      // Scroll to the updated movement (if visible)
+      const movementCards = document.querySelectorAll('[data-movement-id]');
+      const targetCard = Array.from(movementCards).find(
+        card => card.dataset.movementId === message.split(' ')[1]
+      );
+      if (targetCard) {
+        targetCard.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        targetCard.classList.add('ring-4', 'ring-blue-500');
+        setTimeout(() => {
+          targetCard.classList.remove('ring-4', 'ring-blue-500');
+        }, 2000);
+      }
+      toast.remove();
+    }
+  };
+  
+  // Add to document
+  document.body.appendChild(toast);
+  
+  // Auto remove after 5 seconds
+  setTimeout(() => {
+    toast.style.opacity = '0';
+    toast.style.transform = 'translateX(100%)';
+    setTimeout(() => toast.remove(), 300);
+  }, 5000);
+};
+
+/* -----------------------------
+   7. POLLING FALLBACK (BACKUP)
+------------------------------*/
+
+let pollingInterval = null;
+
+const startPollingFallback = () => {
+  // Stop existing polling if any
+  stopPollingFallback();
+  
+  console.log("🔄 Starting polling fallback...");
+  
+  pollingInterval = setInterval(async () => {
+    // Only poll if tab is active
+    if (document.hidden) return;
+    
+    console.log("🔄 Polling for updates...");
+    
+    // Get movements that are in review
+    const reviewMovements = movements.value.filter(
+      m => m.status === "On Review" || m.status === "Waiting"
+    );
+    
+    if (reviewMovements.length > 0) {
+      const ids = reviewMovements.map(m => m.movement_id);
+      
+      const { data: updated } = await supabase
+        .from("gh_movement")
+        .select("*")
+        .in("movement_id", ids);
+      
+      updated?.forEach(async (updatedData) => {
+        const existing = movements.value.find(
+          m => m.movement_id === updatedData.movement_id
+        );
+        
+        // Update if status changed
+        if (existing && existing.status !== updatedData.status) {
+          console.log(`📝 Polling detected change for ${updatedData.movement_id}: ${existing.status} → ${updatedData.status}`);
+          await handleRealtimeUpdate(updatedData);
+        }
+      });
+    }
+  }, 30000); // Poll every 30 seconds
+};
+
+const stopPollingFallback = () => {
+  if (pollingInterval) {
+    clearInterval(pollingInterval);
+    pollingInterval = null;
+    console.log("⏹️ Polling fallback stopped");
+  }
+};
+
+/* -----------------------------
+   8. FORCE REFRESH FUNCTION
+------------------------------*/
+
+const forceRefreshMovements = async () => {
+  console.log("🔄 Force refreshing movements...");
+  
+  // Save scroll position
+  const scrollPosition = window.scrollY;
+  
+  // Show loading indicator (optional)
+  loading.value = true;
+  
+  try {
+    // Reset and fetch
+    await fetchMovements({ reset: true });
+    
+    // Show success toast
+    createToastNotification(
+      "✅", 
+      "Data berhasil diperbarui!", 
+      "bg-green-100 text-green-800 border-green-300"
+    );
+  } catch (err) {
+    console.error("❌ Error refreshing:", err);
+    createToastNotification(
+      "❌", 
+      "Gagal memperbarui data", 
+      "bg-red-100 text-red-800 border-red-300"
+    );
+  } finally {
+    loading.value = false;
+    
+    // Restore scroll position
+    setTimeout(() => {
+      window.scrollTo({ top: scrollPosition, behavior: 'smooth' });
+    }, 100);
+  }
+};
+
+/* -----------------------------
+   9. REQUEST NOTIFICATION PERMISSION
+------------------------------*/
+
+const requestNotificationPermission = async () => {
+  if ("Notification" in window) {
+    if (Notification.permission === "default") {
+      const permission = await Notification.requestPermission();
+      console.log("📢 Notification permission:", permission);
+    }
+  }
+};
+
+/* -----------------------------
+   10. UPDATE LIFECYCLE HOOKS
+------------------------------*/
+
+onMounted(async () => {
+  console.log("🚀 Good Movement mounted");
+  
+  // Load initial data
+  await fetchMovements({ reset: true });
+  
+  // Load user data
+  users.value = JSON.parse(localStorage.getItem("user"));
+  
+  // Setup realtime subscription
+  setupRealtimeSubscription();
+  
+  // Start polling fallback (safety net)
+  startPollingFallback();
+  
+  // Request notification permission (optional)
+  await requestNotificationPermission();
+});
+
+onBeforeUnmount(() => {
+  console.log("🔌 Good Movement unmounting");
+  
+  // Unsubscribe from realtime
+  if (realtimeChannel) {
+    supabase.removeChannel(realtimeChannel);
+    realtimeChannel = null;
+    console.log("📡 Realtime subscription removed");
+  }
+  
+  // Stop polling
+  stopPollingFallback();
+});
 
 const handleRealtimeInsert = async (newRow) => {
   try {
@@ -392,55 +818,6 @@ const handleRealtimeInsert = async (newRow) => {
     movements.value.unshift(newMovement);
   } catch (err) {
     console.error("❌ Error handling realtime insert:", err);
-  }
-};
-
-const handleRealtimeUpdate = async (updatedRow) => {
-  try {
-    // Fetch location names for the updated row
-    const locationIds = [
-      updatedRow.source_location_id,
-      updatedRow.target_location_id,
-    ].filter(Boolean);
-
-    const locMap = await fetchLocationNames(locationIds);
-
-    const sourceId = updatedRow.source_location_id;
-    const targetId = updatedRow.target_location_id;
-    const sourceLoc = sourceId ? locMap[sourceId] : null;
-    const targetLoc = targetId ? locMap[targetId] : null;
-
-    let locationText = "-";
-    if (sourceLoc && targetLoc) {
-      locationText = `${sourceLoc} → ${targetLoc}`;
-    } else if (sourceLoc && !targetLoc) {
-      locationText = `${sourceLoc} → ?`;
-    } else if (!sourceLoc && targetLoc) {
-      locationText = `? → ${targetLoc}`;
-    }
-
-    const updatedMovement = {
-      id: updatedRow.movement_id,
-      movement_id: updatedRow.movement_id,
-      documentNo: updatedRow.reference_no || "-",
-      requester: updatedRow.created_by || "-",
-      movementDateFmt: formatDateTime(updatedRow.created_at),
-      locationText: locationText,
-      status: updatedRow.status || "On Review",
-      createdAt: updatedRow.created_at, // Added for sorting
-      raw: updatedRow,
-    };
-
-    // Find and update the movement in the list
-    const index = movements.value.findIndex(
-      (m) => m.movement_id === updatedRow.movement_id
-    );
-
-    if (index !== -1) {
-      movements.value[index] = updatedMovement;
-    }
-  } catch (err) {
-    console.error("❌ Error handling realtime update:", err);
   }
 };
 

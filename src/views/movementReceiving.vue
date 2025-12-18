@@ -906,7 +906,11 @@ const handleSubmit = async () => {
       isAlreadyReceived.value = true;
       
       // Redirect ke daftar movement
-      router.push({ name: "goodmovement" });
+      router.push({
+        path: `/detailmovement/${movementId.value}`,
+        query: { refresh: Date.now() }
+      });
+
       return;
     }
 
@@ -1073,7 +1077,7 @@ const handleSubmit = async () => {
     }
 
     const headerRes = await openbravoApi.post(
-      '/org.openbravo.service.json.jsonrest/MaterialMgmtInternalMovement',
+      '/MaterialMgmtInternalMovement',
       headerPayload,
     )
 
@@ -1091,7 +1095,7 @@ const handleSubmit = async () => {
     }))
 
     const lineRes = await openbravoApi.post(
-      '/org.openbravo.service.json.jsonrest/MaterialMgmtInternalMovementLine',
+      '/MaterialMgmtInternalMovementLine',
       { data: obLines },
     )
 
@@ -1108,6 +1112,7 @@ const handleSubmit = async () => {
   } finally {
     submitLoading.value = false
   }
+  
 };
 
 const sendToOpenBravo = async () => {

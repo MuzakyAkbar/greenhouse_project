@@ -13,28 +13,29 @@ export default defineConfig({
   },
   server: {
     proxy: {
-      // 1. Proxy untuk Data (Port 80 standard)
-      // Call ke /api-ob/... akan diteruskan ke http://202.59.169.85/openbravo/...
+      // Proxy untuk Data dengan base path
       '/plantara/api-ob': {
-        target: 'https://mhnob.pirantisolusi.com',
+        target: 'https://api1.pirantisolusi.com/obmhn/v1',
         changeOrigin: true,
         secure: false,
-        rewrite: (p) => p.replace(/^\/api-ob/, '/openbravo'),
+        rewrite: (p) => p.replace(/^\/plantara\/api-ob/, '/openbravo'),
         configure: (proxy, options) => {
           proxy.on('error', (err) => console.error('❌ Proxy Data Error:', err.message));
+          proxy.on('proxyReq', (proxyReq, req) => {
+            console.log('📤 Proxying to Openbravo:', req.url);
+          });
         }
       },
-      // 2. Proxy KHUSUS untuk Process (Port 8090)
-      // Call ke /api-process/... akan diteruskan ke http://202.59.169.85:8090/api/...
+      // Proxy untuk Process dengan base path
       '/plantara/api-process': {
-        target: 'https://mhnproc.pirantisolusi.com',
+        target: 'https://mhnproc.pirantisolusi.com/api/process',
         changeOrigin: true,
         secure: false,
-        rewrite: (p) => p.replace(/^\/api-process/, '/api'),
+        rewrite: (p) => p.replace(/^\/plantara\/api-process/, '/api'),
         configure: (proxy, options) => {
           proxy.on('error', (err) => console.error('❌ Proxy Process Error:', err.message));
           proxy.on('proxyReq', (proxyReq, req) => {
-             console.log('📤 Sending Process to 8090:', req.url);
+            console.log('📤 Sending Process to:', req.url);
           });
         }
       }
