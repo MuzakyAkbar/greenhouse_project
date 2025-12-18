@@ -499,6 +499,7 @@ import { ref, computed, onMounted, watch } from "vue";
 import { useAuthStore } from "@/stores/auth";
 import { supabase } from "@/lib/supabase";
 import openbravoApi from "@/lib/openbravo";
+import logoPG from '../assets/logoPG.svg'
 
 const authStore = useAuthStore();
 

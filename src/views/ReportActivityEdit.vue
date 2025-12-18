@@ -9,6 +9,7 @@ import openbravoApi from '@/lib/openbravo'
 // Pastikan komponen ini ada di project Anda, jika belum, buat atau sesuaikan path-nya
 import ImageUploadComponent from '@/components/ImageUploadComponent.vue' 
 import { updateImageInDB, deleteImage, updateMultipleImagesInDB } from '@/lib/imageUpload';
+import logoPG from '../assets/logoPG.svg'
 
 const router = useRouter()
 const route = useRoute()
@@ -1131,6 +1132,9 @@ const reportInfo = computed(() => {
 
       <footer class="text-center py-10 mt-16 border-t border-gray-200">
         <div class="flex items-center justify-center gap-2 mb-2">
+           <span class="w-6 h-6 p-0.5">
+             <img :src="logoPG" alt="Potato Grow Logo" class="w-full h-full object-contain" />
+          </span>
           <p class="text-gray-400 font-bold text-sm">POTATO GROW</p>
         </div>
         <p class="text-gray-400 text-xs">© 2025 All Rights Reserved</p>

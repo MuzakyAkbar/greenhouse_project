@@ -1116,11 +1116,14 @@ const reportInfo = computed(() => {
         </div>
       </template>
 
-      <footer class="text-center py-6">
-        <div class="flex items-center justify-center gap-2 opacity-50 mb-1">
-           <img :src="logoPG" class="w-4 h-4 grayscale" />
-           <span class="text-xs font-bold text-gray-600">POTATO GROW</span>
+      <footer class="text-center py-10 mt-16 border-t border-gray-200">
+        <div class="flex items-center justify-center gap-2 mb-2">
+           <span class="w-6 h-6 p-0.5">
+             <img :src="logoPG" alt="Potato Grow Logo" class="w-full h-full object-contain" />
+          </span>
+          <p class="text-gray-400 font-bold text-sm">POTATO GROW</p>
         </div>
+        <p class="text-gray-400 text-xs">© 2025 All Rights Reserved</p>
       </footer>
     </div>
 
