@@ -1,12 +1,11 @@
 <script setup>
-import { ref, onMounted, computed, onUnmounted } from 'vue'
+import { ref, onMounted, computed, onUnmounted, watch } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useAuthStore } from '../stores/auth'
 import { useBatchStore } from '../stores/batch'
 import { useLocationStore } from '../stores/location'
 import { supabase } from '../lib/supabase'
 import openbravoApi from '@/lib/openbravo'
-// Pastikan komponen ini ada di project Anda, jika belum, buat atau sesuaikan path-nya
 import ImageUploadComponent from '@/components/ImageUploadComponent.vue' 
 import { updateImageInDB, deleteImage, updateMultipleImagesInDB } from '@/lib/imageUpload';
 import logoPG from '../assets/logoPG.svg'
@@ -38,6 +37,7 @@ const editedActivities = ref([])
 const typeDamageImages = ref({})
 const activityImages = ref({})
 const availableMaterials = ref([]) // Untuk validasi stok
+const availableWorkers = ref([]) // Master data pekerja
 
 // State Revision Modal
 const revisionModal = ref({
@@ -76,6 +76,9 @@ const imagePreview = ref({
   title: ''
 })
 
+// ===========================================
+// HELPER FUNCTIONS
+// ===========================================
 
 const openImagePreview = (images, title, startIndex = 0) => {
   if (!images || images.length === 0) return
@@ -165,6 +168,15 @@ const calculateActivityTotal = (materials) => {
   return materials.reduce((sum, mat) => sum + (Number(mat.total_price) || 0), 0)
 }
 
+const calculateLaborCost = (workers) => {
+  if (!workers || workers.length === 0) return 0
+  return workers.reduce((sum, w) => {
+    const hours = Number(w.hours_worked || w.hours) || 0
+    const salary = Number(w.hourly_rate_snapshot || w.hourly_salary || w.worker?.hourly_salary) || 0
+    return sum + (hours * salary)
+  }, 0)
+}
+
 const loadPhaseInfo = async (phaseId) => {
   if (!phaseId) return null;
   try {
@@ -192,13 +204,8 @@ const getStatusBadge = (status) => {
 // LOADERS (Data & Openbravo)
 // ===========================================
 
-// --- Material Stock Loader (For Validation) ---
 const loadMaterialStock = async () => {
   try {
-    // Ambil semua material yang tersedia untuk dicek stoknya
-    // Asumsi: Ada tabel gh_material atau kita ambil dari master data yang ada stoknya
-    // Jika menggunakan Openbravo, ini mungkin perlu call API OB. 
-    // Di sini saya simulasikan ambil dari tabel lokal 'gh_material_stock' atau 'gh_material'
     const { data, error } = await supabase.from('gh_material').select('material_name, stock, uom');
     if (!error && data) {
       availableMaterials.value = data;
@@ -208,7 +215,20 @@ const loadMaterialStock = async () => {
   }
 }
 
-// --- Environment Log Loader ---
+const loadWorkers = async () => {
+  try {
+    const { data, error } = await supabase
+      .from('gh_worker')
+      .select('*')
+      .eq('is_active', true)
+      .order('name');
+    if (error) throw error;
+    availableWorkers.value = data || [];
+  } catch (err) {
+    console.error('❌ Error loading workers:', err);
+  }
+};
+
 const loadEnvironmentLog = async (locationId, dateStr) => {
   try {
     const { data } = await supabase.from('gh_environment_log')
@@ -303,13 +323,22 @@ const loadApprovalProgress = async () => {
 const loadData = async () => {
   try {
     loading.value = true;
-    await Promise.all([batchStore.getBatches(), locationStore.fetchAll()]);
+    await Promise.all([batchStore.getBatches(), locationStore.fetchAll(), loadWorkers()]);
     // Load available materials for edit validation
     await loadMaterialStock();
 
+    // ✅ UPDATED QUERY: Mengambil data workers
     const { data: report, error: fetchError } = await supabase
       .from('gh_report')
-      .select(`*, type_damages:gh_type_damage(*), activities:gh_activity(*, materials:gh_material_used(*))`)
+      .select(`
+        *, 
+        type_damages:gh_type_damage(*), 
+        activities:gh_activity(
+            *, 
+            materials:gh_material_used(*),
+            workers:gh_activity_worker(*, worker:gh_worker(name, role, hourly_salary))
+        )
+      `)
       .eq('report_id', report_id.value)
       .single();
     
@@ -352,8 +381,6 @@ const prepareEditData = () => {
       busuk: d.busuk || 0
     }));
     
-    // Load existing images
-    // Load existing images dengan format yang benar
     currentReport.value.type_damages.forEach(d => {
       if (d.images && d.images.length > 0) {
         typeDamageImages.value[d.typedamage_id] = d.images.map(img => {
@@ -382,7 +409,7 @@ const prepareEditData = () => {
         act_name: a.act_name,
         CoA: a.CoA,
         notes: a.notes || '',
-        manpower: manpower,
+        manpower: manpower, // Will be recalculated based on workers list length
         materials: (a.materials || []).map(m => ({
           material_used_id: m.material_used_id,
           material_name: m.material_name,
@@ -390,12 +417,19 @@ const prepareEditData = () => {
           uom: m.uom,
           unit_price: m.unit_price || 0,
           total_price: m.total_price || 0
+        })),
+        // ✅ Map Workers
+        workers: (a.workers || []).map(w => ({
+            activity_worker_id: w.activity_worker_id,
+            worker_id: w.worker_id,
+            name: w.worker?.name,
+            role: w.worker?.role,
+            hourly_salary: w.hourly_rate_snapshot || w.worker?.hourly_salary || 0,
+            hours: w.hours_worked
         }))
       };
     });
     
-    // Load existing activity images
-    // Load existing activity images dengan format yang benar
     currentReport.value.activities.forEach(a => {
       if (a.images && a.images.length > 0) {
         activityImages.value[a.activity_id] = a.images.map(img => {
@@ -421,21 +455,73 @@ const toggleEditMode = () => {
   isEditMode.value = !isEditMode.value;
 };
 
+// --- WORKER EDIT LOGIC ---
+const addWorkerRow = (activityIndex) => {
+    editedActivities.value[activityIndex].workers.push({
+        activity_worker_id: null,
+        worker_id: "",
+        hours: 0,
+        hourly_salary: 0,
+        role: ""
+    });
+}
+
+const removeWorkerRow = (activityIndex, workerIndex) => {
+    editedActivities.value[activityIndex].workers.splice(workerIndex, 1);
+}
+
+// ✅ NEW: Helper function to filter duplicate workers in the same activity
+const getAvailableWorkerOptions = (activityIndex, currentWorkerRowIndex) => {
+    const activity = editedActivities.value[activityIndex];
+    // Ambil semua ID worker yang sudah dipilih di aktivitas ini, KECUALI yang sedang diedit di baris ini
+    const selectedWorkerIds = activity.workers
+        .map((w, index) => index !== currentWorkerRowIndex ? w.worker_id : null)
+        .filter(id => id); // Remove nulls
+
+    // Return workers yang BELUM dipilih
+    return availableWorkers.value.filter(w => !selectedWorkerIds.includes(w.worker_id));
+};
+
+// Watcher untuk auto-fill role dan salary saat worker dipilih di edit mode
+watch(editedActivities, (activities) => {
+    activities.forEach(activity => {
+        if(activity.workers) {
+            activity.workers.forEach(worker => {
+                if (worker.worker_id) {
+                    const selectedData = availableWorkers.value.find(w => w.worker_id == worker.worker_id);
+                    if (selectedData) {
+                        worker.role = selectedData.role;
+                        // ✅ FIX: Selalu update salary jika ID worker berubah/sesuai data master
+                        // Ini memperbaiki bug "Hourly Cost Salah" saat ganti orang
+                        worker.hourly_salary = selectedData.hourly_salary;
+                    }
+                }
+            });
+        }
+    });
+}, { deep: true });
+
+
 const saveChanges = async () => {
   if (!confirm('💾 Simpan perubahan data?')) return;
   
-  // Validasi Material Stock
+  // Validasi Material Stock & Workers
   for (const activity of editedActivities.value) {
     for (const mat of activity.materials) {
       if (mat.material_name && mat.qty && parseFloat(mat.qty) > 0) {
         const stockItem = availableMaterials.value.find(m => m.material_name === mat.material_name);
-        // Note: Jika material tidak ada di master stock, kita skip validasi atau anggap error.
-        // Di sini kita warning saja jika stock tidak cukup.
         if (stockItem && parseFloat(mat.qty) > stockItem.stock) {
           alert(`⚠️ Stock tidak cukup untuk "${mat.material_name}". Stock tersedia: ${stockItem.stock}`);
           return;
         }
       }
+    }
+    // Validasi Worker Hours
+    for (const w of activity.workers) {
+        if (w.worker_id && (!w.hours || w.hours <= 0)) {
+            alert(`⚠️ Jam kerja harus diisi untuk pekerja pada aktivitas "${activity.act_name}"!`);
+            return;
+        }
     }
   }
   
@@ -455,27 +541,29 @@ const saveChanges = async () => {
           })
           .eq('typedamage_id', damage.typedamage_id);
         
-        // Update images
-        // Update images
-      if (typeDamageImages.value[damage.typedamage_id]) {
-        const imagesToUpdate = typeDamageImages.value[damage.typedamage_id].map(img => ({
-          path: img.path || '',
-          url: img.supabaseUrl || img.url || '',
-          bucket: img.bucket || 'images'
-        }));
-        await updateMultipleImagesInDB(damage.typedamage_id, 'type_damage', imagesToUpdate);
-      }
+        if (typeDamageImages.value[damage.typedamage_id]) {
+            const imagesToUpdate = typeDamageImages.value[damage.typedamage_id].map(img => ({
+            path: img.path || '',
+            url: img.supabaseUrl || img.url || '',
+            bucket: img.bucket || 'images'
+            }));
+            await updateMultipleImagesInDB(damage.typedamage_id, 'type_damage', imagesToUpdate);
+        }
       }
     }
     
     // 2. Update Activities
     for (const activity of editedActivities.value) {
       if (activity.activity_id) {
+        // Calculate Manpower Count
+        const validWorkers = activity.workers.filter(w => w.worker_id);
+        const manpowerCount = validWorkers.length > 0 ? `${validWorkers.length} Orang` : '0 Orang';
+
         await supabase
           .from('gh_activity')
           .update({
             notes: activity.notes || null,
-            manpower: activity.manpower.toString()
+            manpower: manpowerCount // Update manpower string
           })
           .eq('activity_id', activity.activity_id);
         
@@ -497,6 +585,45 @@ const saveChanges = async () => {
               })
               .eq('material_used_id', mat.material_used_id);
           }
+        }
+
+        // ✅ HANDLE WORKERS (Upsert & Delete)
+        // 1. Identifikasi ID yang ada di DB (dari currentReport original)
+        const originalWorkerIds = currentReport.value.activities
+            .find(a => a.activity_id === activity.activity_id)
+            ?.workers?.map(w => w.activity_worker_id) || [];
+        
+        // 2. Identifikasi ID yang masih ada di form edit
+        const currentWorkerIds = activity.workers
+            .map(w => w.activity_worker_id)
+            .filter(Boolean);
+        
+        // 3. Delete yang hilang
+        const idsToDelete = originalWorkerIds.filter(id => !currentWorkerIds.includes(id));
+        if (idsToDelete.length > 0) {
+            await supabase.from('gh_activity_worker').delete().in('activity_worker_id', idsToDelete);
+        }
+
+        // 4. Upsert (Update existing or Insert new)
+        for (const w of validWorkers) {
+            const payload = {
+                activity_id: activity.activity_id,
+                worker_id: w.worker_id,
+                hours_worked: w.hours,
+                hourly_rate_snapshot: w.hourly_salary,
+                // Kita tidak mengubah status menjadi 'onReview' disini agar tidak mereset flow approval jika hanya edit kecil.
+                // Namun jika diperlukan reset, uncomment baris bawah:
+                // status: 'onReview' 
+            };
+            
+            if (w.activity_worker_id) {
+                // Update
+                await supabase.from('gh_activity_worker').update(payload).eq('activity_worker_id', w.activity_worker_id);
+            } else {
+                // Insert New
+                payload.status = 'onReview'; // New workers start as onReview
+                await supabase.from('gh_activity_worker').insert(payload);
+            }
         }
       }
     }
@@ -555,8 +682,6 @@ const handleImageDelete = async (event, type) => {
 // ===========================================
 
 const createAndProcessMovement = async (materials, activityName) => {
-  // ... (Kode approval logic tetap sama, tidak berubah)
-  // [Code disingkat untuk keterbacaan, gunakan logika yang sudah ada di file asli]
   if (!materials || materials.length === 0) return { success: false, errors: 'No materials' };
   if (!warehouseInfo.value.warehouse || !warehouseInfo.value.bin) return { success: false, errors: 'Warehouse/Bin missing' };
   
@@ -627,7 +752,6 @@ const createAndProcessMovement = async (materials, activityName) => {
 };
 
 const approveCurrentLevel = async () => {
-    // ... (Logika approve tetap sama)
     if (!canApproveCurrentLevel.value || !currentUserLevel.value) return;
     const levelName = currentUserLevel.value.level_name;
     if (!confirm(`✅ Approve report ini untuk level "${levelName}"?`)) return;
@@ -685,7 +809,6 @@ const approveCurrentLevel = async () => {
 };
 
 const requestRevisionForLevel = async () => {
-  // ... (Logika request revision tetap sama)
     if (!canApproveCurrentLevel.value) return;
     if (!revisionModal.value.notes || revisionModal.value.notes.trim().length < 10) {
         alert('⚠️ Catatan revisi minimal 10 karakter'); return;
@@ -980,10 +1103,6 @@ const reportInfo = computed(() => {
                 
                 <div class="grid grid-cols-1 md:grid-cols-2 gap-5 mb-4">
                     <div class="flex flex-col">
-                    <label class="text-sm font-semibold text-gray-700 mb-2">👷 Tenaga Kerja</label>
-                    <input v-model="activity.manpower" type="number" class="px-4 py-3 border-2 border-gray-200 rounded-xl focus:border-blue-500 focus:ring-2 focus:ring-blue-200 transition" />
-                    </div>
-                    <div class="flex flex-col">
                     <label class="text-sm font-semibold text-gray-700 mb-2">CoA</label>
                     <input :value="activity.CoA" type="text" readonly class="px-4 py-3 border-2 border-gray-200 rounded-xl bg-gray-50 cursor-not-allowed" />
                     </div>
@@ -994,7 +1113,7 @@ const reportInfo = computed(() => {
                     <textarea v-model="activity.notes" rows="3" class="px-4 py-3 border-2 border-gray-200 rounded-xl focus:border-blue-500 focus:ring-2 focus:ring-blue-200 transition resize-none"></textarea>
                 </div>
                 
-                <div v-if="activity.materials.length > 0" class="bg-gray-50 rounded-lg p-4">
+                <div v-if="activity.materials.length > 0" class="bg-gray-50 rounded-lg p-4 mb-4">
                     <h4 class="text-sm font-bold text-gray-700 mb-3">📦 Material</h4>
                     <div v-for="(mat, mIndex) in activity.materials" :key="mat.material_used_id" class="grid grid-cols-1 md:grid-cols-3 gap-3 mb-3 bg-white p-3 rounded-lg border">
                     <div class="flex flex-col">
@@ -1011,6 +1130,51 @@ const reportInfo = computed(() => {
                     </div>
                     </div>
                 </div>
+
+                <div class="bg-orange-50 rounded-lg p-4 border border-orange-100">
+                    <div class="flex justify-between items-center mb-4">
+                       <h4 class="text-sm font-bold text-gray-900 flex items-center gap-2">
+                          <span class="text-lg">👷</span> Tenaga Kerja (Manpower)
+                       </h4>
+                       <span class="text-xs font-bold text-orange-700 bg-white px-2 py-1 rounded border border-orange-200">
+                         Est. Biaya: {{ formatCurrency(calculateLaborCost(activity.workers)) }}
+                       </span>
+                    </div>
+
+                    <div class="space-y-3">
+                       <div v-for="(worker, wIndex) in activity.workers" :key="wIndex" class="flex flex-col md:flex-row gap-3 items-start md:items-end bg-white rounded-lg p-3 border border-orange-200 shadow-sm">
+                          
+                          <div class="flex-1 w-full">
+                             <label class="text-xs font-semibold text-gray-600 mb-1 block">Nama Pekerja</label>
+                             <select v-model="worker.worker_id" class="w-full px-3 py-2 border rounded-lg text-sm focus:border-orange-500 outline-none bg-white">
+                                <option value="">Pilih Pekerja</option>
+                                <option v-for="w in getAvailableWorkerOptions(index, wIndex)" :key="w.worker_id" :value="w.worker_id">
+                                   {{ w.name }}
+                                </option>
+                             </select>
+                          </div>
+
+                          <div class="w-full md:w-1/4">
+                             <label class="text-xs font-semibold text-gray-600 mb-1 block">Jabatan</label>
+                             <input type="text" :value="worker.role || '-'" readonly class="w-full px-3 py-2 border rounded-lg text-sm bg-gray-50 text-gray-500" />
+                          </div>
+
+                          <div class="w-full md:w-1/6">
+                             <label class="text-xs font-semibold text-gray-600 mb-1 block">Jam Kerja</label>
+                             <input type="number" v-model="worker.hours" min="0" step="0.5" class="w-full px-3 py-2 border rounded-lg text-sm focus:border-orange-500 outline-none" placeholder="0" />
+                          </div>
+
+                          <button @click="removeWorkerRow(index, wIndex)" class="p-2 bg-red-100 text-red-600 rounded-lg hover:bg-red-200 transition">
+                             <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                          </button>
+                       </div>
+                    </div>
+
+                    <button @click="addWorkerRow(index)" class="mt-3 text-sm text-orange-600 font-bold hover:text-orange-700 flex items-center gap-1">
+                       + Tambah Pekerja
+                    </button>
+                 </div>
+
                 </div>
             </div>
             </div>
@@ -1089,8 +1253,9 @@ const reportInfo = computed(() => {
                       <p class="font-bold text-gray-900 text-lg mb-3">{{ activity.act_name }}</p>
                       <div class="grid grid-cols-2 md:grid-cols-3 gap-3 mb-4">
                         <div class="bg-white rounded-lg p-3"><p class="text-xs text-gray-500 font-semibold mb-1">CoA</p><p class="text-sm font-medium text-gray-900">{{ activity.CoA || '-' }}</p></div>
-                        <div class="bg-white rounded-lg p-3"><p class="text-xs text-gray-500 font-semibold mb-1">👷 Tenaga kerja</p><p class="text-sm font-medium text-gray-900">{{ activity.manpower || 0 }} pekerja</p></div>
+                        <div class="bg-white rounded-lg p-3"><p class="text-xs text-gray-500 font-semibold mb-1">👷 Tenaga kerja</p><p class="text-sm font-medium text-gray-900">{{ activity.manpower || '0 Orang' }}</p></div>
                         <div class="bg-gradient-to-br from-green-50 to-emerald-50 rounded-lg p-3 border-2 border-green-200"><p class="text-xs text-green-600 font-semibold mb-1">💰 Biaya Bahan</p><p class="text-base font-bold text-green-700">{{ formatCurrency(calculateActivityTotal(activity.materials || [])) }}</p></div>
+                        <div class="bg-gradient-to-br from-orange-50 to-red-50 rounded-lg p-3 border-2 border-orange-200"><p class="text-xs text-orange-600 font-semibold mb-1">💵 Biaya Pekerja</p><p class="text-base font-bold text-orange-700">{{ formatCurrency(calculateLaborCost(activity.workers || [])) }}</p></div>
                       </div>
                       <div v-if="activity.notes" class="mb-4 p-3 bg-white border border-gray-200 rounded-lg">
                         <p class="text-xs font-bold text-gray-500 uppercase tracking-wider mb-1">Catatan</p>
@@ -1104,7 +1269,7 @@ const reportInfo = computed(() => {
                           </div>
                         </div>
                       </div>
-                      <div v-if="activity.materials && activity.materials.length > 0" class="bg-white rounded-lg p-4">
+                      <div v-if="activity.materials && activity.materials.length > 0" class="bg-white rounded-lg p-4 mb-3">
                         <p class="text-sm font-bold text-gray-700 mb-3 flex items-center gap-2"><span class="text-base">📦</span>Bahan baku ({{ activity.materials.length }})</p>
                         <div class="overflow-x-auto">
                           <table class="w-full text-sm">
@@ -1117,9 +1282,40 @@ const reportInfo = computed(() => {
                                 <td class="py-2 px-3 text-right font-bold text-blue-700">{{ formatCurrency(material.total_price || 0) }}</td>
                               </tr>
                             </tbody>
+                            <tfoot class="border-t-2 border-gray-200">
+                              <tr>
+                                <td colspan="3" class="py-2 px-3 text-right font-bold text-gray-700">Total:</td>
+                                <td class="py-2 px-3 text-right font-bold text-blue-700">{{ formatCurrency(calculateActivityTotal(activity.materials)) }}</td>
+                              </tr>
+                            </tfoot>
                           </table>
                         </div>
                       </div>
+
+                      <div v-if="activity.workers && activity.workers.length > 0" class="bg-white rounded-lg p-4 border border-orange-100">
+                        <p class="text-sm font-bold text-gray-700 mb-3 flex items-center gap-2"><span class="text-base">👷</span>Pekerja ({{ activity.workers.length }})</p>
+                        <div class="overflow-x-auto">
+                          <table class="w-full text-sm">
+                            <thead><tr class="border-b-2 border-orange-200"><th class="text-left py-2 px-3 font-semibold text-gray-600">Nama</th><th class="text-left py-2 px-3 font-semibold text-gray-600">Jabatan</th><th class="text-right py-2 px-3 font-semibold text-gray-600">Jam</th><th class="text-right py-2 px-3 font-semibold text-gray-600">Upah/Jam</th><th class="text-right py-2 px-3 font-semibold text-gray-600">Total</th></tr></thead>
+                            <tbody>
+                              <tr v-for="w in activity.workers" :key="w.activity_worker_id" class="border-b border-orange-50 hover:bg-orange-50 transition">
+                                <td class="py-2 px-3 font-medium text-gray-900">{{ w.worker?.name || 'Unknown' }}</td>
+                                <td class="py-2 px-3 text-gray-600">{{ w.worker?.role || '-' }}</td>
+                                <td class="py-2 px-3 text-right font-semibold text-gray-900">{{ formatNumber(w.hours_worked) }}</td>
+                                <td class="py-2 px-3 text-right text-gray-600">{{ formatCurrency(w.hourly_rate_snapshot || w.hourly_salary) }}</td>
+                                <td class="py-2 px-3 text-right font-bold text-orange-700">{{ formatCurrency((w.hours_worked) * (w.hourly_rate_snapshot || w.hourly_salary)) }}</td>
+                              </tr>
+                            </tbody>
+                            <tfoot class="border-t-2 border-orange-200">
+                              <tr>
+                                <td colspan="4" class="py-2 px-3 text-right font-bold text-gray-700">Total:</td>
+                                <td class="py-2 px-3 text-right font-bold text-orange-700">{{ formatCurrency(calculateLaborCost(activity.workers)) }}</td>
+                              </tr>
+                            </tfoot>
+                          </table>
+                        </div>
+                      </div>
+
                     </div>
                     <div class="flex flex-col items-end gap-2"><span :class="getStatusBadge(activity.status).class" class="px-3 py-1 rounded-lg font-bold text-xs border-2 whitespace-nowrap">{{ getStatusBadge(activity.status).text }}</span></div>
                   </div>

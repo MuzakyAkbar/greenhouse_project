@@ -59,7 +59,6 @@ const getInitialEnvData = () => ({
 const envLogData = ref(getInitialEnvData());
 const loadingEnv = ref(false);
 
-// ✅ FIX 1: Hapus Icon/Emoticon agar lebih profesional
 const sessionLabels = {
   morning: { label: 'Pagi', color: 'orange' },
   noon: { label: 'Siang', color: 'yellow' },
@@ -95,15 +94,21 @@ const selectedBin = ref(null);
 const showScanner = ref(false);
 const isScanning = ref(false);
 let html5QrCode = null;
+
+// --- WORKER STATE (Updated Structure) ---
+const availableWorkers = ref([]);
+
 const formSections = ref([{ 
   id: Date.now(), 
   phase_id: "", 
   activity_id: "", 
   coa: "", 
-  notes: "", // ✅ FIX: Tambah properti notes
+  notes: "",
   materials: [{ material_name: "", qty: "", uom: "", unit_price: 0, total_price: 0 }], 
-  workers: [{ qty: "" }] 
+  // ✅ Updated Worker Structure
+  workers: [{ worker_id: "", hours: 0, hourly_salary: 0, role: "" }] 
 }]);
+
 const typeDamageImages = ref({});
 const activityImages = ref({});
 const uploadingImages = ref({});
@@ -115,6 +120,22 @@ const materialStocks = computed(() => materialStore.materialStock);
 const potatoActivities = computed(() => potatoActivityStore.activities);
 
 const formatNumber = (n) => new Intl.NumberFormat('id-ID').format(n ?? 0);
+const formatCurrency = (n) => new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', minimumFractionDigits: 0 }).format(n ?? 0);
+
+// --- Load Workers from Database ---
+const loadWorkers = async () => {
+  try {
+    const { data, error } = await supabase
+      .from('gh_worker')
+      .select('*')
+      .eq('is_active', true)
+      .order('name');
+    if (error) throw error;
+    availableWorkers.value = data || [];
+  } catch (err) {
+    console.error('❌ Error loading workers:', err);
+  }
+};
 
 const loadApprovalFlowInfo = async () => {
   try {
@@ -189,8 +210,6 @@ const handleEnvFileUpload = async (file) => {
     const ext = file.name.split('.').pop() || 'jpg';
     const timestamp = Date.now();
     
-    // ✅ FIX 2: Storage path menggunakan folder Tanggal
-    // Path: environment/2025-12-08/LocationID_Session_Type_Timestamp.jpg
     const folderDate = selectedDate.value;
     const path = `environment/${folderDate}/${selectedLocation.value}_${session}_${type}_${timestamp}.${ext}`;
 
@@ -372,15 +391,33 @@ const getMaterialPrice = async (materialName) => {
   try {
     const stockItem = availableMaterials.value.find(m => m.material_name === materialName);
     if (!stockItem || !stockItem.productId) return 0;
-    const costingRes = await openbravoApi.get('/MaterialMgmtCosting', { params: { _where: `product='${stockItem.productId}'`, _orderBy: 'updated desc', _maxResults: 50 } });
+    
+    const costingRes = await openbravoApi.get('/MaterialMgmtCosting', { 
+      params: { 
+        _where: `product='${stockItem.productId}'`, 
+        _orderBy: 'updated desc', 
+        _maxResults: 50 
+      } 
+    });
+    
     const costings = costingRes?.data?.response?.data || [];
+    
     if (costings.length > 0) {
-      const latestCosting = costings[0];
-      return parseFloat(latestCosting.price) || 0;
+      const validCostings = costings.filter(c => parseFloat(c.price) > 0);
+      
+      if (validCostings.length === 0) return 0;
+      
+      const totalPrice = validCostings.reduce((sum, c) => sum + parseFloat(c.price), 0);
+      const averagePrice = totalPrice / validCostings.length;
+      
+      console.log(`📊 ${materialName}: ${validCostings.length} lines, avg price: ${averagePrice.toFixed(2)}`);
+      
+      return averagePrice;
     }
+    
     return 0;
   } catch (err) {
-    console.error(`❌ Error fetching price:`, err);
+    console.error(`❌ Error fetching price for ${materialName}:`, err);
     return 0;
   }
 };
@@ -441,22 +478,45 @@ const stopScanner = () => {
 
 function addTypeDamageRow() { typeDamages.value.push({ id: Date.now(), type_damage: "", kuning: 0, kutilang: 0, busuk: 0 }); }
 function removeTypeDamageRow(index) { if (typeDamages.value.length > 1) { const damageId = typeDamages.value[index].id; if (typeDamageImages.value[damageId]) delete typeDamageImages.value[damageId]; typeDamages.value.splice(index, 1); } }
+
 function addFormSection() { 
   formSections.value.push({ 
     id: Date.now(), 
     phase_id: selectedPhase.value, 
     activity_id: "", 
     coa: "", 
-    notes: "", // ✅ FIX: Tambah notes saat membuat section baru
+    notes: "",
     materials: [{ material_name: "", qty: "", uom: "", unit_price: 0, total_price: 0 }], 
-    workers: [{ qty: "" }] 
+    workers: [{ worker_id: "", hours: 0, hourly_salary: 0, role: "" }]
   }); 
 }
-function removeFormSection(index) { if (formSections.value.length > 1) { const sectionId = formSections.value[index].id; if (activityImages.value[sectionId]) delete activityImages.value[sectionId]; formSections.value.splice(index, 1); } }
+
+function removeFormSection(index) { 
+  if (formSections.value.length > 1) { 
+    const sectionId = formSections.value[index].id; 
+    if (activityImages.value[sectionId]) delete activityImages.value[sectionId]; 
+    formSections.value.splice(index, 1); 
+  } 
+}
+
 function addMaterialRow(i) { formSections.value[i].materials.push({ material_name: "", qty: "", uom: "", unit_price: 0, total_price: 0 }); }
 function removeMaterialRow(sectionIndex, matIndex) { if (formSections.value[sectionIndex].materials.length > 1) formSections.value[sectionIndex].materials.splice(matIndex, 1); }
-function addWorkerRow(sectionIndex) { formSections.value[sectionIndex].workers.push({ qty: "" }); }
-function removeWorkerRow(sectionIndex, workerIndex) { if (formSections.value[sectionIndex].workers.length > 1) formSections.value[sectionIndex].workers.splice(workerIndex, 1); }
+
+// ✅ Updated Worker Functions
+function addWorkerRow(sectionIndex) { 
+  formSections.value[sectionIndex].workers.push({ worker_id: "", hours: 0, hourly_salary: 0, role: "" }); 
+}
+
+function removeWorkerRow(sectionIndex, workerIndex) { 
+  if (formSections.value[sectionIndex].workers.length > 1) {
+    formSections.value[sectionIndex].workers.splice(workerIndex, 1); 
+  }
+}
+
+// ✅ Calculate Labor Cost
+const calculateLaborCost = (workers) => {
+  return workers.reduce((sum, w) => sum + (parseFloat(w.hours || 0) * parseFloat(w.hourly_salary || 0)), 0);
+};
 
 const handleTypeDamageImageUpload = (event) => {
   const { recordId, allImages } = event;
@@ -504,6 +564,14 @@ const submitActivityReport = async () => {
       alert("⚠️ Pilih Activity untuk setiap form!");
       return;
     }
+    
+    // ✅ Validate Worker Hours
+    for (const w of section.workers) {
+      if (w.worker_id && (!w.hours || w.hours <= 0)) {
+        alert("⚠️ Jam kerja harus diisi untuk pekerja yang dipilih!");
+        return;
+      }
+    }
   }
 
   // Material Validation
@@ -532,9 +600,7 @@ const submitActivityReport = async () => {
 
   isSubmitting.value = true;
   try {
-    // -----------------------------------------------------
     // 0. HANDLE ENVIRONMENT LOG
-    // -----------------------------------------------------
     const hasEnvData = Object.values(envLogData.value).some(s => 
       s.temp || s.humid || s.co2 || s.img_temp || s.img_humid || s.img_co2
     );
@@ -633,16 +699,17 @@ const submitActivityReport = async () => {
       }
     }
 
-    // 3. Create activities
+    // 3. Create activities (WITH WORKER DETAILS)
     for (const section of formSections.value) {
-      const manpowerTotal = section.workers.reduce((sum, w) => sum + (parseInt(w.qty) || 0), 0);
+      const validWorkers = section.workers.filter(w => w.worker_id && w.hours > 0);
+      const manpowerSummary = validWorkers.length > 0 ? `${validWorkers.length} Orang` : "0 Orang";
       const selectedActivity = potatoActivities.value.find(a => a.activity_id == section.activity_id);
 
       const activityPayload = {
         report_id,
         act_name: selectedActivity?.activity || "",
         CoA: section.coa ? parseFloat(section.coa) : null,
-        manpower: manpowerTotal.toString(),
+        manpower: manpowerSummary,
         notes: section.notes || null,
         images: []
       };
@@ -663,6 +730,19 @@ const submitActivityReport = async () => {
         } catch (imgErr) {
           console.error(`⚠️ Error linking activity images:`, imgErr);
         }
+      }
+
+      // ✅ Insert Workers Detail (With Status 'onReview')
+      if (validWorkers.length > 0) {
+        const workerPayloads = validWorkers.map(w => ({
+            activity_id,
+            worker_id: w.worker_id,
+            hours_worked: parseFloat(w.hours),
+            hourly_rate_snapshot: w.hourly_salary,
+            status: 'onReview'
+        }));
+        const { error: wErr } = await supabase.from('gh_activity_worker').insert(workerPayloads);
+        if (wErr) throw wErr;
       }
 
       // Create materials
@@ -701,7 +781,7 @@ function resetForm() {
   planningData.value = null;
   showPlanningSection.value = false;
   typeDamages.value = [{ id: Date.now(), type_damage: "", kuning: 0, kutilang: 0, busuk: 0 }];
-  formSections.value = [{ id: Date.now(), phase_id: "", activity_id: "", coa: "", materials: [{ material_name: "", qty: "", uom: "", unit_price: 0, total_price: 0 }], workers: [{ qty: "" }] }];
+  formSections.value = [{ id: Date.now(), phase_id: "", activity_id: "", coa: "", notes: "", materials: [{ material_name: "", qty: "", uom: "", unit_price: 0, total_price: 0 }], workers: [{ worker_id: "", hours: 0, hourly_salary: 0, role: "" }] }];
   selectedDate.value = new Date().toISOString().split("T")[0];
   typeDamageImages.value = {};
   activityImages.value = {};
@@ -776,6 +856,24 @@ watch(formSections, (sections) => {
   });
 }, { deep: true });
 
+// ✅ Auto-fill Worker Role & Salary
+watch(formSections, (sections) => {
+  sections.forEach(section => {
+    section.workers.forEach(worker => {
+      if (worker.worker_id) {
+        const selectedWorkerData = availableWorkers.value.find(w => w.worker_id == worker.worker_id);
+        if (selectedWorkerData) {
+          worker.role = selectedWorkerData.role;
+          worker.hourly_salary = selectedWorkerData.hourly_salary;
+        }
+      } else {
+        worker.role = "";
+        worker.hourly_salary = 0;
+      }
+    });
+  });
+}, { deep: true });
+
 onMounted(async () => {
   selectedDate.value = new Date().toISOString().split("T")[0];
   try {
@@ -784,6 +882,7 @@ onMounted(async () => {
       batchStore.getBatches(),
       potatoActivityStore.fetchAll(),
       loadApprovalFlowInfo(),
+      loadWorkers()
     ]);
   } catch (error) {
     alert("Gagal memuat data. Silakan refresh.");
@@ -1381,39 +1480,50 @@ onBeforeUnmount(() => stopCamera());
               </button>
             </div>
 
-            <div class="bg-gray-50 rounded-xl p-5">
-              <div class="flex justify-between items-center mb-4">
-                <h4 class="text-base font-bold text-gray-900 flex items-center gap-2">
-                  <span class="text-lg">👷</span>
-                  Jumlah Tenaga Kerja
-                </h4>
-              </div>
-              <div class="space-y-3">
-                <div
-                  v-for="(worker, workerIndex) in section.workers"
-                  :key="workerIndex"
-                  class="flex gap-3 items-end bg-white rounded-lg p-4 border border-gray-200"
-                >
-                  <div class="flex-1 flex flex-col">
-                    <label class="text-xs font-semibold text-gray-600 mb-2">Jumlah Pekerja</label>
-                    <input
-                      type="number"
-                      v-model="worker.qty"
-                      placeholder="0"
-                      class="px-4 py-2.5 border-2 border-gray-200 rounded-lg bg-white text-gray-700 text-sm font-medium focus:outline-none focus:border-[#0071f3] focus:ring-2 focus:ring-[#0071f3]/20 transition"
-                    />
-                  </div>
-
-                  <button
-                    @click="removeWorkerRow(index, workerIndex)"
-                    v-if="section.workers.length > 1"
-                    class="px-4 py-2.5 bg-red-500 hover:bg-red-600 text-white text-sm font-semibold rounded-lg transition shadow-sm hover:shadow"
-                  >
-                    Hapus
-                  </button>
+            <!-- ✅ UPDATED WORKER SECTION -->
+            <div class="bg-orange-50 rounded-xl p-5 border border-orange-100">
+                <div class="flex justify-between items-center mb-4">
+                   <h4 class="text-base font-bold text-gray-900 flex items-center gap-2">
+                      <span class="text-lg">👷</span> Tenaga Kerja (Manpower)
+                   </h4>
+                   <span class="text-sm font-bold text-orange-700 bg-white px-2 py-1 rounded border border-orange-200">
+                     Est. Biaya: {{ formatCurrency(calculateLaborCost(section.workers)) }}
+                   </span>
                 </div>
-              </div>
-            </div>
+
+                <div class="space-y-3">
+                   <div v-for="(worker, wIndex) in section.workers" :key="wIndex" class="flex flex-col md:flex-row gap-3 items-start md:items-end bg-white rounded-lg p-3 border border-orange-200 shadow-sm">
+                      
+                      <div class="flex-1 w-full">
+                         <label class="text-xs font-semibold text-gray-600 mb-1 block">Nama Pekerja</label>
+                         <select v-model="worker.worker_id" class="w-full px-3 py-2 border rounded-lg text-sm focus:border-orange-500 outline-none bg-white">
+                            <option value="">Pilih Pekerja</option>
+                            <option v-for="w in availableWorkers" :key="w.worker_id" :value="w.worker_id">
+                               {{ w.name }}
+                            </option>
+                         </select>
+                      </div>
+
+                      <div class="w-full md:w-1/4">
+                         <label class="text-xs font-semibold text-gray-600 mb-1 block">Jabatan</label>
+                         <input type="text" :value="worker.role || '-'" readonly class="w-full px-3 py-2 border rounded-lg text-sm bg-gray-50 text-gray-500" />
+                      </div>
+
+                      <div class="w-full md:w-1/6">
+                         <label class="text-xs font-semibold text-gray-600 mb-1 block">Jam Kerja</label>
+                         <input type="number" v-model="worker.hours" min="0" step="0.5" class="w-full px-3 py-2 border rounded-lg text-sm focus:border-orange-500 outline-none" placeholder="0" />
+                      </div>
+
+                      <button @click="removeWorkerRow(index, wIndex)" v-if="section.workers.length > 1" class="p-2 bg-red-100 text-red-600 rounded-lg hover:bg-red-200 transition">
+                         <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                      </button>
+                   </div>
+                </div>
+
+                <button @click="addWorkerRow(index)" class="mt-3 text-sm text-orange-600 font-bold hover:text-orange-700 flex items-center gap-1">
+                   + Tambah Pekerja
+                </button>
+             </div>
           </div>
         </div>
       </div>
@@ -1570,7 +1680,6 @@ select {
   padding-right: 2.5rem;
 }
 
-/* QR Scanner styles */
 #qr-reader {
   border: none;
 }
@@ -1606,6 +1715,18 @@ select {
   animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
 }
 
-.animate-fade-in { animation: fadeIn 0.2s ease-out; }
-@keyframes fadeIn { from { opacity: 0; transform: scale(0.95); } to { opacity: 1; transform: scale(1); } }
+.animate-fade-in { 
+  animation: fadeIn 0.2s ease-out; 
+}
+
+@keyframes fadeIn { 
+  from { 
+    opacity: 0; 
+    transform: scale(0.95); 
+  } 
+  to { 
+    opacity: 1; 
+    transform: scale(1); 
+  } 
+}
 </style>

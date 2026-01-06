@@ -145,30 +145,6 @@ const getImageUrl = (imageData) => {
   return imageData?.url || imageData?.supabaseUrl || ''
 }
 
-const downloadCurrentImage = async () => {
-  const currentImgData = imagePreview.value.images[imagePreview.value.currentIndex]
-  const url = getImageUrl(currentImgData)
-  let rawTitle = imagePreview.value.title || 'evidence'
-  const safeTitle = rawTitle.replace(/[^a-z0-9]/gi, '_').toLowerCase()
-  const fileName = `gh-evidence-${safeTitle}-${imagePreview.value.currentIndex + 1}.jpg`
-
-  try {
-    const response = await fetch(url, { method: 'GET', mode: 'cors', cache: 'no-cache' })
-    if (!response.ok) throw new Error('Network response was not ok')
-    const blob = await response.blob()
-    const blobUrl = window.URL.createObjectURL(blob)
-    const link = document.createElement('a')
-    link.href = blobUrl
-    link.download = fileName
-    document.body.appendChild(link)
-    link.click()
-    document.body.removeChild(link)
-    window.URL.revokeObjectURL(blobUrl)
-  } catch (err) {
-    window.open(url, '_blank')
-  }
-}
-
 const handleKeydown = (e) => {
   if (!imagePreview.value.show) return
   if (e.key === 'Escape') closeImagePreview()
@@ -180,6 +156,13 @@ const handleKeydown = (e) => {
 const calculateActivityTotal = (materials) => {
   if (!materials || materials.length === 0) return 0
   return materials.reduce((sum, mat) => sum + (Number(mat.total_price) || 0), 0)
+}
+
+// ✅ Calculate Labor Cost (Fixed to use total_cost if available, or fallback)
+const calculateLaborCost = (workers) => {
+  if (!workers || workers.length === 0) return 0
+  // Cek apakah menggunakan total_cost atau total_wage
+  return workers.reduce((sum, w) => sum + (Number(w.total_cost || w.total_wage) || 0), 0)
 }
 
 const loadPhaseInfo = async (phaseId) => {
@@ -334,9 +317,21 @@ const loadData = async () => {
     loading.value = true;
     await Promise.all([batchStore.getBatches(), locationStore.fetchAll()]);
 
+    // ✅ FIXED QUERY: Reverted to use 'name' and 'role' instead of 'worker_name' and 'role_position'
     const { data: report, error: fetchError } = await supabase
       .from('gh_report')
-      .select(`*, type_damages:gh_type_damage(*), activities:gh_activity(*, materials:gh_material_used(*))`)
+      .select(`
+        *, 
+        type_damages:gh_type_damage(*), 
+        activities:gh_activity(
+          *, 
+          materials:gh_material_used(*),
+          workers:gh_activity_worker(
+            *, 
+            worker:gh_worker(name, role)
+          )
+        )
+      `)
       .eq('report_id', report_id.value)
       .single();
     
@@ -365,11 +360,10 @@ const loadData = async () => {
 };
 
 // ===========================================
-// API PROCESSING LOGIC (FIXED FOR 415)
+// API PROCESSING LOGIC (UPDATED)
 // ===========================================
 
 const createAndProcessMovement = async (materials, activityName) => {
-  // 1. Validasi Awal
   if (!materials || materials.length === 0) {
     return { success: false, errors: 'No materials provided' };
   }
@@ -397,20 +391,18 @@ const createAndProcessMovement = async (materials, activityName) => {
   const clientId = warehouse.client?.id || warehouse.client || DEFAULT_CLIENT_ID;
   
   console.log(`\n${'='.repeat(60)}`);
-  console.log(`🔄 CREATING INTERNAL CONSUMPTION`);
+  console.log(`📄 PROCESSING ACTIVITY: ${activityName}`);
   console.log(`${'='.repeat(60)}`);
 
   try {
-    // ============================================
-    // STEP 1: CREATE HEADER (Masih pakai helper openbravoApi karena ini endpoint standar)
-    // ============================================
-    console.log('🔄 STEP 1: Creating Header...');
-    
+    // =====================================================================
+    // STEP 1: CREATE HEADER (MaterialMgmtInternalConsumption)
+    // =====================================================================
     const now = new Date();
     const movementDate = now.toISOString().split('T')[0];
-    const consumptionName = `GH-${activityName.replace(/[^a-zA-Z0-9]/g, '').substring(0, 20)}-${Date.now()}`;
+    const consumptionName = `GH-${activityName.replace(/[^a-zA-Z0-9]/g, '').substring(0, 15)}-${Date.now()}`;
     
-    const consumptionPayload = {
+    const headerPayload = {
       data: [{
         _entityName: 'MaterialMgmtInternalConsumption',
         organization: orgId,
@@ -422,33 +414,31 @@ const createAndProcessMovement = async (materials, activityName) => {
       }]
     };
 
-    const createRes = await openbravoApi.post('/MaterialMgmtInternalConsumption', consumptionPayload);
-
-    if (createRes.data.response && createRes.data.response.status !== 0) {
-      throw new Error(`Openbravo Reject: ${createRes.data.response.error?.message}`);
-    }
-
-    let consumptionId = null;
-    if (createRes.data && createRes.data.id) {
-      consumptionId = createRes.data.id;
-    } else if (createRes.data.response?.data?.[0]?.id) {
-      consumptionId = createRes.data.response.data[0].id;
-    }
-
-    if (!consumptionId) throw new Error('Gagal mendapatkan ID Header');
-    console.log(`✅ Header Created: ${consumptionId}`);
-
-
-    // ============================================
-    // STEP 2: CREATE LINES (Masih pakai helper)
-    // ============================================
-    console.log('\n🔄 STEP 2: Creating Lines...');
+    console.log('1. Creating Header...');
+    const headerRes = await openbravoApi.post('/MaterialMgmtInternalConsumption', headerPayload);
     
+    if (headerRes.data.response && headerRes.data.response.status !== 0) {
+      throw new Error(`Gagal Buat Header: ${headerRes.data.response.error?.message}`);
+    }
+
+    // ✅ AMBIL ID HEADER
+    let consumptionId = headerRes.data?.response?.data?.[0]?.id || headerRes.data?.id;
+    
+    if (!consumptionId) {
+      throw new Error('Gagal mendapatkan ID Header dari Openbravo');
+    }
+
+    console.log(`✅ Header Created! ID: ${consumptionId}`);
+
+    // =====================================================================
+    // STEP 2: CREATE LINES (MaterialMgmtInternalConsumptionLine)
+    // =====================================================================
     let successCount = 0;
     const errors = [];
 
     for (const material of materials) {
       try {
+        // --- Cari Product ID ---
         const escapedName = material.material_name.replace(/'/g, "''");
         const prodRes = await openbravoApi.get(`/Product`, { 
           params: { _where: `name='${escapedName}'`, _selectedProperties: 'id,name,uOM', _startRow: 0, _endRow: 1 } 
@@ -456,39 +446,37 @@ const createAndProcessMovement = async (materials, activityName) => {
         
         const products = prodRes.data.response?.data || [];
         if (!products.length) {
-          errors.push(`Produk '${material.material_name}' tidak ditemukan`);
+          errors.push(`Produk '${material.material_name}' tidak ditemukan di OB`);
           continue;
         }
 
         const product = products[0];
         let uomId = product.uOM?.id || product.uOM;
 
-        if (material.uom) {
-          const uomRes = await openbravoApi.get(`/UOM`, { params: { _where: `name='${material.uom}'`, _startRow: 0, _endRow: 1 } });
-          const uoms = uomRes?.data?.response?.data || [];
-          if (uoms.length > 0) uomId = uoms[0].id;
-        }
-
-        // Check Stock
+        // --- Cek Stok (Hanya untuk Warning, JANGAN BLOKIR) ---
         const stockRes = await openbravoApi.get(`/MaterialMgmtStorageDetail`, {
           params: { _where: `storageBin='${binId}' AND product='${product.id}'`, _selectedProperties: 'quantityOnHand', _startRow: 0, _endRow: 1 }
         });
-
-        const stockDetails = stockRes?.data?.response?.data || [];
-        const currentStock = stockDetails[0]?.quantityOnHand || 0;
+        const currentStock = stockRes?.data?.response?.data?.[0]?.quantityOnHand || 0;
         const qty = Math.abs(Number(material.qty) || 0);
 
+        // ⚠️ PERUBAHAN DI SINI:
+        // Sebelumnya: if (currentStock < qty) continue; (Ini yang bikin line tidak terbuat)
+        // Sekarang: Hanya console warn, biarkan OB yang handle validasi saat proses
         if (currentStock < qty) {
-          errors.push(`${material.material_name}: Stok kurang (${currentStock}/${qty})`);
-          continue;
+          console.warn(`⚠️ Warning: Stok ${material.material_name} (${currentStock}) kurang dari kebutuhan (${qty}). Tetap mencoba membuat Line.`);
         }
 
+        // --- KONSTRUKSI PAYLOAD LINE ---
         const linePayload = {
           data: [{
-            _entityName: 'MaterialMgmtInternalConsumptionLine',
+            _entityName: 'MaterialMgmtInternalConsumptionLine', 
             organization: orgId,
             client: clientId,
-            internalConsumption: consumptionId,
+            
+            // ✅ LINK KE HEADER YANG BARU DIBUAT
+            internalConsumption: consumptionId, 
+            
             lineNo: (successCount + 1) * 10,
             product: product.id,
             uOM: uomId,
@@ -497,91 +485,86 @@ const createAndProcessMovement = async (materials, activityName) => {
           }]
         };
 
-        const lineRes = await openbravoApi.post(`/MaterialMgmtInternalConsumptionLine`, linePayload);
-        if (lineRes?.data?.response?.status === -1) throw new Error('Failed to create line');
+        console.log(`2. Creating Line for ${material.material_name}...`);
         
-        successCount++;
+        const lineRes = await openbravoApi.post(`/MaterialMgmtInternalConsumptionLine`, linePayload);
+        
+        // Cek Error Response Line
+        if (lineRes?.data?.response?.status === -1) {
+             throw new Error(lineRes?.data?.response?.error?.message || 'Gagal membuat line');
+        }
+        
+        const lineId = lineRes.data?.response?.data?.[0]?.id || lineRes.data?.id;
+        
+        if (lineId) {
+          console.log(`✅ Line Created! ID: ${lineId}`);
+          
+          // --- UPDATE SUPABASE ---
+          await supabase
+            .from('gh_material_used')
+            .update({ 
+              openbravo_id: lineId, 
+              status: 'pending'
+            })
+            .eq('material_used_id', material.material_used_id);
+            
+          successCount++;
+        } else {
+             throw new Error('Line created but ID not returned');
+        }
+
       } catch (err) {
+        console.error(`Error material ${material.material_name}:`, err);
         errors.push(`${material.material_name}: ${err.message}`);
       }
     }
 
     if (successCount === 0) {
+      console.log('Rolling back header (No lines created)...');
       await openbravoApi.delete(`/MaterialMgmtInternalConsumption/${consumptionId}`).catch(() => {});
-      throw new Error(`Gagal insert item: ${errors.join(', ')}`);
+      throw new Error(`Gagal memproses semua item: ${errors.join(', ')}`);
     }
 
-   // ============================================
-    // STEP 3: PROCESS (FIXED: USE LOCALSTORAGE AUTH + AXIOS)
-    // ============================================
-    console.log('\n🔄 STEP 3: Processing (Direct Axios)...');
-    // 1. Gunakan URL Proxy (Sesuai Referensi) untuk hindari CORS
+    // =====================================================================
+    // STEP 3: PROCESS DOCUMENT
+    // =====================================================================
     const endpoint = 'https://mhnproc.pirantisolusi.com/api/process';
-
-    // 2. Gunakan Kredensial Admin (Sesuai instruksi sebelumnya agar permission valid)
-    //    Kita hardcode di sini agar pasti pakai akun admin, bukan akun user login.
     const apiUser = 'admin';
     const apiPass = '$2a$12$IezF1Wq519tcc.x.BA5Ame4OSstZm6kJ8b7u3lhWelwg6/6zr8U3y'; 
-
-    // 3. Generate Basic Auth Token
     const authToken = btoa(unescape(encodeURIComponent(`${apiUser}:${apiPass}`)));
 
-    // 4. Payload (Sesuai Referensi)
     const processPayload = {
       ad_process_id: "800131",
       ad_client_id: String(clientId),
       ad_org_id: String(orgId),
-      data: [
-        { id: String(consumptionId) }
-      ]
+      data: [{ id: String(consumptionId) }] 
     };
 
-    console.log('🔗 Endpoint:', endpoint);
-    console.log('🔑 Auth User:', apiUser); 
-    console.log('📤 Sending Payload:', JSON.stringify(processPayload, null, 2));
-
     try {
-      // 5. Request via Axios
       const processRes = await axios.post(endpoint, processPayload, {
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Basic ${authToken}`
-        },
-        timeout: 60000 // 60 detik
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Basic ${authToken}` },
+        timeout: 60000
       });
 
-      console.log('📥 Response:', JSON.stringify(processRes.data, null, 2));
-
-      // 6. Validasi Response (Sesuai Referensi)
       const resultData = processRes.data?.data?.[0];
       
       if (resultData && resultData.result === 1) {
-        console.log('✅ Processing Success!');
         return {
           success: true,
           movementId: consumptionId,
           successCount,
-          totalMaterials: materials.length,
           errors: errors.length > 0 ? errors : null
         };
       } else {
-        const msg = resultData?.errormsg || 'Unknown Error (Result not 1)';
-        console.error('❌ Processing Failed:', msg);
-        throw new Error(msg);
+        throw new Error(resultData?.errormsg || 'Unknown Error (Result not 1)');
       }
-
     } catch (procErr) {
-      const errorMsg = procErr.response?.data?.error?.message || procErr.message;
-      console.error('❌ API Error:', errorMsg);
-      console.error('❌ Status:', procErr.response?.status);
-      
       return { 
-        success: true, // Header & Lines aman (Step 1 & 2 sukses)
+        success: true, 
         movementId: consumptionId, 
         successCount, 
-        totalMaterials: materials.length,
-        errors: errors.length > 0 ? errors : null,
-        warning: `Processing Failed: ${errorMsg}. Silakan cek dokumen ${consumptionId} manual.`
+        errors: errors,
+        warning: `Draft Created but Processing Failed: ${procErr.message}`
       };
     }
 
@@ -657,6 +640,7 @@ const approveCurrentLevel = async () => {
     if (isFinalLevel) {
       console.log('🎉 FINAL APPROVAL - Processing Internal Consumption...');
       
+      // Update overall status approval record
       await supabase
         .from('gh_approve_record')
         .update({ 
@@ -665,11 +649,13 @@ const approveCurrentLevel = async () => {
         })
         .eq('record_id', currentReport.value.approval_record_id);
       
+      // Update report status
       await supabase
         .from('gh_report')
         .update({ report_status: 'approved' })
         .eq('report_id', currentReport.value.report_id);
 
+      // Approve Type Damages (jika ada)
       if (currentReport.value.type_damages?.length > 0) {
         const damageIds = currentReport.value.type_damages.map(d => d.typedamage_id);
         await supabase
@@ -678,51 +664,62 @@ const approveCurrentLevel = async () => {
           .in('typedamage_id', damageIds);
       }
 
-      // ✅ PROCESS MATERIALS
+      // ✅ PROCESS ACTIVITIES, WORKERS & MATERIALS (UPDATED LOOP)
       const processResults = { total: 0, successful: [], failed: [], manualRequired: [] };
       
       for (const activity of currentReport.value.activities) {
+        // Approve Activity
         await supabase.from('gh_activity').update({ status: 'approved' }).eq('activity_id', activity.activity_id);
         
+        // Approve Workers
+        if (activity.workers?.length > 0) {
+          const workerIds = activity.workers.map(w => w.activity_worker_id);
+          await supabase
+            .from('gh_activity_worker')
+            .update({ status: 'approved' })
+            .in('activity_worker_id', workerIds);
+        }
+        
+        // Process Materials
         if (activity.materials?.length > 0) {
           processResults.total++;
-          console.log(`\n📦 Processing materials for: ${activity.act_name}`);
-          
           const res = await createAndProcessMovement(activity.materials, activity.act_name);
           
           if (res.success) {
+            // A. Update Activity dengan Header ID
             await supabase
               .from('gh_activity')
               .update({ openbravo_movement_id: res.movementId })
               .eq('activity_id', activity.activity_id);
             
+            // B. Update Status Material
             const materialIds = activity.materials.map(m => m.material_used_id);
             await supabase
               .from('gh_material_used')
-              .update({ status: res.warning ? 'pending' : 'consumed', consumed_at: new Date().toISOString() })
+              .update({ 
+                status: res.warning ? 'pending' : 'consumed', 
+                consumed_at: new Date().toISOString() 
+              })
               .in('material_used_id', materialIds);
             
             if (res.warning) {
-              processResults.manualRequired.push({ activity: activity.act_name, movementId: res.movementId, items: res.successCount, warning: res.warning });
+              processResults.manualRequired.push({ activity: activity.act_name, warning: res.warning });
             } else {
-              processResults.successful.push({ activity: activity.act_name, movementId: res.movementId, items: res.successCount });
+              processResults.successful.push({ activity: activity.act_name });
             }
           } else {
-            processResults.failed.push({ activity: activity.act_name, error: res.errors || res.error });
+            processResults.failed.push({ activity: activity.act_name, error: res.errors });
           }
         }
       }
 
-      // Summary Alert
       let message = `✅ REPORT FULLY APPROVED!\n${'='.repeat(30)}\n`;
       if (processResults.successful.length) message += `\n✅ Processed: ${processResults.successful.length} activities`;
       if (processResults.manualRequired.length) message += `\n⚠️ Manual Action: ${processResults.manualRequired.length} activities (Check Openbravo)`;
       if (processResults.failed.length) message += `\n❌ Failed: ${processResults.failed.length} activities`;
-      
       alert(message);
       
     } else {
-      // Next Level
       await supabase
         .from('gh_approve_record')
         .update({ current_level_order: currentLevelOrder + 1 })
@@ -805,12 +802,13 @@ const requestRevisionForLevel = async () => {
       .eq('record_id', currentReport.value.approval_record_id)
       .neq('level_order', currentLevel.level_order);
 
-    // Reset Child Tables
     if (currentReport.value.type_damages?.length) {
       await supabase.from('gh_type_damage').update({ status: 'needRevision' }).in('typedamage_id', currentReport.value.type_damages.map(d => d.typedamage_id));
     }
     if (currentReport.value.activities?.length) {
-      await supabase.from('gh_activity').update({ status: 'needRevision' }).in('activity_id', currentReport.value.activities.map(a => a.activity_id));
+      const activityIds = currentReport.value.activities.map(a => a.activity_id);
+      await supabase.from('gh_activity').update({ status: 'needRevision' }).in('activity_id', activityIds);
+      await supabase.from('gh_activity_worker').update({ status: 'needRevision' }).in('activity_id', activityIds);
     }
 
     await loadData();
@@ -826,7 +824,6 @@ const requestRevisionForLevel = async () => {
   }
 };
 
-// UI Handlers
 const handleRevision = async () => {
   if (revisionModal.value.type === 'level') await requestRevisionForLevel();
   else { alert('Gunakan revision report.'); closeRevisionModal(); }
@@ -1073,7 +1070,7 @@ const reportInfo = computed(() => {
                     </div>
                   </div>
                    <div v-if="damage.images?.length" class="flex gap-2 overflow-x-auto pb-1">
-                     <img v-for="(img, idx) in damage.images" :key="idx" :src="getImageUrl(img)" @click="openImagePreview(damage.images, damage.type_damage, idx)" class="w-10 h-10 rounded object-cover border flex-shrink-0" />
+                     <img v-for="(img, idx) in damage.images" :key="idx" :src="getImageUrl(img)" @click="openImagePreview(damage.images, damage.type_damage, idx)" class="w-10 h-10 rounded object-cover border flex-shrink-0 cursor-pointer hover:opacity-80" />
                    </div>
                 </div>
               </div>
@@ -1093,19 +1090,75 @@ const reportInfo = computed(() => {
                   
                   <div class="flex flex-wrap gap-2 mb-3 text-xs">
                      <span class="px-2 py-1 bg-gray-100 rounded text-gray-600">Manpower: <b>{{ activity.manpower }}</b></span>
-                     <span class="px-2 py-1 bg-green-50 text-green-700 border border-green-100 rounded">Cost: <b>{{ formatCurrency(calculateActivityTotal(activity.materials)) }}</b></span>
+                     <span class="px-2 py-1 bg-green-50 text-green-700 border border-green-100 rounded">Mat Cost: <b>{{ formatCurrency(calculateActivityTotal(activity.materials)) }}</b></span>
+                     <span class="px-2 py-1 bg-orange-50 text-orange-700 border border-orange-100 rounded">Labor Cost: <b>{{ formatCurrency(calculateLaborCost(activity.workers)) }}</b></span>
                   </div>
 
-                  <div v-if="activity.materials?.length" class="bg-gray-50 rounded-lg p-2 border border-gray-100">
-                    <p class="text-[10px] font-bold text-gray-500 uppercase mb-2">Materials Used</p>
-                    <div class="space-y-2">
-                       <div v-for="mat in activity.materials" :key="mat.material_used_id" class="flex justify-between text-xs border-b border-gray-200 pb-1 last:border-0 last:pb-0">
-                          <span class="text-gray-700 truncate max-w-[50%]">{{ mat.material_name }}</span>
-                          <div class="text-right">
-                             <span class="font-bold text-gray-900 mr-1">{{ formatNumber(mat.qty) }} {{ mat.uom }}</span>
-                             <span class="text-[10px] text-gray-400 block">{{ formatCurrency(mat.total_price) }}</span>
-                          </div>
-                       </div>
+                  <div v-if="activity.workers?.length" class="bg-orange-50/50 rounded-lg p-3 border border-orange-100 mb-3">
+                    <p class="text-[10px] font-bold text-orange-800 mb-2 flex items-center gap-1">
+                      <span>👷</span> Rincian Pekerja
+                    </p>
+                    <div class="overflow-x-auto">
+                      <table class="w-full text-xs">
+                        <thead class="text-gray-600 border-b border-orange-200">
+                          <tr>
+                            <th class="text-left pb-2 pr-2">Nama</th>
+                            <th class="text-left pb-2 pr-2">Jabatan</th>
+                            <th class="text-right pb-2 pr-2">Jam</th>
+                            <th class="text-right pb-2 pr-2">Upah/Jam</th>
+                            <th class="text-right pb-2">Total</th>
+                          </tr>
+                        </thead>
+                        <tbody class="divide-y divide-orange-100">
+                          <tr v-for="w in activity.workers" :key="w.activity_worker_id" class="hover:bg-orange-50">
+                            <td class="py-2 pr-2 font-medium text-gray-900">{{ w.worker?.name || 'Unknown' }}</td>
+                            <td class="py-2 pr-2 text-gray-600">{{ w.worker?.role || '-' }}</td>
+                            <td class="py-2 pr-2 text-right font-semibold">{{ formatNumber(w.hours_worked) }}</td>
+                            <td class="py-2 pr-2 text-right text-gray-600">{{ formatCurrency(w.hourly_rate_snapshot) }}</td>
+                            <td class="py-2 text-right font-bold text-orange-700">{{ formatCurrency(w.total_cost || w.total_wage) }}</td>
+                          </tr>
+                        </tbody>
+                        <tfoot class="border-t-2 border-orange-200">
+                          <tr>
+                            <td colspan="4" class="pt-2 text-right font-bold text-gray-700">Total:</td>
+                            <td class="pt-2 text-right font-bold text-orange-700">{{ formatCurrency(calculateLaborCost(activity.workers)) }}</td>
+                          </tr>
+                        </tfoot>
+                      </table>
+                    </div>
+                  </div>
+
+                  <div v-if="activity.materials?.length" class="bg-green-50/50 rounded-lg p-3 border border-green-100">
+                    <p class="text-[10px] font-bold text-green-800 mb-2 flex items-center gap-1">
+                      <span>📦</span> Rincian Material
+                    </p>
+                    <div class="overflow-x-auto">
+                      <table class="w-full text-xs">
+                        <thead class="text-gray-600 border-b border-green-200">
+                          <tr>
+                            <th class="text-left pb-2 pr-2">Nama Material</th>
+                            <th class="text-right pb-2 pr-2">Qty</th>
+                            <th class="text-center pb-2 pr-2">Satuan</th>
+                            <th class="text-right pb-2 pr-2">Harga/Unit</th>
+                            <th class="text-right pb-2">Total</th>
+                          </tr>
+                        </thead>
+                        <tbody class="divide-y divide-green-100">
+                          <tr v-for="mat in activity.materials" :key="mat.material_used_id" class="hover:bg-green-50">
+                            <td class="py-2 pr-2 font-medium text-gray-900">{{ mat.material_name }}</td>
+                            <td class="py-2 pr-2 text-right font-semibold">{{ formatNumber(mat.qty) }}</td>
+                            <td class="py-2 pr-2 text-center text-gray-600">{{ mat.uom }}</td>
+                            <td class="py-2 pr-2 text-right text-gray-600">{{ formatCurrency(mat.unit_price) }}</td>
+                            <td class="py-2 text-right font-bold text-green-700">{{ formatCurrency(mat.total_price) }}</td>
+                          </tr>
+                        </tbody>
+                        <tfoot class="border-t-2 border-green-200">
+                          <tr>
+                            <td colspan="4" class="pt-2 text-right font-bold text-gray-700">Total:</td>
+                            <td class="pt-2 text-right font-bold text-green-700">{{ formatCurrency(calculateActivityTotal(activity.materials)) }}</td>
+                          </tr>
+                        </tfoot>
+                      </table>
                     </div>
                   </div>
                 </div>

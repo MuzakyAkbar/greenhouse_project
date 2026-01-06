@@ -26,7 +26,7 @@ const approvalProgress = ref([])
 const approvalHistory = ref([])
 
 // --- Environment Log State ---
-const envLogData = ref(null) 
+const envLogData = ref(null)
 const sessionLabels = {
   morning: { label: 'Pagi', icon: '🌅', colorClass: 'border-orange-200 bg-orange-50 text-orange-900' },
   noon: { label: 'Siang', icon: '☀️', colorClass: 'border-yellow-200 bg-yellow-50 text-yellow-900' },
@@ -220,13 +220,16 @@ const loadData = async () => {
     loading.value = true
     await Promise.all([batchStore.getBatches(), locationStore.fetchAll()]);
 
-    // 1. Get Report Data
     const { data: report, error: fetchError } = await supabase
       .from('gh_report')
       .select(`
         *,
         type_damages:gh_type_damage(*),
-        activities:gh_activity(*, materials:gh_material_used(*))
+        activities:gh_activity(
+          *, 
+          materials:gh_material_used(*),
+          workers:gh_activity_worker(*, worker:gh_worker(name, role, hourly_salary))
+        )
       `)
       .eq('report_id', report_id.value)
       .single();
@@ -243,7 +246,6 @@ const loadData = async () => {
     }
 
     // 3. Load Approval Record & History
-    // Kita cari record_id di gh_approve_record berdasarkan entity_id (report_id) dan table_name ('gh_report')
     const { data: recordData } = await supabase
       .from('gh_approve_record')
       .select('record_id')
@@ -286,9 +288,40 @@ const calculateActivityTotal = (materials) => {
   if (!materials) return 0
   return materials.reduce((sum, mat) => sum + (Number(mat.total_price) || 0), 0)
 }
+
+// Calculate labor cost
+const calculateLaborCost = (workers) => {
+  if (!workers || workers.length === 0) return 0
+  return workers.reduce((sum, w) => {
+    const hours = Number(w.hours_worked) || 0
+    const salary = Number(w.hourly_rate_snapshot || w.worker?.hourly_salary) || 0
+    return sum + (hours * salary)
+  }, 0)
+}
+
+// Calculate total activity cost (materials + labor)
+const calculateActivityTotalCost = (activity) => {
+  const materialCost = calculateActivityTotal(activity.materials || [])
+  const laborCost = calculateLaborCost(activity.workers || [])
+  return materialCost + laborCost
+}
+
+// Calculate grand total including labor
 const calculateReportTotal = () => {
   if (!currentReport.value?.activities) return 0
+  return currentReport.value.activities.reduce((sum, act) => sum + calculateActivityTotalCost(act), 0)
+}
+
+// Calculate total material cost
+const calculateReportMaterialTotal = () => {
+  if (!currentReport.value?.activities) return 0
   return currentReport.value.activities.reduce((sum, act) => sum + calculateActivityTotal(act.materials), 0)
+}
+
+// Calculate total labor cost
+const calculateReportLaborTotal = () => {
+  if (!currentReport.value?.activities) return 0
+  return currentReport.value.activities.reduce((sum, act) => sum + calculateLaborCost(act.workers), 0)
 }
 
 // ===========================================
@@ -301,12 +334,13 @@ const printReport = async () => {
   const originalTitle = document.title
   document.title = `Report_${currentReport.value.report_id}`
   
-  element.classList.add('printing-mode')
+  element.classList.add('printing-mode') // Class penting untuk styling
+  
   const opt = {
-    margin: [10, 10],
+    margin: [10, 10, 10, 10], // Margin atas, kiri, bawah, kanan (mm)
     filename: `Report_${currentReport.value.report_id}.pdf`,
     image: { type: 'jpeg', quality: 0.98 },
-    html2canvas: { scale: 2, useCORS: true },
+    html2canvas: { scale: 2, useCORS: true, scrollY: 0 },
     jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' }
   }
   
@@ -322,248 +356,168 @@ const printReport = async () => {
 </script>
 
 <template>
-  <div class="min-h-screen bg-gradient-to-br from-gray-50 to-white">
+  <div class="min-h-screen bg-gray-50">
     <div class="bg-white border-b border-gray-200 shadow-sm sticky top-0 z-40 no-print">
-      <div class="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-5">
-        <div class="flex items-center justify-between gap-4">
-          <div class="flex items-center gap-4">
-            <button @click="() => router.push(sourcePage)" class="flex items-center justify-center w-10 h-10 bg-gray-100 hover:bg-gray-200 rounded-lg transition">
-              <svg class="w-5 h-5 text-gray-700" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512" fill="currentColor"><path d="M9.4 233.4c-12.5 12.5-12.5 32.8 0 45.3l160 160c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L109.2 288 416 288c17.7 0 32-14.3 32-32s-14.3-32-32-32l-306.7 0L214.6 118.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0l-160 160z"/></svg>
-            </button>
-            <div>
-              <h1 class="text-2xl font-bold text-gray-900 flex items-center gap-3">
-                <span class="w-10 h-10 bg-gradient-to-br from-green-400 to-green-500 rounded-lg flex items-center justify-center text-white text-lg">✅</span>
-                Lihat Laporan Aktivitas
-              </h1>
-              <p class="text-sm text-gray-500 mt-1">ID Laporan: #{{ report_id }}</p>
-            </div>
-          </div>
-          <button @click="printReport" class="flex items-center gap-2 bg-[#0071f3] hover:bg-[#0060d1] text-white font-semibold px-6 py-2.5 rounded-xl transition-all shadow-md hover:shadow-lg">
-            <svg class="w-4 h-4" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" fill="currentColor"><path d="M128 0C92.7 0 64 28.7 64 64l0 96 64 0 0-96 226.7 0L384 93.3l0 66.7 64 0 0-66.7c0-17-6.7-33.3-18.7-45.3L400 18.7C388 6.7 371.7 0 354.7 0L128 0zM384 352l0 32 0 64-256 0 0-64 0-16 0-16 256 0zm64 32l32 0c17.7 0 32-14.3 32-32l0-96c0-35.3-28.7-64-64-64L64 192c-35.3 0-64 28.7-64 64l0 96c0 17.7 14.3 32 32 32l32 0 0 64c0 35.3 28.7 64 64 64l256 0c35.3 0 64-28.7 64-64l0-64zM432 248a24 24 0 1 1 0 48 24 24 0 1 1 0-48z"/></svg> Cetak PDF
+      <div class="max-w-5xl mx-auto px-4 py-4 flex justify-between items-center">
+        <div class="flex items-center gap-4">
+          <button @click="() => router.push(sourcePage)" class="p-2 bg-gray-100 rounded-lg hover:bg-gray-200">
+             <svg class="w-5 h-5 text-gray-700" fill="currentColor" viewBox="0 0 448 512"><path d="M9.4 233.4c-12.5 12.5-12.5 32.8 0 45.3l160 160c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L109.2 288 416 288c17.7 0 32-14.3 32-32s-14.3-32-32-32l-306.7 0L214.6 118.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0l-160 160z"/></svg>
           </button>
+          <div>
+            <h1 class="text-xl font-bold text-gray-900">Laporan Aktivitas #{{ report_id }}</h1>
+          </div>
         </div>
+        <button @click="printReport" class="flex items-center gap-2 bg-blue-600 text-white px-5 py-2 rounded-lg font-medium hover:bg-blue-700">
+          🖨️ Cetak PDF
+        </button>
       </div>
     </div>
 
-    <div id="print-area" class="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-      <div v-if="loading" class="flex items-center justify-center py-20">
-        <div class="text-center"><div class="inline-block w-12 h-12 border-4 border-[#0071f3] border-t-transparent rounded-full animate-spin"></div><p class="mt-4 text-gray-600 font-semibold">Memuat data laporan...</p></div>
-      </div>
-
-      <div v-else-if="error" class="bg-red-50 border-2 border-red-200 rounded-2xl p-6 mb-6">
-        <div class="flex items-center gap-3"><span class="text-3xl">❌</span><div><p class="font-bold text-red-900">Terjadi Kesalahan</p><p class="text-sm text-red-700 mt-1">{{ error }}</p></div></div>
-      </div>
+    <div id="print-area" class="max-w-5xl mx-auto px-6 py-8 bg-white">
+      
+      <div v-if="loading" class="text-center py-10 no-print">Loading...</div>
+      <div v-else-if="error" class="p-4 bg-red-50 text-red-700 border border-red-200 rounded no-print">{{ error }}</div>
 
       <template v-else-if="currentReport">
         
-        <div class="mb-6 flex justify-center pdf-avoid-break-inside" v-if="currentReport.report_status === 'approved'">
-           <div class="inline-flex items-center gap-2 bg-green-100 text-green-800 px-6 py-3 rounded-xl font-bold text-base shadow-sm border-2 border-green-200">
-            <svg class="w-5 h-5" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512" fill="currentColor"><path d="M438.6 105.4c12.5 12.5 12.5 32.8 0 45.3l-256 256c-12.5 12.5-32.8 12.5-45.3 0l-128-128c-12.5-12.5-12.5-32.8 0-45.3s32.8-12.5 45.3 0L160 338.7 393.4 105.4c12.5-12.5 32.8-12.5 45.3 0z"/></svg> Laporan Telah Disetujui
-          </div>
-        </div>
-
-        <div class="mb-8 pdf-avoid-break-inside">
-           <h2 class="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-3">📋 Informasi Dasar</h2>
-          <div class="bg-white rounded-2xl border-2 border-gray-100 shadow-sm p-6">
-            <div class="grid grid-cols-1 md:grid-cols-3 gap-5">
-              <div class="flex flex-col"><label class="text-sm font-semibold text-gray-700 mb-2">🆔 ID Laporan</label><div class="px-4 py-3 border-2 border-gray-200 rounded-xl bg-gray-50 text-gray-700 font-bold">#{{ currentReport.report_id }}</div></div>
-              <div class="flex flex-col"><label class="text-sm font-semibold text-gray-700 mb-2">📅 Tanggal</label><div class="px-4 py-3 border-2 border-gray-200 rounded-xl bg-gray-50 text-gray-700 font-medium">{{ formatDate(currentReport.report_date) }}</div></div>
-              <div class="flex flex-col"><label class="text-sm font-semibold text-gray-700 mb-2">📍 Lokasi</label><div class="px-4 py-3 border-2 border-gray-200 rounded-xl bg-gray-50 text-gray-700 font-medium">{{ getLocationName(currentReport.location_id) }}</div></div>
+        <div class="mb-6 border-b-2 border-gray-800 pb-4">
+          <div class="flex justify-between items-end">
+            <div>
+              <h1 class="text-2xl font-bold text-gray-900 uppercase tracking-wider">Laporan Aktivitas</h1>
+              <p class="text-sm text-gray-500 mt-1">Potato Grow Management System</p>
             </div>
-            <div class="grid grid-cols-1 md:grid-cols-3 gap-5 mt-5">
-              <div class="flex flex-col"><label class="text-sm font-semibold text-gray-700 mb-2">🏷️ Batch</label><div class="px-4 py-3 border-2 border-gray-200 rounded-xl bg-gray-50 text-gray-700 font-medium">{{ getBatchName(currentReport.batch_id) }}</div></div>
-              <div class="flex flex-col"><label class="text-sm font-semibold text-gray-700 mb-2">🌿 Fase</label><div class="px-4 py-3 border-2 border-gray-200 rounded-xl bg-gray-50 text-gray-700 font-medium">{{ phaseInfo || 'Belum ditentukan' }}</div></div>
-              <div class="flex flex-col"><label class="text-sm font-semibold text-gray-700 mb-2">📊 Status</label><div class="px-4 py-3 border-2 rounded-xl font-bold text-center capitalize" :class="currentReport.report_status === 'approved' ? 'bg-green-50 text-green-800 border-green-200' : 'bg-yellow-50 text-yellow-800 border-yellow-200'">{{ currentReport.report_status }}</div></div>
+            <div class="text-right">
+              <div class="text-3xl font-bold text-gray-200">#{{ currentReport.report_id }}</div>
+              <div class="text-sm font-bold" :class="currentReport.report_status === 'approved' ? 'text-green-600' : 'text-yellow-600'">
+                {{ currentReport.report_status === 'approved' ? 'APPROVED' : currentReport.report_status.toUpperCase() }}
+              </div>
             </div>
           </div>
         </div>
 
-        <div v-if="envLogData" class="mb-8 pdf-avoid-break-inside">
-           <h2 class="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-3 flex items-center gap-2">
-             <span class="text-lg">🌡️</span> Catatan Lingkungan
-           </h2>
-           <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-              <div v-for="sessionKey in ['morning', 'noon', 'afternoon', 'night']" :key="sessionKey" class="rounded-xl border-2 overflow-hidden bg-white shadow-sm pdf-avoid-break-inside" :class="sessionLabels[sessionKey].colorClass">
-                 <div class="p-3 border-b border-black/10 flex justify-between items-center font-bold">
-                    <span class="flex items-center gap-2">{{ sessionLabels[sessionKey].icon }} {{ sessionLabels[sessionKey].label }}</span>
-                    <span class="text-sm bg-white/50 px-2 py-0.5 rounded">{{ envLogData[`time_${sessionKey}`] || '--:--' }}</span>
+        <div class="mb-6 pdf-avoid-break-inside">
+          <h2 class="section-title">Informasi Dasar</h2>
+          <div class="grid grid-cols-3 gap-4 border border-gray-200 rounded-lg p-4 bg-gray-50 print-bg-none">
+            <div><label class="label-text">Tanggal</label><div class="value-text">{{ formatDate(currentReport.report_date) }}</div></div>
+            <div><label class="label-text">Lokasi</label><div class="value-text">{{ getLocationName(currentReport.location_id) }}</div></div>
+            <div><label class="label-text">Batch & Fase</label><div class="value-text">{{ getBatchName(currentReport.batch_id) }} - {{ phaseInfo }}</div></div>
+          </div>
+        </div>
+
+        <div class="mb-6 pdf-avoid-break-inside">
+           <h2 class="section-title">Catatan Lingkungan</h2>
+           
+           <div v-if="envLogData" class="grid grid-cols-4 gap-3">
+              <div v-for="sessionKey in ['morning', 'noon', 'afternoon', 'night']" :key="sessionKey" class="border border-gray-200 rounded p-2 text-center print-border-gray">
+                 <div class="font-bold text-xs uppercase mb-1 border-b pb-1 bg-gray-50 print-bg-none flex justify-between px-1">
+                    <span>{{ sessionLabels[sessionKey].label }}</span>
+                    <span class="text-[10px] text-gray-500 font-normal">{{ envLogData[`time_${sessionKey}`] || '--:--' }}</span>
                  </div>
-                 <div class="p-4 space-y-3">
-                    <div v-for="(param, pKey) in paramLabels" :key="pKey" class="flex justify-between items-start">
-                       <div class="flex-1">
-                          <p class="text-[10px] uppercase font-bold text-gray-400">{{ param.label }}</p>
-                          <p class="text-sm font-bold text-gray-800">{{ envLogData[`${pKey}_${sessionKey}`] }} <span class="text-gray-400 text-xs font-normal" v-if="envLogData[`${pKey}_${sessionKey}`]">{{ param.unit }}</span><span class="text-gray-300" v-else>-</span></p>
+                 
+                 <div class="space-y-1 text-left px-1">
+                    <div v-for="(param, pKey) in paramLabels" :key="pKey" class="flex justify-between items-center text-xs">
+                       <span class="text-gray-500">{{ param.label }}</span>
+                       <div class="flex items-center gap-1">
+                          <span class="font-bold">{{ envLogData[`${pKey}_${sessionKey}`] || '-' }}</span>
+                          <span v-if="envLogData[`${pKey}_${sessionKey}`]" class="text-[9px] font-normal text-gray-400">{{ param.unit }}</span>
+                          <span v-if="envLogData[`img_${pKey}_${sessionKey}`]" class="text-[8px] cursor-pointer no-print" @click="openEnvImagePreview(envLogData[`img_${pKey}_${sessionKey}`], `${sessionLabels[sessionKey].label} - ${param.label}`)">📷</span>
                        </div>
-                       <div v-if="envLogData[`img_${pKey}_${sessionKey}`]" class="w-10 h-10 rounded-lg border overflow-hidden cursor-pointer hover:opacity-80 transition shadow-sm bg-gray-50 flex-shrink-0 no-print-action" @click="openEnvImagePreview(envLogData[`img_${pKey}_${sessionKey}`], `${sessionLabels[sessionKey].label} - ${param.label}`)">
-                         <img :src="envLogData[`img_${pKey}_${sessionKey}`]" class="w-full h-full object-cover">
-                       </div>
-                       <div v-else class="w-10 h-10 rounded-lg border border-dashed border-gray-200 flex items-center justify-center bg-gray-50 flex-shrink-0"><span class="text-[10px] text-gray-300 italic">Tidak ada gambar</span></div>
                     </div>
                  </div>
               </div>
            </div>
+
+           <div v-else class="border border-gray-200 border-dashed rounded-lg p-4 text-center text-gray-400 text-sm italic bg-gray-50 print-bg-none">
+             Tidak ada catatan data lingkungan untuk tanggal ini.
+           </div>
         </div>
 
-        <div v-if="currentReport.type_damages && currentReport.type_damages.length > 0" class="mb-8 pdf-avoid-break-inside"> 
-          <h2 class="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-3">🌾 Kerusakan Tanaman</h2>
-          <div class="space-y-4">
-            <div v-for="damage in currentReport.type_damages" :key="damage.typedamage_id" class="bg-white rounded-2xl border-2 border-gray-100 shadow-sm p-6 pdf-avoid-break-inside">
-              <h3 class="font-bold text-gray-900 text-lg mb-4">{{ damage.type_damage || 'Kerusakan' }}</h3>
-              <div class="grid grid-cols-3 gap-4">
-                <div class="bg-yellow-50 rounded-lg p-4 border-2 border-yellow-200"><p class="text-xs text-yellow-600 font-semibold mb-2">🟡 Kuning</p><p class="text-2xl font-bold text-yellow-900">{{ damage.kuning || 0 }}</p></div>
-                <div class="bg-orange-50 rounded-lg p-4 border-2 border-orange-200"><p class="text-xs text-orange-600 font-semibold mb-2">🟠 Kutilang</p><p class="text-2xl font-bold text-orange-900">{{ damage.kutilang || 0 }}</p></div>
-                <div class="bg-red-50 rounded-lg p-4 border-2 border-red-200"><p class="text-xs text-red-600 font-semibold mb-2">🔴 Busuk</p><p class="text-2xl font-bold text-red-900">{{ damage.busuk || 0 }}</p></div>
-              </div>
-              <div v-if="damage.images && damage.images.length > 0" class="mt-4">
-                <p class="text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">📷 Bukti Foto</p>
-                <div class="flex flex-wrap gap-3">
-                  <div v-for="(img, idx) in damage.images" :key="idx" @click="openImagePreview(damage.images, damage.type_damage, idx)" class="relative w-24 h-24 rounded-lg overflow-hidden cursor-pointer border hover:opacity-90 transition no-print-action">
-                    <img :src="getImageUrl(img)" class="w-full h-full object-cover" loading="lazy"/>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <div v-if="currentReport.activities && currentReport.activities.length > 0" class="mb-8 pdf-page-break-before"> 
-          <h2 class="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-3">⚙️ Detail Aktivitas</h2>
+        <div v-if="currentReport.activities && currentReport.activities.length > 0">
+          <h2 class="section-title mb-4">Detail Aktivitas</h2>
+          
           <div class="space-y-6">
-            <div v-for="(activity, index) in currentReport.activities" :key="activity.activity_id" class="bg-white rounded-2xl border-2 border-gray-100 shadow-sm p-6 pdf-avoid-break-inside">
-              <div class="flex items-center gap-3 mb-6 pb-4 border-b-2 border-gray-100">
-                <div class="w-8 h-8 bg-[#0071f3] rounded-lg flex items-center justify-center text-white font-bold">{{ index + 1 }}</div>
-                <div><h3 class="text-lg font-bold text-gray-900">{{ activity.act_name }}</h3></div>
-              </div>
-              <div class="space-y-5">
-                <div class="grid grid-cols-1 md:grid-cols-2 gap-5">
-                  <div><label class="text-sm font-semibold text-gray-700 mb-2">CoA</label><div class="px-4 py-3 border-2 rounded-xl bg-gray-50 font-medium">{{ activity.CoA || '-' }}</div></div>
-                  <div><label class="text-sm font-semibold text-gray-700 mb-2">Tenaga Kerja</label><div class="px-4 py-3 border-2 rounded-xl bg-gray-50 font-medium text-center">{{ activity.manpower || 0 }} pekerja</div></div>
-                </div>
-                <div v-if="activity.images && activity.images.length > 0" class="mb-2">
-                  <p class="text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">📷 Bukti Aktivitas</p>
-                  <div class="flex flex-wrap gap-3">
-                    <div v-for="(img, idx) in activity.images" :key="idx" @click="openImagePreview(activity.images, activity.act_name, idx)" class="relative w-24 h-24 rounded-lg overflow-hidden cursor-pointer border hover:opacity-90 transition no-print-action">
-                      <img :src="getImageUrl(img)" class="w-full h-full object-cover" loading="lazy"/>
-                    </div>
+            <div v-for="(activity, index) in currentReport.activities" :key="activity.activity_id" class="activity-card mb-6 border-b-2 border-dashed border-gray-300 pb-6">
+              
+              <div class="flex items-start gap-3 mb-3 pdf-avoid-break-inside">
+                <span class="bg-gray-800 text-white w-6 h-6 flex items-center justify-center rounded text-xs font-bold mt-0.5">{{ index + 1 }}</span>
+                <div class="flex-1">
+                  <h3 class="text-lg font-bold text-gray-900 leading-tight">{{ activity.act_name }}</h3>
+                  <div class="flex gap-4 mt-1 text-xs text-gray-600">
+                    <span>CoA: <b>{{ activity.CoA || '-' }}</b></span>
+                    <span>Tenaga: <b>{{ activity.manpower || '0' }} Org</b></span>
                   </div>
                 </div>
-                <div v-if="activity.materials && activity.materials.length > 0" class="bg-blue-50 rounded-xl p-5 border-2 border-blue-200">
-                  <h4 class="text-base font-bold text-blue-900 flex items-center gap-2 mb-4"><span class="text-lg">📦</span>Material ({{ activity.materials.length }})</h4>
-                  <div class="overflow-x-auto">
-                    <table class="w-full text-sm">
-                      <thead><tr class="border-b-2 border-blue-300"><th class="text-left py-2 px-3 font-semibold text-blue-900">Material</th><th class="text-right py-2 px-3 font-semibold text-blue-900">Jumlah</th><th class="text-center py-2 px-3 font-semibold text-blue-900">Satuan</th><th class="text-right py-2 px-3 font-semibold text-blue-900">Total</th></tr></thead>
-                      <tbody>
-                        <tr v-for="mat in activity.materials" :key="mat.material_used_id" class="border-b border-blue-200 bg-white"><td class="py-3 px-3 font-semibold">{{ mat.material_name }}</td><td class="py-3 px-3 text-right">{{ formatNumber(mat.qty) }}</td><td class="py-3 px-3 text-center text-gray-600">{{ mat.uom }}</td><td class="py-3 px-3 text-right font-bold text-blue-700">{{ formatCurrency(mat.total_price || 0) }}</td></tr>
-                      </tbody>
-                    </table>
-                  </div>
+                <div class="text-right">
+                   <span class="block text-xs text-gray-500">Total Biaya</span>
+                   <span class="text-lg font-bold text-gray-900">{{ formatCurrency(calculateActivityTotalCost(activity)) }}</span>
                 </div>
               </div>
+
+              <div class="pl-9 space-y-4">
+                <div v-if="activity.materials && activity.materials.length > 0" class="pdf-avoid-break-inside">
+                  <div class="text-xs font-bold text-gray-500 uppercase mb-1 border-l-4 border-blue-500 pl-2">Material</div>
+                  <table class="w-full text-xs border-collapse">
+                    <thead class="bg-gray-100 print-bg-gray">
+                      <tr>
+                        <th class="p-2 text-left border border-gray-300 w-1/2">Item</th>
+                        <th class="p-2 text-right border border-gray-300">Qty</th>
+                        <th class="p-2 text-right border border-gray-300">Total</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr v-for="mat in activity.materials" :key="mat.material_used_id" class="pdf-avoid-break-inside">
+                        <td class="p-2 border border-gray-300">{{ mat.material_name }} <span class="text-gray-400 text-[10px]">({{ mat.uom }})</span></td>
+                        <td class="p-2 border border-gray-300 text-right">{{ formatNumber(mat.qty) }}</td>
+                        <td class="p-2 border border-gray-300 text-right font-medium">{{ formatCurrency(mat.total_price) }}</td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+
+                <div v-if="activity.workers && activity.workers.length > 0" class="pdf-avoid-break-inside">
+                  <div class="text-xs font-bold text-gray-500 uppercase mb-1 border-l-4 border-orange-500 pl-2">Tenaga Kerja</div>
+                  <table class="w-full text-xs border-collapse">
+                    <thead class="bg-gray-100 print-bg-gray">
+                      <tr>
+                        <th class="p-2 text-left border border-gray-300 w-1/2">Nama</th>
+                        <th class="p-2 text-right border border-gray-300">Jam</th>
+                        <th class="p-2 text-right border border-gray-300">Total</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr v-for="w in activity.workers" :key="w.activity_worker_id" class="pdf-avoid-break-inside">
+                        <td class="p-2 border border-gray-300">
+                          {{ w.worker?.name }} 
+                          <span class="block text-[10px] text-gray-500">{{ w.worker?.role }}</span>
+                        </td>
+                        <td class="p-2 border border-gray-300 text-right">{{ formatNumber(w.hours_worked) }}</td>
+                        <td class="p-2 border border-gray-300 text-right font-medium">
+                          {{ formatCurrency((w.hours_worked || 0) * (w.hourly_rate_snapshot || w.worker?.hourly_salary || 0)) }}
+                        </td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
             </div>
           </div>
         </div>
 
-        <div v-if="currentReport.activities && currentReport.activities.some(a => a.materials && a.materials.length > 0)" class="mb-8 pdf-avoid-break-inside">
-          <div class="bg-gradient-to-br from-green-50 to-emerald-50 rounded-2xl border-2 border-green-200 shadow-sm p-6 flex justify-between items-center">
-            <div class="flex items-center gap-4"><div class="w-12 h-12 bg-green-500 rounded-xl flex items-center justify-center text-white text-2xl">💰</div><div><p class="text-sm text-green-600 font-semibold">Total Biaya Keseluruhan</p><p class="text-xs text-green-700">Total biaya material</p></div></div>
-            <p class="text-3xl font-bold text-green-700">{{ formatCurrency(calculateReportTotal()) }}</p>
-          </div>
-        </div>
-        
-        <div v-if="approvalProgress.length > 0" class="mb-8 pdf-avoid-break-inside">
-          <h2 class="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-3">📊 Riwayat Persetujuan</h2>
-          <div class="bg-white rounded-2xl border-2 border-gray-100 shadow-sm p-6">
-            <div class="space-y-3">
-              <div 
-                v-for="level in approvalProgress" 
-                :key="level.level_status_id" 
-                class="flex items-start gap-4 p-4 rounded-lg" 
-                :class="{
-                  'bg-green-50 border-2 border-green-200': level.level_status === 'approved', 
-                  'bg-yellow-50 border-2 border-yellow-200': level.level_status === 'pending', 
-                  'bg-red-50 border-2 border-red-200': level.level_status === 'needRevision', 
-                  'bg-gray-50 border-2 border-gray-200': level.level_status === 'skipped'
-                }"
-              >
-                <div 
-                  class="w-10 h-10 rounded-full flex items-center justify-center font-bold text-white flex-shrink-0" 
-                  :class="{
-                    'bg-green-500': level.level_status === 'approved', 
-                    'bg-yellow-500': level.level_status === 'pending', 
-                    'bg-red-500': level.level_status === 'needRevision', 
-                    'bg-gray-400': level.level_status === 'skipped'
-                  }"
-                >
-                  {{ level.level_order }}
-                </div>
-                
-                <div class="flex-1">
-                  <p class="font-bold text-gray-900">{{ level.level_name || `Level ${level.level_order}` }}</p>
-                  
-                  <p class="text-sm text-gray-600">
-                    <span v-if="level.level_status === 'approved'">✅ Disetujui oleh {{ level.approver_name || 'Admin' }}</span>
-                    <span v-else-if="level.level_status === 'needRevision'">🔄 Revisi diminta oleh {{ level.revisor_name || 'Admin' }}</span>
-                    <span v-else-if="level.level_status === 'pending'">⏳ Menunggu Persetujuan</span>
-                    <span v-else>⏭️ Dilewati</span>
-                  </p>
-                  
-                  <p v-if="level.approved_at" class="text-xs text-gray-500 mt-1">{{ formatDateTime(level.approved_at) }}</p>
-                  
-                  <div v-if="approvalHistory.length > 0" class="mt-3 space-y-2">
-                    <template v-for="history in approvalHistory.filter(h => h.level_order === level.level_order)" :key="history.history_id">
-                      
-                      <div v-if="history.action === 'approved'" class="p-3 bg-white border-2 border-green-300 rounded-lg shadow-sm">
-                        <div class="flex items-start justify-between mb-2">
-                          <div class="flex items-center gap-2">
-                            <svg class="w-4 h-4 text-green-600" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" fill="currentColor">
-                              <path d="M256 512A256 256 0 1 0 256 0a256 256 0 1 0 0 512zM369 209L241 337c-9.4 9.4-24.6 9.4-33.9 0l-64-64c-9.4-9.4-9.4-24.6 0-33.9s24.6-9.4 33.9 0l47 47L335 175c9.4-9.4 24.6-9.4 33.9 0s9.4 24.6 0 33.9z"/>
-                            </svg>
-                            <p class="text-xs font-bold text-green-700">Komentar oleh {{ history.user_name }}</p>
-                          </div>
-                          <p class="text-xs text-gray-500">{{ formatDateTime(history.action_at) }}</p>
-                        </div>
-                        <p class="text-sm text-gray-700 whitespace-pre-wrap pl-6">{{ history.comment || 'Tidak ada komentar' }}</p>
-                      </div>
-                      
-                      <div v-if="history.action === 'revision_requested'" class="p-3 bg-white border-2 border-red-300 rounded-lg shadow-sm">
-                        <div class="flex items-start justify-between mb-2">
-                          <div class="flex items-center gap-2">
-                            <span class="text-red-600 font-bold">🔄</span>
-                            <p class="text-xs font-bold text-red-700">Revisi diminta oleh {{ history.user_name }}</p>
-                          </div>
-                          <p class="text-xs text-gray-500">{{ formatDateTime(history.action_at) }}</p>
-                        </div>
-                        <p class="text-sm text-gray-700 whitespace-pre-wrap pl-6">{{ history.comment || 'Tidak ada catatan' }}</p>
-                      </div>
-                      
-                      <div v-if="history.action === 'submitted'" class="p-3 bg-white border-2 border-blue-300 rounded-lg shadow-sm">
-                        <div class="flex items-start justify-between mb-2">
-                          <div class="flex items-center gap-2">
-                            <svg class="w-4 h-4 text-blue-600" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" fill="currentColor">
-                              <path d="M16.1 260.2c-22.6 12.9-20.5 47.3 3.6 57.3L160 376l0 103.3c0 18.1 14.6 32.7 32.7 32.7c9.7 0 18.9-4.3 25.1-11.8l62-74.3 123.9 51.6c18.9 7.9 40.8-4.5 43.9-24.7l64-416c1.9-12.1-3.4-24.3-13.5-31.2s-23.3-7.5-34-1.4l-448 256zm52.1 25.5L409.7 90.6 190.1 336l1.2 1L68.2 285.7zM403.3 425.4L236.7 355.9 450.8 116.6 403.3 425.4z"/>
-                            </svg>
-                            <p class="text-xs font-bold text-blue-700">Diajukan oleh {{ history.user_name }}</p>
-                          </div>
-                          <p class="text-xs text-gray-500">{{ formatDateTime(history.action_at) }}</p>
-                        </div>
-                        <p class="text-sm text-gray-700 whitespace-pre-wrap pl-6">{{ history.comment || 'Laporan diajukan untuk persetujuan' }}</p>
-                      </div>
-                      
-                    </template>
-                  </div>
-                </div>
-                
-                <span 
-                  class="px-3 py-1 rounded-lg font-bold text-xs border-2 whitespace-nowrap self-start" 
-                  :class="{
-                    'bg-green-100 text-green-800 border-green-200': level.level_status === 'approved', 
-                    'bg-yellow-100 text-yellow-800 border-yellow-200': level.level_status === 'pending', 
-                    'bg-red-100 text-red-800 border-red-200': level.level_status === 'needRevision', 
-                    'bg-gray-100 text-gray-800 border-gray-200': level.level_status === 'skipped'
-                  }"
-                >
-                  {{ level.level_status === 'approved' ? '✅ Approved' : level.level_status === 'needRevision' ? '🔄 Revision' : level.level_status === 'skipped' ? '⏭️ Skipped' : '⏳ Pending' }}
-                </span>
+        <div class="mt-4 border-t-4 border-gray-800 pt-4 pdf-avoid-break-inside">
+          <div class="flex justify-end">
+            <div class="w-full md:w-1/2">
+              <div class="flex justify-between py-2 border-b border-gray-200">
+                <span class="text-sm text-gray-600">Total Material</span>
+                <span class="font-bold">{{ formatCurrency(calculateReportMaterialTotal()) }}</span>
+              </div>
+              <div class="flex justify-between py-2 border-b border-gray-200">
+                <span class="text-sm text-gray-600">Total Tenaga Kerja</span>
+                <span class="font-bold">{{ formatCurrency(calculateReportLaborTotal()) }}</span>
+              </div>
+              <div class="flex justify-between py-3 items-center mt-2">
+                <span class="text-base font-bold text-gray-900 uppercase">Grand Total</span>
+                <span class="text-2xl font-bold text-gray-900 bg-yellow-100 px-2 print-bg-none">{{ formatCurrency(calculateReportTotal()) }}</span>
               </div>
             </div>
           </div>
@@ -571,39 +525,110 @@ const printReport = async () => {
 
       </template>
     </div>
-
+    
     <div v-if="imagePreview.show" class="fixed inset-0 z-[60] flex items-center justify-center bg-black bg-opacity-90 backdrop-blur-sm no-print" @click.self="closeImagePreview">
       <div class="absolute top-6 right-6 flex gap-3">
-        <button @click.stop="downloadCurrentImage" class="text-white hover:text-gray-300 p-2"><svg class="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path></svg></button>
-        <button @click="closeImagePreview" class="text-white hover:text-gray-300 p-2"><svg class="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg></button>
+        <button @click.stop="downloadCurrentImage" class="text-white hover:text-gray-300 p-2 bg-white/10 hover:bg-white/20 rounded-full transition" title="Download">
+          <svg class="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path></svg>
+        </button>
+        <button @click="closeImagePreview" class="text-white hover:text-gray-300 p-2 bg-white/10 hover:bg-white/20 rounded-full transition">
+          <svg class="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+        </button>
       </div>
-      <button v-if="imagePreview.images.length > 1" @click.stop="prevImage" class="absolute left-4 text-white hover:text-gray-300 p-3">‹</button>
+      <button v-if="imagePreview.images.length > 1" @click.stop="prevImage" class="absolute left-4 md:left-8 text-white hover:text-gray-300 p-3 rounded-full bg-white/10 hover:bg-white/20 transition text-4xl">‹</button>
       <div class="relative max-w-7xl max-h-[85vh] p-4 flex flex-col items-center">
-        <img :src="getImageUrl(imagePreview.images[imagePreview.currentIndex])" class="max-w-full max-h-[80vh] rounded-lg shadow-xl object-contain"/>
-        <div class="mt-4 text-center"><p class="text-white font-bold text-lg">{{ imagePreview.title }}</p><p class="text-gray-400 text-sm">Gambar {{ imagePreview.currentIndex + 1 }} dari {{ imagePreview.images.length }}</p></div>
-      </div>
-      <button v-if="imagePreview.images.length > 1" @click.stop="nextImage" class="absolute right-4 text-white hover:text-gray-300 p-3">›</button>
-    </div>
-    <footer class="text-center py-10 mt-16 border-t border-gray-200">
-        <div class="flex items-center justify-center gap-2 mb-2">
-           <span class="w-6 h-6 p-0.5">
-             <img :src="logoPG" alt="Logo Potato Grow" class="w-full h-full object-contain" />
-          </span>
-          <p class="text-gray-400 font-bold text-sm">POTATO GROW</p>
+        <img :src="getImageUrl(imagePreview.images[imagePreview.currentIndex])" class="max-w-full max-h-[80vh] rounded-lg shadow-2xl object-contain select-none"/>
+        <div class="mt-4 text-center">
+          <p class="text-white font-bold text-lg md:text-xl">{{ imagePreview.title }}</p>
+          <p class="text-gray-400 text-sm mt-1">Gambar {{ imagePreview.currentIndex + 1 }} dari {{ imagePreview.images.length }}</p>
         </div>
-        <p class="text-gray-400 text-xs">© 2025 Hak Cipta Dilindungi</p>
-      </footer>
+      </div>
+      <button v-if="imagePreview.images.length > 1" @click.stop="nextImage" class="absolute right-4 md:right-8 text-white hover:text-gray-300 p-3 rounded-full bg-white/10 hover:bg-white/20 transition text-4xl">›</button>
+    </div>
+
   </div>
 </template>
 
 <style scoped>
-#print-area.printing-mode { font-size: 12px; }
+/* GENERAL STYLES */
+.section-title {
+  font-size: 14px;
+  font-weight: 700;
+  text-transform: uppercase;
+  color: #374151;
+  border-bottom: 2px solid #e5e7eb;
+  padding-bottom: 4px;
+  margin-bottom: 12px;
+}
+.label-text {
+  font-size: 11px;
+  font-weight: 600;
+  color: #6b7280;
+  display: block;
+}
+.value-text {
+  font-size: 14px;
+  font-weight: 600;
+  color: #111827;
+}
+
+/* PRINTING MODE STYLES */
+/* Style ini aktif saat class 'printing-mode' ditambahkan oleh JS */
+#print-area.printing-mode {
+  background-color: white !important;
+  color: black !important;
+  font-family: Arial, sans-serif;
+  padding: 0 !important;
+}
+
+/* Menghilangkan Shadow dan Background saat Print agar bersih */
+#print-area.printing-mode .shadow-sm,
+#print-area.printing-mode .shadow-md,
+#print-area.printing-mode .shadow-lg {
+  box-shadow: none !important;
+}
+
+#print-area.printing-mode .bg-gray-50,
+#print-area.printing-mode .bg-blue-50,
+#print-area.printing-mode .bg-yellow-50 {
+  background-color: transparent !important; /* Hemat tinta */
+}
+
+/* Force border visible saat print */
+#print-area.printing-mode .print-bg-gray {
+  background-color: #f3f4f6 !important;
+  -webkit-print-color-adjust: exact; 
+}
+
+/* PAGE BREAK CONTROL - SANGAT PENTING */
+.pdf-avoid-break-inside {
+  page-break-inside: avoid !important;
+  break-inside: avoid !important;
+}
+
+tr {
+  page-break-inside: avoid !important;
+  break-inside: avoid !important;
+}
+
+/* Pastikan tabel tidak terpotong header-nya */
+thead {
+  display: table-header-group; 
+}
+tfoot {
+  display: table-footer-group;
+}
+
+/* Mengatur ukuran font khusus saat print agar muat lebih banyak */
+#print-area.printing-mode {
+  font-size: 12px; 
+}
+#print-area.printing-mode h1 { font-size: 20px; }
+#print-area.printing-mode h2 { font-size: 14px; }
+#print-area.printing-mode h3 { font-size: 14px; }
+#print-area.printing-mode table { font-size: 10px; }
+
 @media print {
   .no-print { display: none !important; }
-  .no-print-action { pointer-events: none; }
-  #print-area { background: white !important; box-shadow: none !important; }
-  body { background: white !important; }
-  .pdf-avoid-break-inside { page-break-inside: avoid; }
-  .pdf-page-break-before { page-break-before: always; }
 }
 </style>

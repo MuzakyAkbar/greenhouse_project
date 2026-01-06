@@ -298,28 +298,6 @@
             </tfoot>
           </table>
         </div>
-        <!-- WARNING MESSAGE -->
-        <div
-          v-if="hasShortage"
-          class="mt-6 bg-amber-50 border border-amber-200 rounded-xl p-4"
-        >
-          <div class="flex items-start gap-3">
-            <div class="text-amber-500 text-xl">⚠️</div>
-            <div>
-              <h4 class="font-semibold text-amber-800">
-                Perhatian: Terdapat Kekurangan Barang
-              </h4>
-              <p class="text-amber-700 text-sm mt-1">
-                Terdapat {{ shortageCount }} item dengan kekurangan jumlah.
-                <span class="font-semibold"
-                  >Data yang masuk ke OpenBravo akan menggunakan jumlah
-                  request</span
-                >, sedangkan data di sistem internal mencatat jumlah sebenarnya.
-              </p>
-            </div>
-          </div>
-        </div>
-
         <!-- ACTION BUTTONS -->
         <div
           class="mt-8 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4"
@@ -335,17 +313,9 @@
                 class="w-4 h-4"
               />
               <span
-                ><strong
-                  >Saya telah memastikan data dengan benar dengan kepala gudang
-                  / manager!</strong
-                ></span
+                ><strong>Saya telah memastikan data dengan benar</strong></span
               >
             </label>
-            <p>• Data penerimaan akan disimpan di Supabase</p>
-            <p>• Data untuk OpenBravo akan menggunakan jumlah request</p>
-            <p v-if="hasShortage">
-              • Kekurangan akan dicatat untuk berita acara
-            </p>
           </div>
 
           <div
@@ -370,30 +340,34 @@
                 ></span>
                 Menyimpan...
               </span>
-              <span v-else>Simpan Penerimaan</span>
+              <span v-else>Simpan</span>
             </button>
           </div>
         </div>
       </form>
-    </div>
-    <footer class="text-center py-10 mt-16 border-t border-gray-200">
+
+      <footer class="text-center py-10 mt-16 border-t border-gray-200">
         <div class="flex items-center justify-center gap-2 mb-2">
-           <span class="w-6 h-6 p-0.5">
-             <img :src="logoPG" alt="Potato Grow Logo" class="w-full h-full object-contain" />
+          <span class="w-6 h-6 p-0.5">
+            <img :src="logoPG" alt="Logo Potato Grow" class="w-full h-full object-contain" />
           </span>
           <p class="text-gray-400 font-bold text-sm">POTATO GROW</p>
         </div>
-        <p class="text-gray-400 text-xs">© 2025 All Rights Reserved</p>
+        <p class="text-gray-400 text-xs">© 2025 Hak Cipta Dilindungi</p>
       </footer>
+
+    </div>
   </div>
 </template>
 
 <script setup>
+import axios from 'axios';
 import { ref, computed, onMounted } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { supabase } from "@/lib/supabase";
+import openbravoApi from "@/lib/openbravo";
 import { useAuthStore } from "@/stores/auth";
-import logoPG from '../assets/logoPG.svg'
+import logoPG from "@/assets/logoPG.svg";
 
 const route = useRoute();
 const router = useRouter();
@@ -414,13 +388,16 @@ const receivingHistory = ref(null);
 
 // ⭐ COMPUTED UNTUK DISABLE FORM
 const isFormDisabled = computed(() => {
-  return isAlreadyReceived.value || 
-         user.role === 'kepalagudang' || 
-         user.role === 'manager';
+  return (
+    isAlreadyReceived.value ||
+    user.role === "kepalagudang" ||
+    user.role === "manager"
+  );
 });
 
 // --- COMPUTED PROPERTIES ---
 const totalRequested = computed(() => {
+  console.log(formRows.value);
   return formRows.value.reduce(
     (sum, row) => sum + (Number(row.qty_request) || 0),
     0
@@ -458,8 +435,8 @@ const isFormValid = computed(() => {
 
 const receivingStatus = computed(() => {
   if (isAlreadyReceived.value) return "Sudah Diterima";
-  if (totalReceived.value === 0) return "Belum Mulai";
-  if (hasShortage.value) return "Parsial";
+  if (totalReceived.value === 0) return "Belum Diterima";
+  if (hasShortage.value) return "Kurang";
   if (totalReceived.value === totalRequested.value) return "Lengkap";
   return "Dalam Proses";
 });
@@ -489,8 +466,8 @@ const headerStatusBadge = computed(() => {
 
 const overallStatusText = computed(() => {
   if (isAlreadyReceived.value) return "SUDAH DITERIMA";
-  if (totalReceived.value === 0) return "BELUM DIMULAI";
-  if (hasShortage.value) return "PARSIAL";
+  if (totalReceived.value === 0) return "BELUM DITERIMA";
+  if (hasShortage.value) return "Kurang";
   if (totalReceived.value === totalRequested.value) return "LENGKAP";
   return "DALAM PROSES";
 });
@@ -508,6 +485,18 @@ const overallStatusClass = computed(() => {
 const formatNumber = (value) => {
   if (value === null || value === undefined) return "0";
   return new Intl.NumberFormat("id-ID").format(value);
+};
+
+const updateStockAfterReceiving = async () => {
+  // 🔒 STOK DIKELOLA OLEH OPENBRAVO
+  // Supabase TIDAK menyimpan stok fisik
+  // Fungsi ini sengaja dikosongkan agar flow tidak error
+
+  console.log(
+    "ℹ️ updateStockAfterReceiving dilewati (stok dikelola OpenBravo)"
+  );
+
+  return true;
 };
 
 const formatDate = (dateString) => {
@@ -555,7 +544,7 @@ const getRowStatusText = (row) => {
 
 const autoFillAll = () => {
   if (isFormDisabled.value) return;
-  
+
   formRows.value.forEach((row) => {
     row.qty_received = row.qty_request;
     calculateShortage(row);
@@ -565,58 +554,105 @@ const autoFillAll = () => {
 // ------------------------------------------------------------------
 // FUNGSI HELPER UNTUK CEK STATUS DATA
 // ------------------------------------------------------------------
+const getOrCreateLocationIdFromObWarehouse = async (obWarehouseId, name) => {
+  const { data } = await supabase
+    .from("gh_location")
+    .select("location_id")
+    .eq("id_openbravo", obWarehouseId)
+    .maybeSingle();
+
+  if (data?.location_id) return data.location_id;
+
+  const { data: inserted, error } = await supabase
+    .from("gh_location")
+    .insert({
+      id_openbravo: obWarehouseId,
+      location: name || "(Unknown)",
+    })
+    .select("location_id")
+    .single();
+
+  if (error) {
+    console.error("Gagal membuat lokasi baru:", error);
+    throw error;
+  }
+
+  return inserted.location_id;
+};
+
+const getDefaultStorageBinByWarehouse = async (warehouseId) => {
+  const res = await openbravoApi.get(`/Locator`, {
+    params: {
+      _where: `warehouse='${warehouseId}'`,
+      _selectedProperties: "id,_identifier,default",
+    },
+  });
+
+  const bins = res.data?.response?.data || [];
+
+  if (!bins.length) {
+    throw new Error("Storage Bin tidak ditemukan untuk warehouse ini");
+  }
+
+  // 1️⃣ cari default
+  const defaultBin = bins.find((b) => b.default === true);
+
+  // 2️⃣ fallback ke bin pertama
+  return defaultBin || bins[0];
+};
 
 // Fungsi untuk cek apakah ada data pending di localStorage
 const checkPendingData = () => {
   const pendingData = localStorage.getItem("movementReceiving");
-  
+
   if (pendingData) {
     const data = JSON.parse(pendingData);
-    
+
     if (data.is_pending_database) {
-      console.warn("⚠️ Ditemukan data pending yang belum masuk database");
+      console.warn("⚠️ Ditemukan data pending yang belum masuk");
       console.log("Movement ID:", data.movement_id);
       console.log("Created at:", data.created_at);
       return data;
     }
   }
-  
+
   return null;
 };
 
 // Fungsi untuk restore data jika user kembali ke halaman receiving
 const restorePendingData = () => {
   const pendingData = checkPendingData();
-  
+
   if (pendingData && pendingData.movement_id === movementId.value) {
     console.log("♻️ Restoring pending data...");
-    
+
     // Restore formRows dengan data yang sudah diinput sebelumnya
-    formRows.value = pendingData.items.map(item => ({
+    formRows.value = pendingData.items.map((item) => ({
       id: item.id,
       movement_item_id: item.movement_item_id,
       material_used_id: item.material_used_id,
       material_code: item.material_code,
       material_name: item.material_name,
+      uomId: item.uomId,
       uom: item.uom,
       qty_request: item.qty_request,
       qty_received: item.qty_received,
       qty_shortage: item.qty_shortage,
       notes: item.notes,
     }));
-    
+
     return true;
   }
-  
+
   return false;
 };
 
-// ⭐ FUNGSI CEK STATUS PENERIMAAN
 const checkReceivingStatus = async () => {
   try {
     const { data: existing, error } = await supabase
-      .from('gh_movement_receiving')
-      .select(`
+      .from("gh_movement_receiving")
+      .select(
+        `
         *,
         gh_movement_receiving_item (
           *,
@@ -626,13 +662,16 @@ const checkReceivingStatus = async () => {
             uom
           )
         )
-      `)
-      .eq('movement_id', movementId.value)
+      `
+      )
+      .eq("movement_id", movementId.value)
       .maybeSingle();
 
-    if (error && error.code !== 'PGRST116') {
+    if (error && error.code !== "PGRST116") {
       throw error;
     }
+
+    console.log("Existing receiving data:", existing);
 
     if (existing) {
       // Sudah pernah diterima
@@ -645,13 +684,13 @@ const checkReceivingStatus = async () => {
           id: item.receiving_item_id,
           movement_item_id: item.movement_item_id,
           material_used_id: item.material_used_id,
-          material_code: item.gh_material_used?.openbravo_id || '-',
-          material_name: item.gh_material_used?.material_name || '-',
-          uom: item.gh_material_used?.uom || 'pcs',
+          material_code: item.gh_material_used?.openbravo_id || "-",
+          material_name: item.gh_material_used?.material_name || "-",
+          uom: item.gh_material_used?.uom || "pcs",
           qty_request: item.qty_requested,
           qty_received: item.qty_received,
           qty_shortage: item.qty_shortage,
-          notes: item.notes || '',
+          notes: item.notes || "",
         }));
       }
 
@@ -663,12 +702,11 @@ const checkReceivingStatus = async () => {
       await loadMovementData();
     }
   } catch (error) {
-    console.error('Error checking receiving status:', error);
-    alert('Gagal mengecek status penerimaan');
+    console.error("Error checking receiving status:", error);
+    alert("Gagal mengecek status penerimaan");
   }
 };
 
-// ⭐ FUNGSI LOAD HEADER SAJA (untuk mode read-only)
 const loadHeaderOnly = async () => {
   try {
     const { data: movement, error: moveError } = await supabase
@@ -681,6 +719,8 @@ const loadHeaderOnly = async () => {
       throw new Error("Movement tidak ditemukan di Supabase.");
     }
 
+    console.log("Loaded movement:", movement);
+
     const { data: locations } = await supabase
       .from("gh_location")
       .select("location_id, location, id_openbravo");
@@ -688,11 +728,17 @@ const loadHeaderOnly = async () => {
     const findLocationName = (idOrUuid) => {
       if (!idOrUuid || !locations) return "Unknown";
       const found = locations.find(
-        (loc) =>
-          loc.location_id == idOrUuid || 
-          loc.id_openbravo == idOrUuid
+        (loc) => loc.location_id == idOrUuid || loc.id_openbravo == idOrUuid
       );
       return found ? found.location : `ID: ${idOrUuid}`;
+    };
+
+    const findLocationId = (idOrUuid) => {
+      if (!idOrUuid || !locations) return "Unknown";
+      const found = locations.find(
+        (loc) => loc.location_id == idOrUuid || loc.id_openbravo == idOrUuid
+      );
+      return found ? found.id_openbravo : `ID: ${idOrUuid}`;
     };
 
     header.value = {
@@ -700,11 +746,16 @@ const loadHeaderOnly = async () => {
       code: movement.reference_no || `MOV-${movement.movement_id}`,
       from_location: findLocationName(movement.source_location_id),
       to_location: findLocationName(movement.target_location_id),
+      from_location_id_ob: findLocationId(movement.source_location_id),
+      to_location_id_ob: findLocationId(movement.target_location_id),
       requested_by: movement.created_by,
       requested_at: movement.created_at,
+      uomId: movement.uom_id,
       status: movement.status,
       receive_status: movement.receive_status,
     };
+
+    console.log("Header: ", header);
   } catch (error) {
     console.error("Error loading header:", error);
   }
@@ -716,7 +767,7 @@ const loadMovementData = async () => {
 
   try {
     loading.value = true;
-    
+
     const { data: movement, error: moveError } = await supabase
       .from("gh_movement")
       .select("*")
@@ -727,6 +778,8 @@ const loadMovementData = async () => {
       throw new Error("Movement tidak ditemukan di Supabase.");
     }
 
+    console.log("Loaded movement:", movement);
+
     const { data: locations } = await supabase
       .from("gh_location")
       .select("location_id, location, id_openbravo");
@@ -734,23 +787,34 @@ const loadMovementData = async () => {
     const findLocationName = (idOrUuid) => {
       if (!idOrUuid || !locations) return "Unknown";
       const found = locations.find(
-        (loc) =>
-          loc.location_id == idOrUuid || 
-          loc.id_openbravo == idOrUuid
+        (loc) => loc.location_id == idOrUuid || loc.id_openbravo == idOrUuid
       );
       return found ? found.location : `ID: ${idOrUuid}`;
     };
 
+    const findLocationId = (idOrUuid) => {
+      if (!idOrUuid || !locations) return "Unknown";
+      const found = locations.find(
+        (loc) => loc.location_id == idOrUuid || loc.id_openbravo == idOrUuid
+      );
+      return found ? found.id_openbravo : `ID: ${idOrUuid}`;
+    };
+
     header.value = {
       id: movement.movement_id,
+      openbravo_id: movement.openbravo_id,
       code: movement.reference_no || `MOV-${movement.movement_id}`,
       from_location: findLocationName(movement.source_location_id),
       to_location: findLocationName(movement.target_location_id),
+      from_location_id_ob: findLocationId(movement.source_location_id),
+      to_location_id_ob: findLocationId(movement.target_location_id),
       requested_by: movement.created_by,
       requested_at: movement.created_at,
       status: movement.status,
       receive_status: movement.receive_status,
     };
+
+    console.log("Header: ", header);
 
     const { data: items } = await supabase
       .from("gh_movement_item")
@@ -796,6 +860,8 @@ const loadMovementData = async () => {
           notes: item.notes || "",
         };
       });
+
+      console.log("formRows: ", formRows);
     }
   } catch (error) {
     console.error("Error loading movement data:", error);
@@ -805,31 +871,85 @@ const loadMovementData = async () => {
   }
 };
 
+// --- FUNGSI BARU: SIMPAN KE DATABASE SUPABASE ---
+const saveToSupabase = async () => {
+  console.log("💾 Menyimpan data receiving real ke Supabase...");
+
+  // 1. CEK DATA EKSISTING (Mencegah Double Input)
+  const { data: existingCheck, error: checkError } = await supabase
+    .from("gh_movement_receiving")
+    .select("receiving_id")
+    .eq("movement_id", movementId.value)
+    .maybeSingle();
+
+  if (checkError && checkError.code !== 'PGRST116') throw checkError;
+  if (existingCheck) {
+    throw new Error("STOP! Data penerimaan untuk Movement ini SUDAH ADA di database.");
+  }
+
+  // 2. INSERT HEADER (gh_movement_receiving)
+  // Menyimpan data real penerimaan sesuai input staff
+  const { data: receivingData, error: receivingError } = await supabase
+    .from("gh_movement_receiving")
+    .insert({
+      movement_id: movementId.value,
+      received_by: auth.user?.user_id || user.id,
+      received_at: new Date().toISOString(),
+      
+      // ✅ Sesuai struktur tabel baru:
+      total_requested: totalRequested.value, 
+      total_received: totalReceived.value,
+      total_shortage: totalShortage.value,
+      
+      status: totalShortage.value > 0 ? "Partial" : "Completed",
+      notes: receivingNotes.value || "",
+    })
+    .select("receiving_id")
+    .single();
+
+  if (receivingError) throw receivingError;
+
+  // 3. INSERT ITEMS (gh_movement_receiving_item)
+  const itemsData = formRows.value.map((row) => ({
+    receiving_id: receivingData.receiving_id,
+    movement_item_id: row.movement_item_id,
+    material_used_id: row.material_used_id,
+    
+    qty_requested: row.qty_request,
+    qty_received: row.qty_received, // Input real staff
+    qty_shortage: row.qty_shortage, // Hitungan selisih
+    notes: row.notes || "",
+    
+    // Karena dipanggil setelah sendToOpenBravo sukses:
+    openbravo_synced: true,
+    openbravo_sync_at: new Date().toISOString()
+  }));
+
+  const { error: itemsError } = await supabase
+    .from("gh_movement_receiving_item")
+    .insert(itemsData);
+
+  if (itemsError) throw itemsError;
+
+  console.log("✅ Berhasil tersimpan di tabel Supabase Receiving");
+};
+
+
 // --- SUBMIT FUNCTION ---
 const handleSubmit = async () => {
-  // ⭐ VALIDASI: Jangan izinkan submit jika sudah diterima
   if (isAlreadyReceived.value) {
-    alert('⚠️ Penerimaan barang untuk movement ini sudah pernah dilakukan!\n\nData tidak dapat diubah atau disimpan ulang.');
+    alert("⚠️ Penerimaan barang untuk movement ini sudah pernah dilakukan!");
     return;
   }
 
-  // 1. Validasi Form
-  if (!isFormValid.value) {
-    alert(
-      "Ada data yang tidak valid. Periksa kembali input Anda (Qty Diterima tidak boleh minus atau melebihi Request)."
-    );
+  if (!isFormValid.value || !isChecked.value) {
+    alert("Periksa kembali input Anda dan centang konfirmasi.");
     return;
   }
 
-  if (!isChecked.value) {
-    alert('Anda harus mencentang konfirmasi terlebih dahulu!');
-    return;
-  }
-
-  // 2. Konfirmasi User
   if (
     !confirm(
-      `Simpan penerimaan barang?\n\nRequest: ${formatNumber(
+      `Simpan penerimaan barang?\nRequest: ${formatNumber(
         totalRequested.value
       )}\nDiterima: ${formatNumber(totalReceived.value)}`
     )
@@ -840,294 +960,207 @@ const handleSubmit = async () => {
   processing.value = true;
 
   try {
-    // ------------------------------------------------------------------
-    // SKENARIO 1: PENERIMAAN LENGKAP (TIDAK ADA SHORTAGE)
-    // → LANGSUNG SIMPAN KE DATABASE
-    // ------------------------------------------------------------------
-    if (totalShortage.value === 0) {
-      console.log("✅ Penerimaan LENGKAP - Simpan langsung ke database");
+    // 1. Kirim ke OpenBravo (Code lama tetap berjalan)
+    await sendToOpenBravo();
 
-      // A. Save Header to Supabase
-      const receivingData = {
-        movement_id: movementId.value,
-        received_by: auth.user?.user_id || "System",
-        received_at: new Date().toISOString(),
-        total_requested: totalRequested.value,
-        total_received: totalReceived.value,
-        total_shortage: 0,
-        status: "completed",
-        notes: "Penerimaan lengkap - semua barang diterima sesuai request",
-      };
+    // 2. (BARU) Simpan ke Database Supabase agar data masuk
+    await saveToSupabase();
 
-      const { data: receiving, error: receivingError } = await supabase
-        .from("gh_movement_receiving")
-        .insert([receivingData])
-        .select()
-        .single();
-
-      if (receivingError) throw receivingError;
-
-      // B. Save Items to Supabase
-      const receivingItems = formRows.value.map((row) => ({
-        receiving_id: receiving.receiving_id,
+    // 3. Logic Penyimpanan LocalStorage (untuk Berita Acara jika ada selisih)
+    if (totalShortage.value > 0) {
+      const itemsDetail = formRows.value.map((row) => ({
+        id: row.id,
         movement_item_id: row.movement_item_id,
         material_used_id: row.material_used_id,
-        qty_requested: row.qty_request,
+        material_code: row.material_code,
+        material_name: row.material_name,
+        uom: row.uom,
+        qty_request: row.qty_request,
         qty_received: row.qty_received,
-        qty_shortage: 0,
-        notes: row.notes,
-        openbravo_synced: false,
+        qty_shortage: row.qty_shortage,
+        notes: row.notes || "",
       }));
 
-      const { error: itemsError } = await supabase
-        .from("gh_movement_receiving_item")
-        .insert(receivingItems);
+      const data_sementara = {
+        movement_id: movementId.value,
+        received_by: auth.user?.user_id || "System",
+        total_requested: totalRequested.value,
+        total_received: totalReceived.value,
+        total_shortage: totalShortage.value,
+        status: "partial",
+        items: itemsDetail,
+        created_at: new Date().toISOString(),
+        is_pending_database: true,
+      };
 
-      if (itemsError) throw itemsError;
-
-      // C. Update Movement Items (qty_received)
-      const updatePromises = formRows.value.map((row) =>
-        supabase
-          .from("gh_movement_item")
-          .update({
-            qty_received: row.qty_received,
-            updated_at: new Date().toISOString(),
-          })
-          .eq("movement_item_id", row.movement_item_id)
+      console.log("💾 Menyimpan ke localStorage:", data_sementara);
+      localStorage.setItem("movementReceiving", JSON.stringify(data_sementara));
+      localStorage.setItem("header", JSON.stringify(header.value));
+      sessionStorage.setItem(
+        "movementReceiving_backup",
+        JSON.stringify(data_sementara)
       );
-      await Promise.all(updatePromises);
 
-      // D. Update Movement Header Status
-      await supabase
-        .from("gh_movement")
-        .update({
-          receive_status: "Received",
-          received_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
-        })
-        .eq("movement_id", movementId.value);
-
-      // E. Sync to OpenBravo (Optional)
-      await sendToOpenBravo();
-
-      alert("✅ Penerimaan barang LENGKAP berhasil disimpan ke database!");
+      alert(
+        `✅ Data Berhasil Disimpan (Partial)!\n\nAnda akan diarahkan ke halaman Berita Acara.`
+      );
+      router.push({ name: "movement-berita-acara" });
+    } else {
+      // 4. (BARU) Jika LENGKAP (Tidak ada selisih), langsung selesai
+      // Hapus sisa data localstorage jika ada agar bersih
+      localStorage.removeItem("movementReceiving");
       
-      // Update status menjadi sudah diterima
-      isAlreadyReceived.value = true;
-      
-      // Redirect ke daftar movement
-      router.push({
-        path: `/detailmovement/${movementId.value}`,
-        query: { refresh: Date.now() }
-      });
-
-      return;
+      alert("✅ Penerimaan Barang Berhasil Disimpan (Lengkap)!");
+      // Redirect kembali ke halaman list movement
+      router.push("/goodmovement"); 
     }
-
-    // ------------------------------------------------------------------
-    // SKENARIO 2: ADA KEKURANGAN (SHORTAGE)
-    // → HANYA SIMPAN KE LOCALSTORAGE, BELUM KE DATABASE
-    // ------------------------------------------------------------------
-    console.log("⚠️ Ada SHORTAGE - Data disimpan ke localStorage dulu");
-
-    // A. Siapkan data items secara lengkap (Array)
-    const itemsDetail = formRows.value.map((row) => ({
-      id: row.id,
-      movement_item_id: row.movement_item_id,
-      material_used_id: row.material_used_id,
-      material_code: row.material_code,
-      material_name: row.material_name,
-      uom: row.uom,
-      qty_request: row.qty_request,
-      qty_received: row.qty_received,
-      qty_shortage: row.qty_shortage,
-      notes: row.notes || "",
-    }));
-
-    // B. Siapkan object utama untuk localStorage
-    const data_sementara = {
-      movement_id: movementId.value,
-      received_by: auth.user?.user_id || "System",
-      total_requested: totalRequested.value,
-      total_received: totalReceived.value,
-      total_shortage: totalShortage.value,
-      status: "partial",
-      items: itemsDetail,
-      // Tambahan: timestamp untuk tracking
-      created_at: new Date().toISOString(),
-      // Flag untuk menandai data ini belum masuk database
-      is_pending_database: true,
-    };
-
-    console.log("💾 Menyimpan ke localStorage:", data_sementara);
-
-    // C. Simpan ke LocalStorage
-    localStorage.setItem("movementReceiving", JSON.stringify(data_sementara));
-    
-    // D. Backup ke sessionStorage (untuk keamanan)
-    sessionStorage.setItem("movementReceiving_backup", JSON.stringify(data_sementara));
-
-    // E. Tampilkan pesan informasi
-    alert(
-      `⚠️ Terdapat kekurangan barang!\n\n` +
-      `Request: ${formatNumber(totalRequested.value)}\n` +
-      `Diterima: ${formatNumber(totalReceived.value)}\n` +
-      `Kekurangan: ${formatNumber(totalShortage.value)}\n\n` +
-      `Anda akan diarahkan ke halaman Berita Acara untuk mengisi alasan kekurangan.\n\n` +
-      `⚠️ DATA BELUM TERSIMPAN KE DATABASE\n` +
-      `Data akan disimpan setelah Berita Acara selesai diisi.`
-    );
-
-    // F. Redirect ke halaman Berita Acara
-    router.push({ name: "movement-berita-acara" });
-
   } catch (error) {
     console.error("❌ Error saving receiving:", error);
-    alert(`Gagal menyimpan data: ${error.message}`);
+    const errorMsg =
+      error.response?.data?.response?.error?.message || error.message;
+    alert(`Gagal menyimpan data: ${errorMsg}`);
   } finally {
     processing.value = false;
   }
-
-  try {
-    const sourceLocationId = await getOrCreateLocationIdFromObWarehouse(
-      fromWarehouse.value.id,
-      fromWarehouse.value.name,
-    )
-    const targetLocationId = await getOrCreateLocationIdFromObWarehouse(
-      toWarehouse.value.id,
-      toWarehouse.value.name,
-    )
-
-    const ts = Date.now().toString().slice(-6)
-    movementName.value = `GM/MHN/${ts}`
-
-    const createdBy =
-      authStore.user?.username ||
-      authStore.user?.email ||
-      (authStore.user?.user_id != null ? String(authStore.user.user_id) : 'unknown')
-
-    const { data: movementHeader, error: mhErr } = await supabase
-      .from('gh_movement')
-      .insert({
-        reference_no: movementName.value,
-        movement_date: selectedDate.value,
-        source_location_id: sourceLocationId,
-        target_location_id: targetLocationId,
-        created_by: createdBy,
-        status: 'Waiting',
-      })
-      .select()
-      .single()
-
-    if (mhErr) throw mhErr
-
-    const newMovementId = movementHeader.movement_id
-    movementId.value = newMovementId
-
-    const itemsPayload = await Promise.all(
-      materials.value.map(async (m) => ({
-        movement_id: newMovementId,
-        material_used_id: await getOrCreateMaterialUsedId(m),
-        qty: m.amount,
-        uom: m.uom,
-        qty_received: 0,
-        qty_loss: 0,
-      })),
-    )
-
-    const { error: liErr } = await supabase
-      .from('gh_movement_item')
-      .insert(itemsPayload)
-
-    if (liErr) throw liErr
-
-    const FLOW_ID = 4;
-
-    const { data: approveRecord, error: arErr } = await supabase
-      .from('gh_approve_record')
-      .insert({
-        reference_type: 'movement',
-        reference_id: newMovementId,
-        overall_status: 'onReview',
-        current_level_order: 1,
-        flow_id: FLOW_ID,
-      })
-      .select()
-      .single();
-
-    if (arErr) throw arErr;
-
-    const approvalLevels = await loadApprovalLevels(FLOW_ID);
-
-    if (!approvalLevels.length) {
-      throw new Error("Approval levels untuk flow_id=4 tidak ditemukan di Supabase.");
-    }
-
-    const levelRows = approvalLevels.map((lvl) => ({
-      record_id: approveRecord.record_id,
-      level_order: lvl.level_order,
-      level_name: lvl.level_name,
-      status: 'pending',
-    }));
-
-    const { error: lvErr } = await supabase
-      .from('gh_approval_level_status')
-      .insert(levelRows);
-
-    if (lvErr) throw lvErr;
-
-    const headerPayload = {
-      data: [
-        {
-          _entityName: 'MaterialMgmtInternalMovement',
-          name: movementName.value,
-          movementDate: selectedDate.value,
-        },
-      ],
-    }
-
-    const headerRes = await openbravoApi.post(
-      '/MaterialMgmtInternalMovement',
-      headerPayload,
-    )
-
-    const obHeader = headerRes?.data?.response?.data?.[0]
-    if (!obHeader?.id) throw new Error('Tidak menerima ID dokumen dari Openbravo')
-
-    const obLines = materials.value.map((m) => ({
-      _entityName: 'MaterialMgmtInternalMovementLine',
-      movement: obHeader.id,
-      storageBin: selectedBinId.value,
-      newStorageBin: selectedBinIdTo.value,
-      product: m.productId,
-      movementQuantity: m.amount,
-      uOM: m.uomId,
-    }))
-
-    const lineRes = await openbravoApi.post(
-      '/MaterialMgmtInternalMovementLine',
-      { data: obLines },
-    )
-
-    if (lineRes?.data?.response?.status !== 0) {
-      throw new Error('Gagal membuat line Openbravo')
-    }
-
-    alert('Dokumen berhasil dibuat di Supabase & Openbravo!')
-    clearForm()
-  } 
-  catch (err) {
-    console.error('Submit error:', err)
-    alert(err.message || 'Gagal menyimpan data, cek console.')
-  } finally {
-    submitLoading.value = false
-  }
-  
 };
 
 const sendToOpenBravo = async () => {
-  console.log("Syncing to OpenBravo...");
-  return true;
+  console.log("🚀 Memulai proses sinkronisasi OpenBravo (Sesuai Request Awal)...");
+
+  // 1. Setup Credential
+  const apiUser = 'admin'; 
+  const apiPass = '$2a$12$IezF1Wq519tcc.x.BA5Ame4OSstZm6kJ8b7u3lhWelwg6/6zr8U3y'; 
+  const authToken = btoa(unescape(encodeURIComponent(`${apiUser}:${apiPass}`)));
+
+  // 2. Persiapan Data Lokasi/Bin
+  const fromBin = await getDefaultStorageBinByWarehouse(header.value.from_location_id_ob);
+  const toBin = await getDefaultStorageBinByWarehouse(header.value.to_location_id_ob);
+
+  if (!fromBin?.id || !toBin?.id) {
+    throw new Error("Gagal mendapatkan ID Bin (Locator) untuk gudang asal/tujuan.");
+  }
+
+  // STEP 1: CREATE HEADER
+  const movementDate = new Date().toISOString().split("T")[0];
+  const headerName = `${header.value.code}-${Date.now()}`;
+
+  const headerPayload = {
+    data: [{
+      _entityName: "MaterialMgmtInternalMovement",
+      name: headerName, 
+      movementDate: movementDate,
+      description: `Auto-Move: ${header.value.code}`
+    }],
+  };
+
+  const headerRes = await openbravoApi.post("/MaterialMgmtInternalMovement", headerPayload);
+
+  if (headerRes?.data?.response?.status !== 0) {
+    throw new Error(`Gagal membuat Header: ${headerRes?.data?.response?.error?.message}`);
+  }
+
+  const obMovementId = headerRes.data?.response?.data?.[0]?.id;
+  if (!obMovementId) throw new Error("Gagal mendapatkan ID Header dari OpenBravo.");
+  
+  console.log(`✅ Header Created! ID: ${obMovementId}`);
+
+  // STEP 2: CREATE LINES (Looping per Item)
+  let successCount = 0;
+
+  for (const row of formRows.value) {
+    try {
+      const uomId = await getProductUomId(row.material_code);
+      if (!uomId) throw new Error(`UOM tidak ditemukan untuk product ${row.material_code}`);
+      
+      // ✅ PERUBAHAN UTAMA DISINI: 
+      // Menggunakan qty_request (Rencana) untuk OpenBravo, bukan qty_received (Aktual)
+      const qtyToSend = Number(row.qty_request) || 0; 
+      
+      if (qtyToSend <= 0) continue; 
+
+      const linePayload = {
+        data: [{
+          _entityName: "MaterialMgmtInternalMovementLine",
+          movement: obMovementId, 
+          lineNo: (successCount + 1) * 10,
+          storageBin: fromBin.id,     
+          newStorageBin: toBin.id,    
+          product: row.material_code, 
+          movementQuantity: qtyToSend, // Mengirim Qty Request
+          uOM: uomId,
+        }]
+      };
+
+      const lineRes = await openbravoApi.post("/MaterialMgmtInternalMovementLine", linePayload);
+
+      if (lineRes?.data?.response?.status !== 0) {
+        throw new Error(`Gagal membuat line untuk ${row.material_name}`);
+      }
+      
+      successCount++;
+
+    } catch (err) {
+      console.error(`Error creating line for ${row.material_name}:`, err);
+      throw new Error(`Gagal pada item ${row.material_name}: ${err.message}`);
+    }
+  }
+
+  if (successCount === 0) {
+    await openbravoApi.delete(`/MaterialMgmtInternalMovement/${obMovementId}`).catch(() => {});
+    throw new Error("Tidak ada item yang berhasil diproses ke OpenBravo.");
+  }
+
+  // STEP 3: PROCESS DOCUMENT
+  console.log("3. Processing Document...");
+  
+  const processEndpoint = 'https://mhnproc.pirantisolusi.com/api/process';
+  const processPayload = {
+    ad_process_id: "122", 
+    ad_client_id: "0",    
+    ad_org_id: "0",       
+    data: [{ id: String(obMovementId) }]
+  };
+
+  try {
+    const processRes = await axios.post(processEndpoint, processPayload, {
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Basic ${authToken}` },
+      timeout: 60000
+    });
+
+    const resultData = processRes.data?.data?.[0];
+    
+    if (resultData && resultData.result === 1) {
+      console.log("✅ Document Processed Successfully!");
+    } else {
+      console.warn("⚠️ Document Created but Process Failed:", resultData?.errormsg);
+      alert(`Info: Data masuk ke OpenBravo sebagai Draft (ID: ${obMovementId}), namun gagal diproses otomatis.`);
+    }
+
+  } catch (procErr) {
+    console.error("Error Processing Document:", procErr);
+    alert("Data terkirim ke OpenBravo (Draft), namun gagal melakukan Post Process.");
+  }
+
+  // STEP 4: UPDATE STATUS LOKAL (SUPABASE MOVEMENT)
+  // Status movement menjadi Approved/Completed secara sistem karena OB sudah jalan
+  const { error: updateError } = await supabase
+    .from("gh_movement")
+    .update({ status: "Approved" })
+    .eq("movement_id", movementId.value); // Gunakan eq untuk keamanan
+
+  if (updateError) throw updateError;
+};
+
+const getProductUomId = async (productId) => {
+  const res = await openbravoApi.get("/Product", {
+    params: {
+      _where: `id='${productId}'`,
+      _selectedProperties: "uOM",
+    },
+  });
+
+  const product = res.data?.response?.data?.[0];
+  return product?.uOM || null;
 };
 
 const goBack = () => {
@@ -1151,21 +1184,22 @@ onMounted(async () => {
 
   // ⭐ CEK STATUS PENERIMAAN TERLEBIH DAHULU
   await checkReceivingStatus();
-  
+  await loadMovementData();
+
   // ⭐ CEK APAKAH ADA DATA PENDING DI LOCALSTORAGE
   const hasPendingData = restorePendingData();
-  
+
   if (hasPendingData) {
     console.log("ℹ️ Data pending ditemukan dan di-restore");
-    
+
     // Tampilkan warning banner di UI
     const showWarning = confirm(
       "⚠️ Ditemukan data penerimaan yang belum selesai untuk movement ini.\n\n" +
-      "Apakah Anda ingin melanjutkan mengisi Berita Acara?\n\n" +
-      "Klik OK untuk lanjut ke Berita Acara\n" +
-      "Klik Cancel untuk input ulang dari awal"
+        "Apakah Anda ingin melanjutkan mengisi Berita Acara?\n\n" +
+        "Klik OK untuk lanjut ke Berita Acara\n" +
+        "Klik Cancel untuk input ulang dari awal"
     );
-    
+
     if (showWarning) {
       router.push({ name: "movement-berita-acara" });
     } else {
@@ -1175,7 +1209,7 @@ onMounted(async () => {
       await loadMovementData();
     }
   }
-  
+
   loading.value = false;
 });
 </script>

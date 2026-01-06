@@ -165,7 +165,7 @@
                   </span>
                 </div>
 
-                <div v-if="approvalHistory.length > 0" class="mt-3 space-y-2">
+                <div v-if="approvalHistory.length > 0" class="mt-3 space-y-2 print-hide">
                   <template
                     v-for="history in approvalHistory.filter(
                       (h) => h.level_order === level.level_order
@@ -341,7 +341,7 @@
                 <th class="px-4 py-3 text-left">Kode Material</th>
                 <th class="px-4 py-3 text-right">Kuantitas Diminta</th>
                 <th class="px-4 py-3 text-right">Satuan</th>
-                <th class="px-4 py-3 text-right" v-if="showRevisionNotes">Catatan Revisi</th>
+                <th class="px-4 py-3 text-right print-hide" v-if="showRevisionNotes">Catatan Revisi</th>
               </tr>
             </thead>
             <tbody>
@@ -369,7 +369,7 @@
                   {{ row.uom || '-' }}
                 </td>
 
-                <td v-if="showRevisionNotes" class="px-4 py-3 text-right">
+                <td v-if="showRevisionNotes" class="px-4 py-3 text-right print-hide">
                   <span
                     v-if="row.revision_notes"
                     class="text-xs text-amber-600 italic"
@@ -403,69 +403,6 @@
         <p v-if="loading" class="text-center text-sm text-gray-500 mt-4">
           Memuat data movement...
         </p>
-      </div>
-
-      <!-- INFORMASI APPROVAL -->
-      <div class="bg-white rounded-2xl shadow-sm border border-gray-100 p-5">
-        <h2 class="font-semibold text-gray-800 mb-4">Riwayat Persetujuan</h2>
-        
-        <div v-if="approvalHistory.length > 0" class="space-y-4">
-          <!-- Grup berdasarkan level -->
-          <div v-for="level in [1, 2]" :key="level">
-            <h3 class="font-medium text-gray-700 mb-2">
-              {{ level === 1 ? 'Manager' : 'Kepala Gudang' }} Persetujuan
-            </h3>
-            <div class="space-y-3">
-              <div
-                v-for="history in approvalHistory.filter(h => h.level_order === level)"
-                :key="history.history_id"
-                class="border border-gray-200 rounded-lg p-4"
-                :class="{
-                  'border-green-200 bg-green-50': history.action === 'approved',
-                  'border-red-200 bg-red-50': history.action === 'rejected' || history.action === 'revision_requested'
-                }"
-              >
-                <div class="flex justify-between items-start mb-2">
-                  <div>
-                    <p class="font-semibold text-gray-800">
-                      {{ history.user_name }}
-                    </p>
-                    <p class="text-xs text-gray-500">
-                      {{ formatDateTime(history.action_at) }}
-                    </p>
-                  </div>
-                  <span
-                    :class="{
-                      'bg-green-100 text-green-800': history.action === 'approved',
-                      'bg-red-100 text-red-800': history.action === 'rejected',
-                      'bg-amber-100 text-amber-800': history.action === 'revision_requested'
-                    }"
-                    class="px-2 py-1 rounded-full text-xs font-semibold"
-                  >
-                    {{
-                      history.action === 'approved'
-                        ? '✅ Disetujui'
-                        : history.action === 'rejected'
-                        ? '❌ Ditolak'
-                        : '🔄 Permintaan Revisi'
-                    }}
-                  </span>
-                </div>
-                <p
-                  v-if="history.comment"
-                  class="text-sm text-gray-700 mt-2 italic"
-                >
-                  "{{ history.comment }}"
-                </p>
-              </div>
-            </div>
-          </div>
-        </div>
-        
-        <div v-else class="text-center py-8 text-gray-500">
-          <div class="text-3xl mb-2">📝</div>
-          <p>Belum ada riwayat persetujuan</p>
-        </div>
       </div>
     </div>
 
@@ -687,14 +624,14 @@
       </div>
     </div>
     <footer class="text-center py-10 mt-16 border-t border-gray-200">
-        <div class="flex items-center justify-center gap-2 mb-2">
-           <span class="w-6 h-6 p-0.5">
-             <img :src="logoPG" alt="Potato Grow Logo" class="w-full h-full object-contain" />
-          </span>
-          <p class="text-gray-400 font-bold text-sm">POTATO GROW</p>
-        </div>
-        <p class="text-gray-400 text-xs">© 2025 All Rights Reserved</p>
-      </footer>
+      <div class="flex items-center justify-center gap-2 mb-2">
+        <span class="w-6 h-6 p-0.5">
+          <img :src="logoPG" alt="Logo Potato Grow" class="w-full h-full object-contain" />
+        </span>
+        <p class="text-gray-400 font-bold text-sm">POTATO GROW</p>
+      </div>
+      <p class="text-gray-400 text-xs">© 2025 Hak Cipta Dilindungi</p>
+    </footer>
   </div>
 </template>
 
@@ -708,7 +645,7 @@ import { supabase } from "@/lib/supabase";
 import { useAuthStore } from "@/stores/auth";
 import openbravoApi from '@/lib/openbravo';
 import axios from 'axios';
-import logoPG from '../assets/logoPG.svg'
+import logoPG from "@/assets/logoPG.svg";
 
 const auth = useAuthStore();
 const route = useRoute();
@@ -1058,7 +995,7 @@ const fetchApproverNames = async (ids) => {
 };
 
 /* -----------------------------
-   4. LOAD MOVEMENT DATA
+   4. LOAD MOVEMENT DATA (DIPERBAIKI)
 ------------------------------*/
 const loadMovement = async () => {
   loading.value = true;
@@ -1071,6 +1008,37 @@ const loadMovement = async () => {
       .single();
 
     if (headError) throw headError;
+
+    // --- [PERBAIKAN DIMULAI DISINI] ---
+    // Cek tabel receiving untuk mendapatkan status Real-time dari aplikasi
+    const { data: receivingData } = await supabase
+      .from("gh_movement_receiving")
+      .select("status")
+      .eq("movement_id", MOVEMENT_ID)
+      .maybeSingle();
+
+    // Tentukan Execution Status
+    let execStatus = 'not_started';
+
+    // Prioritas 1: Cek dari tabel Receiving (Data real-time yang baru diinput user)
+    if (receivingData) {
+      const rStatus = (receivingData.status || '').toLowerCase();
+      if (rStatus === 'completed' || rStatus === 'lengkap') {
+        execStatus = 'completed';
+      } else if (rStatus === 'partial' || rStatus.includes('partial')) {
+        execStatus = 'partial';
+      }
+    } 
+    // Prioritas 2: Cek dari Header Movement (Fallback / Data OpenBravo)
+    else if (header.receive_status) {
+      const hStatus = header.receive_status.toLowerCase();
+      if (hStatus === 'received' || hStatus === 'completed') {
+        execStatus = 'completed';
+      } else if (hStatus.includes('partially')) {
+        execStatus = 'partial';
+      }
+    }
+    // --- [PERBAIKAN SELESAI] ---
 
     // 2. Locations
     let fromLocName = "-";
@@ -1109,7 +1077,7 @@ const loadMovement = async () => {
       };
     });
 
-    // ✅ FIX: Map movement status ke format yang konsisten
+    // Map movement status
     let movementStatus = header.status;
     if (header.status === 'Waiting') movementStatus = 'On Review';
     if (header.status === 'Need Revision') movementStatus = 'Need Revision';
@@ -1117,20 +1085,19 @@ const loadMovement = async () => {
     movement.value = {
       id: header.movement_id,
       code: header.reference_no,
-      status: movementStatus, // ✅ Gunakan mapped status
+      status: movementStatus,
       movement_date: header.movement_date,
       requested_by: header.created_by,
       requested_at: header.created_at,
       from_location: fromLocName,
       to_location: toLocName,
-      execution_status: header.receive_status === 'Received' ? 'completed' : 
-                       header.receive_status === 'Partially Received' ? 'partial' : 'not_started'
+      execution_status: execStatus // Menggunakan variabel yang sudah diperbaiki
     };
 
-    // 4. Load Approval Data (akan melakukan sinkronisasi)
+    // 4. Load Approval Data
     await loadApprovalData();
 
-    // 5. Load Warehouse Info for Internal Movement
+    // 5. Load Warehouse Info
     if (header.source_location_id) {
       await loadWarehouseAndBin(header.source_location_id);
     }
@@ -1253,52 +1220,31 @@ const approveCurrentLevel = async () => {
     const isFinalLevel = currentLevelOrder === lastLevel;
 
     if (isFinalLevel) {
-      console.log('🎉 FINAL APPROVAL - Processing Good Movement...');
-      
-      // Update approval record
-      await supabase
-        .from("gh_approve_record")
-        .update({ 
-          overall_status: "approved", 
-          completed_at: validTimestamp,
-          updated_at: validTimestamp
-        })
-        .eq("record_id", recordId);
-      
-      // ✅ FIX: Update movement status ke "Approved" (bukan "approved")
-      await supabase
-        .from("gh_movement")
-        .update({ 
-          status: "Approved", 
-          updated_at: validTimestamp 
-        })
-        .eq("movement_id", MOVEMENT_ID);
+  console.log('🎉 FINAL APPROVAL - MENUNGGU PENERIMAAN');
 
-      // Process internal movement to Openbravo
-      const processResults = await createAndProcessInternalMovement();
-      
-      // Display results
-      let message = `✅ Good Movement telah disetujui sepenuhnya.\n\n`;
-      
-      if (processResults.success) {
-        message += `📦 INTERNAL MOVEMENT DIBUAT:\n`;
-        message += `• Document ID: ${processResults.movementId}\n`;
-        message += `• Items Diproses: ${processResults.successCount}/${processResults.totalItems}\n`;
-        
-        if (processResults.warning) {
-          message += `\n⚠️ PERINGATAN:\n${processResults.warning}\n`;
-        }
-        
-        if (processResults.errors) {
-          message += `\n❌ ERROR:\n${processResults.errors.join('\n')}\n`;
-        }
-      } else {
-        message += `❌ Gagal membuat internal movement:\n${processResults.errors}`;
-      }
-      
-      alert(message);
-      
-    } else {
+  // 1️⃣ Update approval record (SELESAI APPROVAL)
+  await supabase
+    .from("gh_approve_record")
+    .update({ 
+      overall_status: "approved",
+      completed_at: validTimestamp,
+      updated_at: validTimestamp
+    })
+    .eq("record_id", recordId);
+
+  // 2️⃣ ⛔ JANGAN Approved
+  // 3️⃣ ✅ SET STATUS BARU
+  await supabase
+    .from("gh_movement")
+    .update({ 
+      status: "Menunggu Penerimaan",
+      updated_at: validTimestamp
+    })
+    .eq("movement_id", MOVEMENT_ID);
+
+  alert("✅ Disetujui. Menunggu penerimaan barang oleh staff.");
+
+  } else {
       // Not final level - proceed to next level
       await supabase
         .from("gh_approve_record")
@@ -1448,12 +1394,12 @@ const requestRevisionForLevel = async () => {
 };
 
 /* -----------------------------
-   7. CREATE AND PROCESS INTERNAL MOVEMENT
+   7. CREATE AND PROCESS INTERNAL MOVEMENT 
 ------------------------------*/
 const createAndProcessInternalMovement = async () => {
-  // [Kode ini tetap sama seperti sebelumnya]
+  // --- Validasi Awal ---
   if (!items.value || items.value.length === 0) {
-    return { success: false, errors: 'No items provided' };
+    return { success: false, errors: 'Tidak ada item barang untuk diproses.' };
   }
   
   const obUser = localStorage.getItem('OB_USER');
@@ -1469,7 +1415,7 @@ const createAndProcessInternalMovement = async () => {
   if (!warehouseInfo.value.bin || !warehouseInfo.value.warehouse) {
     return { 
       success: false, 
-      errors: 'Warehouse/Bin tidak ditemukan untuk location ini' 
+      errors: 'Gudang/Bin tidak ditemukan untuk lokasi ini.' 
     };
   }
 
@@ -1478,54 +1424,65 @@ const createAndProcessInternalMovement = async () => {
   const warehouseId = warehouse.id;
   const binId = bin.id; 
   
+  // Default fallback ID jika di warehouse tidak ada
   const DEFAULT_CLIENT_ID = '025F309A89714992995442D9CDE13A15';
   const DEFAULT_ORG_ID = '96D7D37973EF450383B8ADCFDB666725';
 
   const orgId = warehouse.organization?.id || warehouse.organization || DEFAULT_ORG_ID;
   const clientId = warehouse.client?.id || warehouse.client || DEFAULT_CLIENT_ID;
   
-  const PATH_SERVICE = '';
+  const PATH_SERVICE = ''; // Prefix URL jika ada (misal /org.openbravo...)
 
   try {
-    // STEP 1: CREATE HEADER
+    // ============================================
+    // STEP 1: CREATE HEADER (DRAFT)
+    // ============================================
+    console.log("1️⃣ Membuat Header Movement...");
     const now = new Date();
     const movementDate = movement.value.movement_date ? 
       new Date(movement.value.movement_date).toISOString().split('T')[0] : 
       now.toISOString().split('T')[0];
     
-    const movementName = `GM-${movement.value.code}-${Date.now()}`;
+    // Nama unik agar mudah dicari
+    const movementName = `GM-${movement.value.code}-${Date.now().toString().slice(-4)}`;
     
     const movementPayload = {
       data: [{
-        _entityName: 'MaterialMgmtInternalConsumption',
+        _entityName: 'MaterialMgmtInternalMovement',
         organization: orgId,
         client: clientId,
         warehouse: warehouseId,
         movementDate: movementDate,
         name: movementName,
-        description: `Good Movement: ${movement.value.code}`
+        description: `Good Movement dari Aplikasi: ${movement.value.code}`
       }]
     };
 
-    const createRes = await openbravoApi.post(`${PATH_SERVICE}/MaterialMgmtInternalConsumption`, movementPayload);
+    const createRes = await openbravoApi.post(`${PATH_SERVICE}/MaterialMgmtInternalMovement`, movementPayload);
 
     if (createRes.data.response && createRes.data.response.status !== 0) {
-      throw new Error(`Openbravo Reject: ${createRes.data.response.error?.message}`);
+      throw new Error(`Gagal Membuat Header: ${createRes.data.response.error?.message}`);
     }
 
+    // Ambil ID Movement yang baru dibuat
     let movementId = null;
     const rData = createRes.data.response?.data || createRes.data.data;
     if (Array.isArray(rData) && rData.length > 0) movementId = rData[0].id;
     else if (rData && rData.id) movementId = rData.id;
 
-    if (!movementId) throw new Error('Gagal mendapatkan ID Header');
+    if (!movementId) throw new Error('Gagal mendapatkan ID Header dari respon OpenBravo.');
+    console.log("✅ Header Terbentuk. ID:", movementId);
 
-    // STEP 2: CREATE LINES
+    // ============================================
+    // STEP 2: CREATE LINES (ITEM BARANG)
+    // ============================================
+    console.log("2️⃣ Membuat Lines Item...");
     let successCount = 0;
     const errors = [];
 
     for (const item of items.value) {
       try {
+        // Cari Produk di OB berdasarkan Nama
         const escapedName = item.material_name.replace(/'/g, "''");
         const prodRes = await openbravoApi.get(`${PATH_SERVICE}/Product`, { 
           params: { _where: `name='${escapedName}'`, _selectedProperties: 'id,name,uOM', _startRow: 0, _endRow: 1 } 
@@ -1533,20 +1490,21 @@ const createAndProcessInternalMovement = async () => {
         
         const products = prodRes.data.response?.data || [];
         if (!products.length) {
-          errors.push(`Produk '${item.material_name}' tidak ditemukan`);
+          errors.push(`Produk '${item.material_name}' tidak ditemukan di OpenBravo.`);
           continue;
         }
 
         const product = products[0];
         let uomId = product.uOM?.id || product.uOM;
 
+        // Cari UOM jika ada override
         if (item.uom) {
           const uomRes = await openbravoApi.get(`${PATH_SERVICE}/UOM`, { params: { _where: `name='${item.uom}'`, _startRow: 0, _endRow: 1 } });
           const uoms = uomRes?.data?.response?.data || [];
           if (uoms.length > 0) uomId = uoms[0].id;
         }
 
-        // Check Stock
+        // Cek Stok Fisik (Opsional: Bisa dimatikan jika ingin membolehkan minus sementara)
         const stockRes = await openbravoApi.get(`${PATH_SERVICE}/MaterialMgmtStorageDetail`, {
           params: { _where: `storageBin='${binId}' AND product='${product.id}'`, _selectedProperties: 'quantityOnHand', _startRow: 0, _endRow: 1 }
         });
@@ -1556,26 +1514,28 @@ const createAndProcessInternalMovement = async () => {
         const qty = Math.abs(Number(item.qty_request) || 0);
 
         if (currentStock < qty) {
-          errors.push(`${item.material_name}: Stok kurang (${currentStock}/${qty})`);
+          errors.push(`${item.material_name}: Stok di OB kurang (${currentStock} tersedia, butuh ${qty})`);
           continue;
         }
 
+        // Insert Line ke OB
         const linePayload = {
           data: [{
-            _entityName: 'MaterialMgmtInternalConsumptionLine',
+            _entityName: 'MaterialMgmtInternalMovementLine',
             organization: orgId,
             client: clientId,
-            internalConsumption: movementId,
+            internalMovement: movementId,
             lineNo: (successCount + 1) * 10,
             product: product.id,
             uOM: uomId,
             movementQuantity: qty,
-            storageBin: binId
+            storageBin: binId // Bin Asal
+            // newStorageBin: ... // Jika ingin langsung set tujuan, tapi biasanya default transit
           }]
         };
 
-        const lineRes = await openbravoApi.post(`${PATH_SERVICE}/MaterialMgmtInternalConsumptionLine`, linePayload);
-        if (lineRes?.data?.response?.status === -1) throw new Error('Failed to create line');
+        const lineRes = await openbravoApi.post(`${PATH_SERVICE}/MaterialMgmtInternalMovementLine`, linePayload);
+        if (lineRes?.data?.response?.status === -1) throw new Error('Gagal insert line.');
         
         successCount++;
       } catch (err) {
@@ -1584,45 +1544,60 @@ const createAndProcessInternalMovement = async () => {
     }
 
     if (successCount === 0) {
-      await openbravoApi.delete(`${PATH_SERVICE}/MaterialMgmtInternalConsumption/${movementId}`).catch(() => {});
-      throw new Error(`Gagal insert item: ${errors.join(', ')}`);
+      // Bersihkan header jika gagal semua agar tidak jadi sampah
+      await openbravoApi.delete(`${PATH_SERVICE}/MaterialMgmtInternalMovement/${movementId}`).catch(() => {});
+      throw new Error(`Proses dibatalkan. Gagal insert item: ${errors.join(', ')}`);
     }
 
-    // STEP 3: PROCESS
-    if (!API_USER || !API_PASS) {
-      return {
-        success: true, movementId: movementId, successCount, totalItems: items.value.length,
-        errors: errors.length > 0 ? errors : null,
-        warning: 'Credential ENV missing for Processing.'
-      };
-    }
+    // ============================================
+    // STEP 3: AUTOMATIC PROCESS (ROBOT)
+    // ============================================
+    console.log(`3️⃣ Memproses Otomatis (Items: ${successCount})...`);
 
+    // [PENTING] Jeda Waktu (Delay)
+    // Kita tunggu 3 detik agar database OB selesai menyimpan Lines sebelum diproses
+    console.log("⏳ Menunggu sinkronisasi database (3 detik)...");
+    await new Promise(resolve => setTimeout(resolve, 3000)); 
+
+    // Setup URL & Auth untuk API Process
+    // Menggunakan variabel ENV atau fallback ke hardcode jika perlu
     const baseUrl = API_URL.replace(/\/+$/, '').replace(/:\d+$/, '');
-    const endpoint = `${baseUrl}:${API_PORT}/api/process`;
+    const endpoint = `${baseUrl}:${API_PORT}/api/process`; // Pastikan port benar (biasanya 8090/8080)
     
+    // Auth Token Basic
     const authToken = btoa(unescape(encodeURIComponent(`${API_USER}:${API_PASS}`)));
 
+    // Payload untuk menekan tombol "Process" 
     const processPayload = {
-      ad_process_id: "800131",
+      ad_process_id: "122", // ID Proses M_Movement_Post
       ad_client_id: clientId,
       ad_org_id: orgId,
       data: [
-        { id: movementId }
+        { id: String(movementId) }
       ]
     };
 
+    console.log('🔗 Endpoint:', endpoint);
+    console.log('🔑 Auth User:', apiUser); 
+    console.log('📤 Sending Payload:', JSON.stringify(processPayload, null, 2));
+
     try {
+      // Panggil API Process via Axios
       const processRes = await axios.post(endpoint, processPayload, {
         headers: {
           'Content-Type': 'application/json',
           'Authorization': `Basic ${authToken}`
         },
-        timeout: 45000
+        timeout: 60000 // Timeout 60 detik jaga-jaga server lambat
       });
+
+      console.log("📥 Respon Process:", processRes.data);
 
       const resultData = processRes.data?.data?.[0];
       
+      // Cek Hasil (result === 1 artinya Sukses/Completed)
       if (resultData && resultData.result === 1) {
+        console.log("✅ Movement Berhasil Ter-Posting Otomatis!");
         return {
           success: true,
           movementId: movementId,
@@ -1631,20 +1606,23 @@ const createAndProcessInternalMovement = async () => {
           errors: errors.length > 0 ? errors : null
         };
       } else {
+        // Gagal memproses (misal stok berubah saat delay, atau periode tutup)
         const msg = resultData?.errormsg || 'Unknown Error (Result not 1)';
-        throw new Error(msg);
+        throw new Error(`Gagal memproses dokumen otomatis: ${msg}`);
       }
 
     } catch (procErr) {
-      console.error('❌ API Error:', procErr.message);
+      console.error('❌ Gagal Auto-Process:', procErr.message);
       
+      // Jika gagal auto-process, data tetap tersimpan sebagai DRAFT di OpenBravo.
+      // Kita return success: true tapi dengan warning.
       return { 
         success: true,
         movementId: movementId, 
         successCount, 
         totalItems: items.value.length,
         errors: errors.length > 0 ? errors : null,
-        warning: `Processing Failed: ${procErr.message}. Silakan proses manual dokumen ${movementId}`
+        warning: `Data tersimpan di OpenBravo (Draft), tapi gagal diposting otomatis: ${procErr.message}. Harap proses manual di OpenBravo.`
       };
     }
 
@@ -1654,9 +1632,6 @@ const createAndProcessInternalMovement = async () => {
   }
 };
 
-/* -----------------------------
-   8. REJECT FUNCTION - FIXED UNTUK CONSTRAINT
-------------------------------*/
 /* -----------------------------
    8. REJECT FUNCTION - FIXED UNTUK CONSTRAINT
 ------------------------------*/
@@ -1752,7 +1727,7 @@ const submitRevision = async () => {
   if (!userId) return alert("Sesi kadaluarsa.");
 
   processing.value = true;
-  try { 
+  try {
     const now = new Date();
     const recordId = approvalRecord.value.record_id;
     
@@ -1974,7 +1949,76 @@ const isRevisionValid = computed(() => {
    12. UTILITY FUNCTIONS
 ------------------------------*/
 const handleBack = () => router.back();
-const printPage = () => window.print();
+const printPage = () => {
+  const escapeHtml = (text) =>
+    text
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;");
+
+  const lines = [];
+
+  lines.push("DOKUMEN PERPINDAHAN BARANG");
+  lines.push("================================");
+  lines.push(`No Movement   : ${movement.value?.code || "-"}`);
+  lines.push(`Tanggal       : ${formatDate(movement.value?.movement_date)}`);
+  lines.push(`Dari Lokasi   : ${movement.value?.from_location}`);
+  lines.push(`Ke Lokasi     : ${movement.value?.to_location}`);
+  lines.push(`Diminta Oleh  : ${movement.value?.requested_by}`);
+  lines.push("");
+  lines.push("DETAIL BARANG");
+  lines.push("--------------------------------");
+
+  items.value.forEach((item, i) => {
+    lines.push(`${i + 1}. ${item.material_name}`);
+    lines.push(`   Kode : ${item.material_code}`);
+    lines.push(`   Qty  : ${formatNumber(item.qty_request)} ${item.uom || ""}`);
+    lines.push("");
+  });
+
+  lines.push("--------------------------------");
+  lines.push(`Total Item : ${items.value.length}`);
+  lines.push("");
+  lines.push("Dikirim Oleh,                Diterima Oleh,");
+  lines.push("");
+  lines.push("");
+  lines.push("(__________________)      (__________________)");
+
+  const content = escapeHtml(lines.join("\n"));
+
+  const win = window.open();
+
+  win.document.open();
+  win.document.write(`
+    <html>
+      <head>
+        <title>Detail Movement</title>
+        <style>
+          body {
+            margin: 24px;
+          }
+          pre {
+            font-family: "Courier New", monospace;
+            font-size: 18px;
+            line-height: 1.5;
+            white-space: pre-wrap;
+          }
+        </style>
+      </head>
+      <body>
+        <pre>${content}</pre>
+      </body>
+    </html>
+  `);
+  win.document.close();
+
+  // ⏳ PENTING: tunggu render selesai
+  setTimeout(() => {
+    win.focus();
+    win.print();
+    win.close();
+  }, 300);
+};
 
 const formatNumber = (v) => v == null ? "-" : new Intl.NumberFormat("id-ID").format(v);
 const formatDate = (v) => v ? new Intl.DateTimeFormat("id-ID").format(new Date(v)) : "-";
@@ -2048,5 +2092,49 @@ watch(
     await loadMovement(); // ⬅️ INI KUNCI UTAMA
   }
 );
-
 </script>
+
+<style>
+/* =========================
+   MODE PRINT
+========================= */
+@media print {
+  /* Sembunyikan komentar approval & revisi */
+  .print-hide {
+    display: none !important;
+  }
+
+  /* Hilangkan tombol & header */
+  button,
+  a,
+  nav {
+    display: none !important;
+  }
+
+  /* Rapikan layout */
+  body {
+    background: white !important;
+  }
+
+  .shadow-sm,
+  .shadow-md,
+  .shadow-lg {
+    box-shadow: none !important;
+  }
+
+  .bg-gray-50,
+  .bg-white {
+    background: white !important;
+  }
+
+  /* Hindari page break aneh */
+  table {
+    page-break-inside: auto;
+  }
+
+  tr {
+    page-break-inside: avoid;
+    page-break-after: auto;
+  }
+}
+</style>

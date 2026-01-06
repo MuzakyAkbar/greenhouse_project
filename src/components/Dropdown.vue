@@ -197,7 +197,6 @@ const error = ref(null);
 const selectedItem = ref(null);
 const emit = defineEmits(["select"]);
 
-// Function untuk memilih item spesifik
 function selectItem(item) {
   selectedItem.value = item;
   emit("select", item); // Mengirim object item
@@ -205,7 +204,6 @@ function selectItem(item) {
   console.log("Item dipilih:", item);
 }
 
-// Function BARU untuk mereset pilihan (Tampil Semuanya)
 function resetSelection() {
   selectedItem.value = null;
   emit("select", null); // Mengirim null ke parent agar filter dimatikan

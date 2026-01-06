@@ -5,6 +5,8 @@ import ModalView from '@/components/ModalView.vue'
 import PotatoProgressBar from '@/components/PotatoProgressBar.vue'
 import DamageRepairModal from '@/components/DamageRepairModal.vue'
 import logoPG from '../assets/logoPG.svg'
+import * as XLSX from 'xlsx'
+import html2pdf from 'html2pdf.js'
 import {
   Chart,
   LineController,
@@ -19,7 +21,7 @@ import {
   Legend,
   BarController,
   BarElement,
-  Filler // ⬅️ TAMBAHKAN INI
+  Filler
 } from 'chart.js'
 
 Chart.register(
@@ -35,32 +37,25 @@ Chart.register(
   Legend,
   BarController,
   BarElement,
-  Filler // ⬅️ DAN INI
+  Filler
 )
-
 
 import { useAuthStore } from '../stores/auth'
 import { supabase } from '@/lib/supabase'
-
-// import logoPG from '../assets/logoPG.svg' // Tidak digunakan di template yang diberikan
 
 const router = useRouter()
 const route = useRoute()
 const authStore = useAuthStore()
 
-// --- Data Spesifik Batch & Lingkungan ---
-// Mengambil ID Batch dari URL
 const batchId = computed(() => {
   const rawId = route.params.batch_id || route.params.id
   return parseInt(rawId)
 })
 
-// State untuk Detail Batch yang Diperbaiki
 const batchDetail = ref(null) 
-const locationInfo = ref(null) // Menyimpan info lokasi terkait
-const environmentData = ref(null) // Data lingkungan
+const locationInfo = ref(null)
+const environmentData = ref(null)
 
-// Data yang sebelumnya ada di dashboard, kini dihitung ulang untuk batch spesifik
 const batchSummary = ref({
   totalPlanlet: 0,
   g0Terjual: 0,
@@ -75,7 +70,10 @@ const activityReport = ref([])
 const materialList = ref([])
 const totalMaterial = ref(0)
 
-// Struktur successRate Baru (Dipertahankan seperti sebelumnya, namun diisi data batch spesifik)
+// ✅ TAMBAHAN: State untuk data pekerja
+const workerSummary = ref([])
+const totalLaborCost = ref(0)
+
 const successRate = ref({
   planlet: {
     total: 0, kuning: 0, kutilang: 0, busuk: 0, damaged: 0, dead: 0, success: 0, percentage: 0
@@ -91,22 +89,18 @@ const successRate = ref({
   }
 })
 
-// ✅ PERBAIKAN: Definisikan chartData di sini agar tidak 'undefined'
 const chartData = ref({
   faseChart: null,
   kepemilikanChart: null,
   penjualanChart: null
 })
 
-
-// Persentase progres (dihitung dari successRate)
 const progres = computed(() => ({
   planletToG0: successRate.value.planlet.percentage,
   G0ToG1: successRate.value.g0.percentage,
   G1ToG2: successRate.value.g1.percentage,
 }));
 
-// --- State Modal (Dipertahankan) ---
 const isOpen = ref(false)
 const isRepairModalOpen = ref(false)
 const selectedPhaseForRepair = ref(null)
@@ -123,11 +117,9 @@ const closeRepairModal = () => {
 }
 const handleRepairSuccess = async () => {
   closeRepairModal()
-  await loadBatchDetailData() // Refresh data batch setelah perbaikan
+  await loadBatchDetailData()
 }
-// ------------------------------------
 
-// Helper function untuk normalize phase name (Dipertahankan)
 const normalizePhase = (phaseName) => {
   const phase = phaseName?.toLowerCase() || '';
   
@@ -139,7 +131,6 @@ const normalizePhase = (phaseName) => {
   return null; 
 }
 
-// Navigasi (Dipertahankan)
 const goToDetail = (batchId) => router.push(`/batch/${batchId}`)
 const tambahBatch = () => router.push('/tambah-batch')
 const bukaFormActivity = () => router.push('/formReportActivity')
@@ -154,7 +145,6 @@ const logout = async () => {
   alert('Logout failed. Please try again.')
 }
 
-// Formatters (Dipertahankan)
 const formatDate = (dateString) => {
   if (!dateString) return '-'
   const date = new Date(dateString)
@@ -166,15 +156,11 @@ const formatTime = (timeString) => {
   return timeString.substring(0, 5)
 }
 
-// --------------------------------------------------------------------------------------
-// NEW: Fungsi Load Environment Data (Diperbaiki agar hanya menampilkan data HARI INI)
-// --------------------------------------------------------------------------------------
 const loadEnvironmentData = async (location_id) => {
   if (!location_id) return;
   try {
-    const today = new Date().toISOString().split('T')[0] // Format YYYY-MM-DD
+    const today = new Date().toISOString().split('T')[0]
     
-    // 1. Coba ambil data TEPAT HARI INI
     let { data, error } = await supabase
       .from('gh_environment_log')
       .select('*')
@@ -182,10 +168,9 @@ const loadEnvironmentData = async (location_id) => {
       .eq('log_date', today)
       .maybeSingle()
     
-    // 2. Jika data hari ini TIDAK ADA, JANGAN ambil data terakhir/kemarin. Cukup set null.
     if (!data) {
-      console.log("Data lingkungan HARI INI (9/12/2025) tidak ditemukan, mereset tampilan.")
-      environmentData.value = null; // Kunci: Reset ke null jika data hari ini kosong
+      console.log("Data lingkungan HARI INI tidak ditemukan, mereset tampilan.")
+      environmentData.value = null;
     } else {
       environmentData.value = data
     }
@@ -196,15 +181,9 @@ const loadEnvironmentData = async (location_id) => {
   }
 }
 
-
-// --------------------------------------------------------------------------------------
-// NEW: Fungsi Load Data Detail Batch
-// --------------------------------------------------------------------------------------
-
 const loadBatchDetailData = async () => {
   if (isNaN(batchId.value)) return;
 
-  // 1. Ambil Detail Batch & Info Lokasi
   const { data: batch, error: batchError } = await supabase
     .from("gh_batch")
     .select(`
@@ -216,23 +195,19 @@ const loadBatchDetailData = async () => {
 
   if (batchError || !batch) {
     console.error("Error loading batch detail:", batchError);
-    // Mungkin redirect ke halaman error atau dashboard jika batch tidak ditemukan
     return;
   }
   
   batchDetail.value = batch;
   locationInfo.value = batch.gh_location;
 
-  // ✅ PERBAIKAN: Muat data lingkungan setelah mendapatkan location_id
   await loadEnvironmentData(batch.location_id);
   
-  // Reset summary & successRate
   Object.assign(batchSummary.value, { totalPlanlet: 0, g0Terjual: 0, g0Diproduksi: 0, g2Diproduksi: 0, g2Terjual: 0, pendapatan: 0, sukses: 0 });
   Object.keys(successRate.value).forEach(key => {
     Object.assign(successRate.value[key], { total: 0, kuning: 0, kutilang: 0, busuk: 0, damaged: 0, dead: 0, success: 0, percentage: 0 });
   });
 
-  // 2. Ambil data produksi spesifik batch ini
   const { data: productionData } = await supabase
     .from("gh_data_production")
     .select("production_type, qty, location_id")
@@ -258,7 +233,6 @@ const loadBatchDetailData = async () => {
     });
   }
   
-  // 3. Ambil report approved & damage spesifik batch ini
   const { data: reportData } = await supabase
     .from("gh_report")
     .select(`
@@ -309,7 +283,6 @@ const loadBatchDetailData = async () => {
     }
   }
 
-  // Hitung Success & Percentage
   let grandTotalSuccess = 0;
   let grandTotalTotal = 0;
 
@@ -320,7 +293,6 @@ const loadBatchDetailData = async () => {
       ? ((phase.success / phase.total) * 100).toFixed(1) 
       : 0;
       
-    // Hitung grand total untuk success rate keseluruhan
     grandTotalSuccess += phase.success;
     grandTotalTotal += phase.total;
   });
@@ -329,8 +301,6 @@ const loadBatchDetailData = async () => {
       ? ((grandTotalSuccess / grandTotalTotal) * 100).toFixed(1) 
       : 0;
 
-
-  // 4. Ambil data penjualan spesifik batch ini & hitung total
   const { data: salesData } = await supabase
     .from("gh_sales")
     .select("qty, price, category")
@@ -341,7 +311,6 @@ const loadBatchDetailData = async () => {
       const qty = parseFloat(item.qty) || 0;
       const price = parseFloat(item.price) || 0;
       
-      // Update G0/G2 Terjual (sederhana: anggap G0/G2 adalah kategori penjualan)
       if (item.category?.toLowerCase().includes('g0')) {
           batchSummary.value.g0Terjual += qty;
       } else if (item.category?.toLowerCase().includes('g2')) {
@@ -352,22 +321,19 @@ const loadBatchDetailData = async () => {
     }, 0);
   }
   
-  // 5. Load Activity Report & Material List (Jika diperlukan untuk tabel)
   await loadActivityAndMaterialData(batch.batch_id);
-
   await initCharts();
 }
 
-  const loadActivityAndMaterialData = async (batch_id) => {
+const loadActivityAndMaterialData = async (batch_id) => {
   try {
     activityReport.value = []
     materialList.value = []
     totalMaterial.value = 0
+    workerSummary.value = []
+    totalLaborCost.value = 0
 
-    /**
-     * 1️⃣ Ambil REPORT APPROVED milik batch
-     * (INI WAJIB, karena gh_activity tidak punya FK ke gh_report)
-     */
+    // 1️⃣ Ambil REPORT APPROVED
     const { data: reports, error: reportError } = await supabase
       .from('gh_report')
       .select('report_id, report_date')
@@ -376,15 +342,12 @@ const loadBatchDetailData = async () => {
 
     if (reportError || !reports?.length) return
 
-    // Map report_id → report_date
     const reportMap = {}
     reports.forEach(r => {
       reportMap[r.report_id] = r.report_date
     })
 
-    /**
-     * 2️⃣ Ambil ACTIVITY + MATERIAL
-     */
+    // 2️⃣ Ambil ACTIVITY + MATERIAL + WORKERS
     const { data: activities, error: activityError } = await supabase
       .from('gh_activity')
       .select(`
@@ -397,22 +360,38 @@ const loadBatchDetailData = async () => {
           qty,
           uom,
           unit_price
+        ),
+        gh_activity_worker (
+          activity_worker_id,
+          hours_worked,
+          hourly_rate_snapshot,
+          worker:gh_worker (
+            name,
+            role
+          )
         )
       `)
       .in('report_id', reports.map(r => r.report_id))
 
     if (activityError || !activities?.length) return
 
-    /**
-     * 3️⃣ Mapping FINAL ke UI (INI KUNCI)
-     */
+    // 3️⃣ Mapping ACTIVITY dengan MATERIAL & WORKERS
     activityReport.value = activities.map(act => {
       const materials = act.gh_material_used || []
+      const workers = act.gh_activity_worker || []
 
-      const rowTotal = materials.reduce((sum, m) => {
+      // Hitung total material
+      const materialTotal = materials.reduce((sum, m) => {
         const qty = Number(m.qty) || 0
         const price = Number(m.unit_price) || 0
         return qty > 0 ? sum + qty * price : sum
+      }, 0)
+
+      // Hitung total labor
+      const laborTotal = workers.reduce((sum, w) => {
+        const hours = Number(w.hours_worked) || 0
+        const rate = Number(w.hourly_rate_snapshot) || 0
+        return sum + (hours * rate)
       }, 0)
 
       return {
@@ -423,84 +402,117 @@ const loadBatchDetailData = async () => {
         Activity: act.act_name || '-',
         manpower: act.manpower ?? '-',
         materials,
-        row_total: rowTotal // ✅ TOTAL FINAL PER BARIS
+        workers,
+        material_total: materialTotal,
+        labor_total: laborTotal,
+        row_total: materialTotal + laborTotal // Total keseluruhan
       }
     })
 
+    // 4️⃣ Ringkasan Material
+    const materialMap = {}
+    let grandMaterialTotal = 0
 
-    /**
-     * 4️⃣ Ringkasan Material (UNTUK TABEL BAWAH)
-     */
-    /**
- * 4️⃣ Ringkasan material (UNTUK TABEL BAWAH)
- * + HITUNG HARGA SATUAN RATA-RATA
- */
-const materialMap = {}
-let grandTotal = 0
+    activities.forEach(act => {
+      act.gh_material_used?.forEach(mat => {
+        const qty = Number(mat.qty) || 0
+        const price = Number(mat.unit_price) || 0
+        const total = qty * price
 
-activities.forEach(act => {
-  act.gh_material_used?.forEach(mat => {
-    const qty = Number(mat.qty) || 0
-    const price = Number(mat.unit_price) || 0
-    const total = qty * price
+        grandMaterialTotal += total
 
-    grandTotal += total
+        if (!materialMap[mat.material_name]) {
+          materialMap[mat.material_name] = {
+            material_name: mat.material_name,
+            Qty: 0,
+            UoM: mat.uom,
+            total_harga: 0,
+            total_unit_price: 0,
+            price_count: 0
+          }
+        }
 
-    if (!materialMap[mat.material_name]) {
-      materialMap[mat.material_name] = {
-        material_name: mat.material_name,
-        Qty: 0,
-        UoM: mat.uom,
-        total_harga: 0,
+        materialMap[mat.material_name].Qty += qty
+        materialMap[mat.material_name].total_harga += total
 
-        // ➕ UNTUK RATA-RATA
-        total_unit_price: 0,
-        price_count: 0
-      }
-    }
+        if (price > 0) {
+          materialMap[mat.material_name].total_unit_price += price
+          materialMap[mat.material_name].price_count += 1
+        }
+      })
+    })
 
-    materialMap[mat.material_name].Qty += qty
-    materialMap[mat.material_name].total_harga += total
+    materialList.value = Object.values(materialMap).map(mat => ({
+      material_name: mat.material_name,
+      Qty: mat.Qty,
+      UoM: mat.UoM,
+      total_harga: mat.total_harga,
+      harga_satuan: mat.Qty > 0
+        ? Math.round(mat.total_harga / mat.Qty)
+        : 0
+    }))
 
-    // ➕ SIMPAN HARGA SATUAN
-    if (price > 0) {
-      materialMap[mat.material_name].total_unit_price += price
-      materialMap[mat.material_name].price_count += 1
-    }
-  })
-})
+    totalMaterial.value = grandMaterialTotal
 
-/**
- * 5️⃣ Finalisasi data material
- */
-materialList.value = Object.values(materialMap).map(mat => ({
-  material_name: mat.material_name,
-  Qty: mat.Qty,
-  UoM: mat.UoM,
-  total_harga: mat.total_harga,
+    // 5️⃣ BARU: Ringkasan Pekerja
+    const workerMap = {}
+    let grandLaborTotal = 0
 
-  // ✅ SESUAI TEMPLATE
-  harga_satuan: mat.Qty > 0
-    ? Math.round(mat.total_harga / mat.Qty)
-    : 0
-}))
+    activities.forEach(act => {
+      act.gh_activity_worker?.forEach(aw => {
+        const workerName = aw.worker?.name || 'Unknown'
+        const workerRole = aw.worker?.role || '-'
+        const hours = Number(aw.hours_worked) || 0
+        const rate = Number(aw.hourly_rate_snapshot) || 0
+        const total = hours * rate
 
+        grandLaborTotal += total
 
-totalMaterial.value = grandTotal
-} catch (err) {
+        if (!workerMap[workerName]) {
+          workerMap[workerName] = {
+            worker_name: workerName,
+            worker_role: workerRole,
+            total_hours: 0,
+            avg_hourly_rate: 0,
+            total_cost: 0,
+            rate_sum: 0,
+            rate_count: 0
+          }
+        }
+
+        workerMap[workerName].total_hours += hours
+        workerMap[workerName].total_cost += total
+
+        if (rate > 0) {
+          workerMap[workerName].rate_sum += rate
+          workerMap[workerName].rate_count += 1
+        }
+      })
+    })
+
+    workerSummary.value = Object.values(workerMap).map(worker => ({
+      worker_name: worker.worker_name,
+      worker_role: worker.worker_role,
+      total_hours: worker.total_hours,
+      avg_hourly_rate: worker.rate_count > 0
+        ? Math.round(worker.rate_sum / worker.rate_count)
+        : 0,
+      total_cost: worker.total_cost
+    }))
+
+    totalLaborCost.value = grandLaborTotal
+
+  } catch (err) {
     console.error('❌ loadActivityAndMaterialData:', err)
     activityReport.value = []
     materialList.value = []
     totalMaterial.value = 0
+    workerSummary.value = []
+    totalLaborCost.value = 0
   }
 }
 
-
-// --------------------------------------------------------------------------------------
-// Chart Functions (Diperbarui untuk menggunakan data batch spesifik)
-// --------------------------------------------------------------------------------------
 const initCharts = async () => {
-  // ✅ PERBAIKAN: chartData sudah didefinisikan sebagai ref di atas
   await initFaseChart();
   await initKepemilikanChart();
   await initPenjualanChart();
@@ -517,7 +529,7 @@ const initFaseChart = async () => {
   const { data: productionData } = await supabase
     .from("gh_data_production")
     .select("production_type, qty")
-    .eq("batch_id", batchId.value); // Filter berdasarkan batchId
+    .eq("batch_id", batchId.value);
 
   const faseData = { planlet: 0, g0: 0, g1: 0, g2: 0 };
 
@@ -573,7 +585,6 @@ const initKepemilikanChart = async () => {
     chartData.value.kepemilikanChart.destroy();
   }
 
-  // Hanya ambil data production yang sudah diringkas (gh_production) yang relevan dengan batch ini
   const { data: productionData } = await supabase
     .from("gh_production")
     .select("owner, qty, category")
@@ -624,7 +635,7 @@ const initKepemilikanChart = async () => {
 };
 
 const initPenjualanChart = async () => {
-  const canvas = document.getElementById('keuanganChart'); // Menggunakan ID yang ada di template
+  const canvas = document.getElementById('keuanganChart');
   if (!canvas || isNaN(batchId.value)) return;
 
   if (chartData.value.penjualanChart) {
@@ -634,7 +645,7 @@ const initPenjualanChart = async () => {
   const { data: salesData } = await supabase
     .from("gh_sales")
     .select("date, qty, price")
-    .eq("batch_id", batchId.value) // Filter berdasarkan batchId
+    .eq("batch_id", batchId.value)
     .order("date", { ascending: true });
 
   const monthlyData = {};
@@ -703,28 +714,21 @@ const initPenjualanChart = async () => {
   });
 };
 
-
 onMounted(async () => {
   if (isNaN(batchId.value)) {
     console.error('Invalid Batch ID.');
-    // Redirect ke dashboard jika ID tidak valid
     router.push('/dashboard'); 
     return;
   }
   await loadBatchDetailData();
 });
 
-// Helper untuk mendapatkan warna gradient per fase (disesuaikan dengan gambar referensi)
 const getPhaseColors = (phaseKey) => {
-    // Warna Cokelat/Krem dari gambar referensi (Potato/Kartu)
     const BROWN_START = '#D4A574'; 
     const BROWN_END = '#B88A5C';
-
-    // Warna Kuning/Emas untuk tombol Repair (dari gambar referensi)
     const REPAIR_BUTTON_BG = '#FFC107'; 
     const REPAIR_BUTTON_HOVER = '#FFA000';
     
-    // Warna untuk progress bar, menggunakan gradient cokelat/krem sesuai gambar
     switch (phaseKey) {
         case 'planlet':
         case 'g0':
@@ -744,6 +748,181 @@ const getPhaseColors = (phaseKey) => {
                 button_hover: REPAIR_BUTTON_HOVER
             };
     }
+}
+
+// ✅ FUNGSI EXPORT TO EXCEL
+const exportToExcel = () => {
+  try {
+    const wb = XLSX.utils.book_new()
+    
+    // Sheet 1: Ringkasan Batch
+    const summaryData = [
+      ['LAPORAN DETAIL BATCH'],
+      ['Batch', batchDetail.value?.batch_name || '-'],
+      ['Lokasi', locationInfo.value?.location || '-'],
+      [''],
+      ['RINGKASAN PRODUKSI'],
+      ['Total Planlet', batchSummary.value.totalPlanlet],
+      ['G0 Diproduksi', batchSummary.value.g0Diproduksi],
+      ['G0 Terjual', batchSummary.value.g0Terjual],
+      ['G2 Diproduksi', batchSummary.value.g2Diproduksi],
+      ['G2 Terjual', batchSummary.value.g2Terjual],
+      ['Tingkat Keberhasilan', batchSummary.value.sukses + '%'],
+      [''],
+      ['BIAYA PRODUKSI'],
+      ['Total Material', `Rp ${totalMaterial.value.toLocaleString('id-ID')}`],
+      ['Total Tenaga Kerja', `Rp ${totalLaborCost.value.toLocaleString('id-ID')}`],
+      ['TOTAL BIAYA', `Rp ${(totalMaterial.value + totalLaborCost.value).toLocaleString('id-ID')}`]
+    ]
+    const ws1 = XLSX.utils.aoa_to_sheet(summaryData)
+    XLSX.utils.book_append_sheet(wb, ws1, 'Ringkasan')
+    
+    // Sheet 2: Material
+    if (materialList.value.length > 0) {
+      const materialData = [
+        ['BAHAN BAKU YANG DIGUNAKAN'],
+        [''],
+        ['Nama Material', 'Jumlah', 'Satuan', 'Harga Satuan', 'Total Harga']
+      ]
+      materialList.value.forEach(mat => {
+        materialData.push([
+          mat.material_name,
+          mat.Qty,
+          mat.UoM,
+          mat.harga_satuan,
+          mat.total_harga
+        ])
+      })
+      materialData.push(['', '', '', 'TOTAL:', totalMaterial.value])
+      const ws2 = XLSX.utils.aoa_to_sheet(materialData)
+      XLSX.utils.book_append_sheet(wb, ws2, 'Material')
+    }
+    
+    // Sheet 3: Tenaga Kerja
+    if (workerSummary.value.length > 0) {
+      const workerData = [
+        ['TENAGA KERJA YANG DIGUNAKAN'],
+        [''],
+        ['Nama Pekerja', 'Jabatan', 'Total Jam', 'Upah/Jam', 'Total Biaya']
+      ]
+      workerSummary.value.forEach(worker => {
+        workerData.push([
+          worker.worker_name,
+          worker.worker_role,
+          worker.total_hours,
+          worker.avg_hourly_rate,
+          worker.total_cost
+        ])
+      })
+      workerData.push(['', '', '', 'TOTAL:', totalLaborCost.value])
+      const ws3 = XLSX.utils.aoa_to_sheet(workerData)
+      XLSX.utils.book_append_sheet(wb, ws3, 'Tenaga Kerja')
+    }
+    
+    // Sheet 4: Aktivitas
+    if (activityReport.value.length > 0) {
+      const activityData = [
+        ['LAPORAN AKTIVITAS'],
+        [''],
+        ['Tanggal', 'Aktivitas', 'Material', 'Jumlah', 'Satuan', 'Harga Satuan', 'Total Material', 'Pekerja', 'Total Labor', 'Total Biaya']
+      ]
+      activityReport.value.forEach(act => {
+        const materialRows = act.materials?.length || 1
+        const workerNames = act.workers?.map(w => `${w.worker?.name} (${w.hours_worked}h)`).join(', ') || '-'
+        
+        if (act.materials?.length > 0) {
+          act.materials.forEach((mat, idx) => {
+            activityData.push([
+              idx === 0 ? act.tanggal : '',
+              idx === 0 ? act.Activity : '',
+              mat.material_name,
+              mat.qty,
+              mat.uom,
+              mat.unit_price,
+              idx === 0 ? act.material_total : '',
+              idx === 0 ? workerNames : '',
+              idx === 0 ? act.labor_total : '',
+              idx === 0 ? act.row_total : ''
+            ])
+          })
+        } else {
+          activityData.push([
+            act.tanggal,
+            act.Activity,
+            '-',
+            0,
+            '-',
+            0,
+            act.material_total,
+            workerNames,
+            act.labor_total,
+            act.row_total
+          ])
+        }
+      })
+      
+      const totalMaterialAct = activityReport.value.reduce((sum, item) => sum + (item.material_total || 0), 0)
+      const totalLaborAct = activityReport.value.reduce((sum, item) => sum + (item.labor_total || 0), 0)
+      const totalAct = activityReport.value.reduce((sum, item) => sum + (item.row_total || 0), 0)
+      
+      activityData.push(['', '', '', '', '', 'TOTAL:', totalMaterialAct, '', totalLaborAct, totalAct])
+      const ws4 = XLSX.utils.aoa_to_sheet(activityData)
+      XLSX.utils.book_append_sheet(wb, ws4, 'Aktivitas')
+    }
+    
+    const fileName = `Batch_${batchDetail.value?.batch_name || batchId.value}_${new Date().toISOString().split('T')[0]}.xlsx`
+    XLSX.writeFile(wb, fileName)
+    
+  } catch (error) {
+    console.error('Error exporting to Excel:', error)
+    alert('Gagal export ke Excel: ' + error.message)
+  }
+}
+
+// ✅ FUNGSI EXPORT TO PDF
+const exportToPDF = async () => {
+  try {
+    const element = document.getElementById('exportArea')
+    if (!element) {
+      alert('Area export tidak ditemukan')
+      return
+    }
+    
+    // Sembunyikan tombol export saat PDF
+    const buttons = document.querySelectorAll('.export-hide')
+    buttons.forEach(btn => btn.style.display = 'none')
+    
+    const opt = {
+      margin: [10, 10, 10, 10],
+      filename: `Batch_${batchDetail.value?.batch_name || batchId.value}_${new Date().toISOString().split('T')[0]}.pdf`,
+      image: { type: 'jpeg', quality: 0.95 },
+      html2canvas: { 
+        scale: 2, 
+        useCORS: true, 
+        scrollY: 0,
+        windowHeight: element.scrollHeight
+      },
+      jsPDF: { 
+        unit: 'mm', 
+        format: 'a4', 
+        orientation: 'portrait' 
+      },
+      pagebreak: { mode: ['avoid-all', 'css', 'legacy'] }
+    }
+    
+    await html2pdf().set(opt).from(element).save()
+    
+    // Tampilkan kembali tombol
+    buttons.forEach(btn => btn.style.display = '')
+    
+  } catch (error) {
+    console.error('Error exporting to PDF:', error)
+    alert('Gagal export ke PDF: ' + error.message)
+    
+    // Pastikan tombol muncul kembali
+    const buttons = document.querySelectorAll('.export-hide')
+    buttons.forEach(btn => btn.style.display = '')
+  }
 }
 </script>
 
@@ -774,25 +953,27 @@ const getPhaseColors = (phaseKey) => {
               </p>
             </div>
           </div>
-          <div class="flex items-center gap-3">
+          <div class="flex items-center gap-3 export-hide">
             <button 
               @click="exportToExcel" 
-              class="flex items-center gap-2 bg-white hover:bg-gray-50 text-gray-700 px-4 py-2.5 rounded-lg border-2 border-gray-200 hover:border-green-500 transition font-medium text-sm shadow-sm hover:shadow"
+              class="flex items-center gap-2 bg-white hover:bg-gray-50 text-gray-700 px-3 sm:px-4 py-2 sm:py-2.5 rounded-lg border-2 border-gray-200 hover:border-green-500 transition font-medium text-xs sm:text-sm shadow-sm hover:shadow"
             >
               <svg class="w-4 h-4 text-green-600" fill="currentColor" viewBox="0 0 20 20">
                 <path d="M9 2a2 2 0 00-2 2v8a2 2 0 002 2h6a2 2 0 002-2V6.414A2 2 0 0016.414 5L14 2.586A2 2 0 0012.586 2H9z"/>
                 <path d="M3 8a2 2 0 012-2v10h8a2 2 0 01-2 2H5a2 2 0 01-2-2V8z"/>
               </svg>
-              Ekspor Excel
+              <span class="hidden sm:inline">Ekspor Excel</span>
+              <span class="sm:hidden">Excel</span>
             </button>
             <button 
               @click="exportToPDF" 
-              class="flex items-center gap-2 bg-gradient-to-r from-red-500 to-red-600 hover:from-red-600 hover:to-red-700 text-white px-4 py-2.5 rounded-lg transition font-medium text-sm shadow-md hover:shadow-lg transform hover:-translate-y-0.5"
+              class="flex items-center gap-2 bg-gradient-to-r from-red-500 to-red-600 hover:from-red-600 hover:to-red-700 text-white px-3 sm:px-4 py-2 sm:py-2.5 rounded-lg transition font-medium text-xs sm:text-sm shadow-md hover:shadow-lg transform hover:-translate-y-0.5"
             >
               <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
                 <path fill-rule="evenodd" d="M6 2a2 2 0 00-2 2v12a2 2 0 002 2h8a2 2 0 002-2V7.414A2 2 0 0015.414 6L12 2.586A2 2 0 0010.586 2H6zm5 6a1 1 0 10-2 0v3.586l-1.293-1.293a1 1 0 10-1.414 1.414l3 3a1 1 0 001.414 0l3-3a1 1 0 00-1.414-1.414L11 11.586V8z" clip-rule="evenodd"/>
               </svg>
-              Ekspor PDF
+              <span class="hidden sm:inline">Ekspor PDF</span>
+              <span class="sm:hidden">PDF</span>
             </button>
           </div>
         </div>
@@ -827,7 +1008,7 @@ const getPhaseColors = (phaseKey) => {
             <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
                 <div class="bg-white rounded-xl border-t-4 border-t-orange-400 p-4 shadow-sm">
                     <div class="flex justify-between items-center mb-3">
-                        <span class="font-bold text-gray-800 flex items-center gap-1"> Pagi</span>
+                        <span class="font-bold text-gray-800 flex items-center gap-1">🌅 Pagi</span>
                         <span class="text-xs bg-gray-100 px-2 py-0.5 rounded text-gray-600 font-mono">{{ formatTime(environmentData.time_morning) }}</span>
                     </div>
                     <div class="space-y-2 text-sm">
@@ -838,7 +1019,7 @@ const getPhaseColors = (phaseKey) => {
                 </div>
                 <div class="bg-white rounded-xl border-t-4 border-t-yellow-400 p-4 shadow-sm">
                     <div class="flex justify-between items-center mb-3">
-                        <span class="font-bold text-gray-800 flex items-center gap-1"> Siang</span>
+                        <span class="font-bold text-gray-800 flex items-center gap-1">☀️ Siang</span>
                         <span class="text-xs bg-gray-100 px-2 py-0.5 rounded text-gray-600 font-mono">{{ formatTime(environmentData.time_noon) }}</span>
                     </div>
                     <div class="space-y-2 text-sm">
@@ -849,7 +1030,7 @@ const getPhaseColors = (phaseKey) => {
                 </div>
                 <div class="bg-white rounded-xl border-t-4 border-t-indigo-400 p-4 shadow-sm">
                     <div class="flex justify-between items-center mb-3">
-                        <span class="font-bold text-gray-800 flex items-center gap-1"> Sore</span>
+                        <span class="font-bold text-gray-800 flex items-center gap-1">🌥️ Sore</span>
                         <span class="text-xs bg-gray-100 px-2 py-0.5 rounded text-gray-600 font-mono">{{ formatTime(environmentData.time_afternoon) }}</span>
                     </div>
                     <div class="space-y-2 text-sm">
@@ -860,7 +1041,7 @@ const getPhaseColors = (phaseKey) => {
                 </div>
                 <div class="bg-white rounded-xl border-t-4 border-t-slate-500 p-4 shadow-sm">
                     <div class="flex justify-between items-center mb-3">
-                        <span class="font-bold text-gray-800 flex items-center gap-1"> Malam</span>
+                        <span class="font-bold text-gray-800 flex items-center gap-1">🌙 Malam</span>
                         <span class="text-xs bg-gray-100 px-2 py-0.5 rounded text-gray-600 font-mono">{{ formatTime(environmentData.time_night) }}</span>
                     </div>
                     <div class="space-y-2 text-sm">
@@ -871,49 +1052,52 @@ const getPhaseColors = (phaseKey) => {
                 </div>
             </div>
         </div>
+        <div v-else class="bg-white rounded-xl border border-gray-200 border-dashed p-8 text-center">
+          <p class="text-gray-400 text-sm italic">Tidak ada catatan lingkungan untuk hari ini</p>
         </div>
+      </div>
       
       <div class="mb-8">
         <h2 class="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-3">Ringkasan Produksi</h2>
-        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
-          <div class="bg-gradient-to-br from-[#0071f3] to-[#005dd1] text-white rounded-2xl p-6 text-left hover:shadow-xl transition-all transform hover:scale-105 relative overflow-hidden">
-            <div class="absolute top-0 right-0 w-32 h-32 bg-white opacity-5 rounded-full -mr-16 -mt-16"></div>
+        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-5">
+          <div class="bg-gradient-to-br from-[#0071f3] to-[#005dd1] text-white rounded-xl sm:rounded-2xl p-4 sm:p-6 text-left hover:shadow-xl transition-all transform hover:scale-105 relative overflow-hidden">
+            <div class="absolute top-0 right-0 w-24 h-24 sm:w-32 sm:h-32 bg-white opacity-5 rounded-full -mr-12 sm:-mr-16 -mt-12 sm:-mt-16"></div>
             <div class="relative">
-              <p class="text-sm font-semibold opacity-90 mb-2">Total Planlet</p>
-              <h2 class="text-4xl font-bold mb-1">{{ batchSummary.totalPlanlet.toLocaleString('id-ID') }}</h2>
+              <p class="text-xs sm:text-sm font-semibold opacity-90 mb-1 sm:mb-2">Total Planlet</p>
+              <h2 class="text-2xl sm:text-4xl font-bold mb-1">{{ batchSummary.totalPlanlet.toLocaleString('id-ID') }}</h2>
               <p class="text-xs opacity-75">🌱 Stok keseluruhan</p>
             </div>
           </div>
 
-          <div class="bg-white rounded-2xl p-6 text-left border-2 border-gray-100 hover:border-gray-200 hover:shadow-lg transition-all">
-            <p class="text-sm font-semibold text-gray-500 mb-2">G0 Terjual</p>
-            <h2 class="text-4xl font-bold text-gray-900 mb-1">{{ batchSummary.g0Terjual.toLocaleString('id-ID') }}</h2>
+          <div class="bg-white rounded-xl sm:rounded-2xl p-4 sm:p-6 text-left border-2 border-gray-100 hover:border-gray-200 hover:shadow-lg transition-all">
+            <p class="text-xs sm:text-sm font-semibold text-gray-500 mb-1 sm:mb-2">G0 Terjual</p>
+            <h2 class="text-2xl sm:text-4xl font-bold text-gray-900 mb-1">{{ batchSummary.g0Terjual.toLocaleString('id-ID') }}</h2>
             <p class="text-xs text-gray-500">💰 Unit terjual</p>
           </div>
 
-          <div class="bg-white rounded-2xl p-6 text-left border-2 border-gray-100 hover:border-gray-200 hover:shadow-lg transition-all">
-            <p class="text-sm font-semibold text-gray-500 mb-2">G0 Diproduksi</p>
-            <h2 class="text-4xl font-bold text-gray-900 mb-1">{{ batchSummary.g0Diproduksi.toLocaleString('id-ID') }}</h2>
+          <div class="bg-white rounded-xl sm:rounded-2xl p-4 sm:p-6 text-left border-2 border-gray-100 hover:border-gray-200 hover:shadow-lg transition-all">
+            <p class="text-xs sm:text-sm font-semibold text-gray-500 mb-1 sm:mb-2">G0 Diproduksi</p>
+            <h2 class="text-2xl sm:text-4xl font-bold text-gray-900 mb-1">{{ batchSummary.g0Diproduksi.toLocaleString('id-ID') }}</h2>
             <p class="text-xs text-gray-500">🏭 Unit produksi</p>
           </div>
 
-          <div class="bg-white rounded-2xl p-6 text-left border-2 border-gray-100 hover:border-gray-200 hover:shadow-lg transition-all">
-            <p class="text-sm font-semibold text-gray-500 mb-2">Total G2 Diproduksi</p>
-            <h2 class="text-4xl font-bold text-gray-900 mb-1">{{ batchSummary.g2Diproduksi.toLocaleString('id-ID') }}</h2>
+          <div class="bg-white rounded-xl sm:rounded-2xl p-4 sm:p-6 text-left border-2 border-gray-100 hover:border-gray-200 hover:shadow-lg transition-all">
+            <p class="text-xs sm:text-sm font-semibold text-gray-500 mb-1 sm:mb-2">Total G2 Diproduksi</p>
+            <h2 class="text-2xl sm:text-4xl font-bold text-gray-900 mb-1">{{ batchSummary.g2Diproduksi.toLocaleString('id-ID') }}</h2>
             <p class="text-xs text-gray-500">✅ Produksi akhir</p>
           </div>
 
-          <div class="bg-white rounded-2xl p-6 text-left border-2 border-gray-100 hover:border-gray-200 hover:shadow-lg transition-all">
-            <p class="text-sm font-semibold text-gray-500 mb-2">Total G2 Terjual</p>
-            <h2 class="text-4xl font-bold text-gray-900 mb-1">{{ batchSummary.g2Terjual.toLocaleString('id-ID') }}</h2>
+          <div class="bg-white rounded-xl sm:rounded-2xl p-4 sm:p-6 text-left border-2 border-gray-100 hover:border-gray-200 hover:shadow-lg transition-all">
+            <p class="text-xs sm:text-sm font-semibold text-gray-500 mb-1 sm:mb-2">Total G2 Terjual</p>
+            <h2 class="text-2xl sm:text-4xl font-bold text-gray-900 mb-1">{{ batchSummary.g2Terjual.toLocaleString('id-ID') }}</h2>
             <p class="text-xs text-gray-500">📦 Distribusi selesai</p>
           </div>
 
-          <div class="bg-gradient-to-br from-[#0071f3] to-[#005dd1] text-white rounded-2xl p-6 text-left hover:shadow-xl transition-all transform hover:scale-105 relative overflow-hidden">
-            <div class="absolute top-0 right-0 w-32 h-32 bg-white opacity-5 rounded-full -mr-16 -mt-16"></div>
+          <div class="bg-gradient-to-br from-[#0071f3] to-[#005dd1] text-white rounded-xl sm:rounded-2xl p-4 sm:p-6 text-left hover:shadow-xl transition-all transform hover:scale-105 relative overflow-hidden">
+            <div class="absolute top-0 right-0 w-24 h-24 sm:w-32 sm:h-32 bg-white opacity-5 rounded-full -mr-12 sm:-mr-16 -mt-12 sm:-mt-16"></div>
             <div class="relative">
-              <p class="text-sm font-semibold opacity-90 mb-2">Tingkat Keberhasilan</p>
-              <h2 class="text-4xl font-bold mb-1">{{ batchSummary.sukses }}%</h2>
+              <p class="text-xs sm:text-sm font-semibold opacity-90 mb-1 sm:mb-2">Tingkat Keberhasilan</p>
+              <h2 class="text-2xl sm:text-4xl font-bold mb-1">{{ batchSummary.sukses }}%</h2>
               <p class="text-xs opacity-75">📊 Tingkat keberhasilan keseluruhan</p>
             </div>
           </div>
@@ -1002,6 +1186,7 @@ const getPhaseColors = (phaseKey) => {
           </div>
         </div>
       </div>
+
       <div class="mb-8">
         <h2 class="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-3">Analisis & Visualisasi</h2>
         <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -1023,7 +1208,69 @@ const getPhaseColors = (phaseKey) => {
         <div v-if="activityReport.length === 0" class="bg-white rounded-2xl border-2 border-gray-100 p-8 text-center text-gray-500">
           Belum ada laporan aktivitas untuk batch ini
         </div>
-        <div v-else class="bg-white rounded-2xl border-2 border-gray-100 shadow-sm hover:shadow-lg transition-all overflow-hidden">
+        
+        <!-- Mobile Card View -->
+        <div v-else class="block lg:hidden space-y-4">
+          <div
+            v-for="item in activityReport"
+            :key="item.activity_id"
+            class="bg-white rounded-xl border-2 border-gray-100 p-4 shadow-sm hover:shadow-lg transition-all"
+          >
+            <div class="flex justify-between items-start mb-3">
+              <div>
+                <p class="text-xs text-gray-500 mb-1">{{ item.tanggal || '-' }}</p>
+                <h3 class="font-bold text-gray-900">{{ item.Activity }}</h3>
+              </div>
+            </div>
+            
+            <!-- Material Section -->
+            <div v-if="item.materials?.length" class="mb-3">
+              <p class="text-xs font-bold text-gray-600 mb-1 flex items-center gap-1">
+                <span>📦</span> Material
+              </p>
+              <div class="bg-green-50 rounded-lg p-2 space-y-1">
+                <div v-for="(mat, index) in item.materials" :key="index" class="text-xs">
+                  <div class="flex justify-between">
+                    <span class="text-gray-600">{{ mat.material_name }}</span>
+                    <span class="font-semibold">{{ Number(mat.qty ?? 0).toLocaleString('id-ID') }} {{ mat.uom }}</span>
+                  </div>
+                </div>
+                <div class="pt-1 border-t border-green-200 flex justify-between font-bold text-green-700">
+                  <span>Total Material:</span>
+                  <span>Rp {{ (item.material_total || 0).toLocaleString('id-ID') }}</span>
+                </div>
+              </div>
+            </div>
+            
+            <!-- Worker Section -->
+            <div v-if="item.workers?.length" class="mb-3">
+              <p class="text-xs font-bold text-gray-600 mb-1 flex items-center gap-1">
+                <span>👷</span> Pekerja
+              </p>
+              <div class="bg-orange-50 rounded-lg p-2 space-y-1">
+                <div v-for="(worker, index) in item.workers" :key="index" class="text-xs">
+                  <div class="flex justify-between">
+                    <span class="text-gray-600">{{ worker.worker?.name }}</span>
+                    <span class="font-semibold">{{ Number(worker.hours_worked || 0).toLocaleString('id-ID') }}h</span>
+                  </div>
+                </div>
+                <div class="pt-1 border-t border-orange-200 flex justify-between font-bold text-orange-700">
+                  <span>Total Labor:</span>
+                  <span>Rp {{ (item.labor_total || 0).toLocaleString('id-ID') }}</span>
+                </div>
+              </div>
+            </div>
+            
+            <!-- Total -->
+            <div class="pt-3 border-t border-gray-200 flex justify-between items-center">
+              <span class="font-bold text-gray-900">Total Biaya:</span>
+              <span class="text-lg font-bold text-blue-700">Rp {{ (item.row_total || 0).toLocaleString('id-ID') }}</span>
+            </div>
+          </div>
+        </div>
+        
+        <!-- Desktop Table View -->
+        <div v-if="activityReport.length > 0" class="hidden lg:block bg-white rounded-2xl border-2 border-gray-100 shadow-sm hover:shadow-lg transition-all overflow-hidden">
           <div class="overflow-x-auto">
             <table class="min-w-full">
               <thead class="bg-gradient-to-r from-[#0071f3] to-[#0060d1]">
@@ -1034,8 +1281,10 @@ const getPhaseColors = (phaseKey) => {
                   <th class="px-6 py-4 text-right text-xs font-semibold text-white uppercase tracking-wider">Jumlah</th>
                   <th class="px-6 py-4 text-center text-xs font-semibold text-white uppercase tracking-wider">UoM</th>
                   <th class="px-6 py-4 text-right text-xs font-semibold text-white uppercase tracking-wider">Harga satuan</th>
-                  <th class="px-6 py-4 text-right text-xs font-semibold text-white uppercase tracking-wider">Total</th>
-                  <th class="px-6 py-4 text-center text-xs font-semibold text-white uppercase tracking-wider">Tenaga Kerja</th>
+                  <th class="px-6 py-4 text-right text-xs font-semibold text-white uppercase tracking-wider">Total Material</th>
+                  <th class="px-6 py-4 text-left text-xs font-semibold text-white uppercase tracking-wider">Pekerja</th>
+                  <th class="px-6 py-4 text-right text-xs font-semibold text-white uppercase tracking-wider">Total Labor</th>
+                  <th class="px-6 py-4 text-right text-xs font-semibold text-white uppercase tracking-wider">Total Biaya</th>
                 </tr>
               </thead>
               <tbody class="bg-white divide-y divide-gray-200">
@@ -1044,86 +1293,72 @@ const getPhaseColors = (phaseKey) => {
                   :key="item.activity_id"
                   class="hover:bg-blue-50 transition"
                 >
-                  <td class="px-6 py-4 text-sm text-gray-900">
-                    {{ item.tanggal || '-' }}
-                  </td>
-
-                  <td class="px-6 py-4 text-sm text-gray-700">
-                    {{ item.Activity }}
-                  </td>
-
+                  <td class="px-6 py-4 text-sm text-gray-900">{{ item.tanggal || '-' }}</td>
+                  <td class="px-6 py-4 text-sm text-gray-700">{{ item.Activity }}</td>
                   <td class="px-6 py-4 text-sm text-gray-700">
                     <div v-if="item.materials?.length">
-                      <div
-                        v-for="(mat, index) in item.materials"
-                        :key="index"
-                        class="text-xs"
-                      >
+                      <div v-for="(mat, index) in item.materials" :key="index" class="text-xs">
                         • {{ mat.material_name }}
                       </div>
                     </div>
                     <div v-else>-</div>
                   </td>
-
                   <td class="px-6 py-4 text-sm font-semibold text-right">
                     <div v-if="item.materials?.length">
-                      <div
-                        v-for="(mat, index) in item.materials"
-                        :key="index"
-                        class="text-xs"
-                      >
+                      <div v-for="(mat, index) in item.materials" :key="index" class="text-xs">
                         {{ Number(mat.qty ?? 0).toLocaleString('id-ID') }}
                       </div>
                     </div>
                     <div v-else>0</div>
                   </td>
-
                   <td class="px-6 py-4 text-sm text-center text-gray-600">
                     <div v-if="item.materials?.length">
-                      <div
-                        v-for="(mat, index) in item.materials"
-                        :key="index"
-                        class="text-xs"
-                      >
+                      <div v-for="(mat, index) in item.materials" :key="index" class="text-xs">
                         {{ mat.uom || '-' }}
                       </div>
                     </div>
                     <div v-else>-</div>
                   </td>
-
                   <td class="px-6 py-4 text-sm text-right">
                     <div v-if="item.materials?.length">
-                      <div
-                        v-for="(mat, index) in item.materials"
-                        :key="index"
-                        class="text-xs"
-                      >
+                      <div v-for="(mat, index) in item.materials" :key="index" class="text-xs">
                         Rp {{ Number(mat.unit_price ?? 0).toLocaleString('id-ID') }}
                       </div>
                     </div>
                     <div v-else>Rp 0</div>
                   </td>
-
+                  <td class="px-6 py-4 text-sm font-bold text-green-700 text-right">
+                    Rp {{ (item.material_total || 0).toLocaleString('id-ID') }}
+                  </td>
+                  <td class="px-6 py-4 text-sm text-gray-700">
+                    <div v-if="item.workers?.length">
+                      <div v-for="(worker, index) in item.workers" :key="index" class="text-xs">
+                        • {{ worker.worker?.name }} ({{ Number(worker.hours_worked || 0).toLocaleString('id-ID') }}h)
+                      </div>
+                    </div>
+                    <div v-else>-</div>
+                  </td>
+                  <td class="px-6 py-4 text-sm font-bold text-orange-700 text-right">
+                    Rp {{ (item.labor_total || 0).toLocaleString('id-ID') }}
+                  </td>
                   <td class="px-6 py-4 text-sm font-bold text-blue-700 text-right">
                     Rp {{ (item.row_total || 0).toLocaleString('id-ID') }}
-                  </td>
-
-                  <td class="px-6 py-4 text-sm font-semibold text-center">
-                    {{ item.manpower ?? '-' }}
                   </td>
                 </tr>
               </tbody>
               <tfoot>
                 <tr class="bg-gradient-to-r from-blue-50 to-white">
-                  <td colspan="6" class="px-6 py-4 text-right text-sm font-bold text-gray-900">Total Biaya Kegiatan:</td>
-                  <td class="px-6 py-4 whitespace-nowrap text-sm font-bold text-green-600 text-right">
-                    Rp {{
-                        activityReport
-                          .reduce((sum, item) => sum + (item.row_total || 0), 0)
-                          .toLocaleString('id-ID')
-                      }}
+                  <td colspan="6" class="px-6 py-4 text-right text-sm font-bold text-gray-900">Total Biaya Material:</td>
+                  <td class="px-6 py-4 text-sm font-bold text-green-600 text-right">
+                    Rp {{ activityReport.reduce((sum, item) => sum + (item.material_total || 0), 0).toLocaleString('id-ID') }}
                   </td>
-                  <td></td>
+                  <td class="px-6 py-4 text-right text-sm font-bold text-gray-900">Total Biaya Labor:</td>
+                  <td class="px-6 py-4 text-sm font-bold text-orange-600 text-right">
+                    Rp {{ activityReport.reduce((sum, item) => sum + (item.labor_total || 0), 0).toLocaleString('id-ID') }}
+                  </td>
+                  <td class="px-6 py-4 text-sm font-bold text-blue-600 text-right">
+                    Rp {{ activityReport.reduce((sum, item) => sum + (item.row_total || 0), 0).toLocaleString('id-ID') }}
+                  </td>
                 </tr>
               </tfoot>
             </table>
@@ -1166,6 +1401,69 @@ const getPhaseColors = (phaseKey) => {
         </div>
       </div>
 
+      <!-- ✅ SECTION BARU: Ringkasan Tenaga Kerja -->
+      <div class="mb-8">
+        <h2 class="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-3">Tenaga Kerja yang Digunakan (Ringkasan)</h2>
+        <div v-if="workerSummary.length === 0" class="bg-white rounded-2xl border-2 border-gray-100 p-8 text-center text-gray-500">
+          Belum ada data tenaga kerja
+        </div>
+        <div v-else class="bg-white rounded-2xl border-2 border-gray-100 shadow-sm hover:shadow-lg transition-all overflow-hidden">
+          <div class="overflow-x-auto">
+            <table class="min-w-full">
+              <thead class="bg-gradient-to-r from-orange-500 to-orange-600">
+                <tr>
+                  <th class="px-6 py-4 text-left text-xs font-semibold text-white uppercase tracking-wider">Nama Pekerja</th>
+                  <th class="px-6 py-4 text-left text-xs font-semibold text-white uppercase tracking-wider">Jabatan</th>
+                  <th class="px-6 py-4 text-right text-xs font-semibold text-white uppercase tracking-wider">Total Jam Kerja</th>
+                  <th class="px-6 py-4 text-right text-xs font-semibold text-white uppercase tracking-wider">Upah/Jam Rata-rata</th>
+                  <th class="px-6 py-4 text-right text-xs font-semibold text-white uppercase tracking-wider">Total Biaya</th>
+                </tr>
+              </thead>
+              <tbody class="bg-white divide-y divide-gray-200">
+                <tr v-for="worker in workerSummary" :key="worker.worker_name" class="hover:bg-orange-50 transition">
+                  <td class="px-6 py-4 text-sm text-gray-900 font-medium">{{ worker.worker_name }}</td>
+                  <td class="px-6 py-4 text-sm text-gray-600">{{ worker.worker_role }}</td>
+                  <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900 font-semibold text-right">{{ worker.total_hours.toLocaleString('id-ID', { minimumFractionDigits: 1, maximumFractionDigits: 1 }) }} jam</td>
+                  <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-700 text-right">Rp {{ worker.avg_hourly_rate.toLocaleString('id-ID') }}</td>
+                  <td class="px-6 py-4 whitespace-nowrap text-sm text-orange-600 font-bold text-right">Rp {{ worker.total_cost.toLocaleString('id-ID') }}</td>
+                </tr>
+                <tr class="bg-gradient-to-r from-orange-50 to-white">
+                  <td colspan="4" class="px-6 py-4 text-right text-sm font-bold text-gray-900">Grand Total Labor Cost:</td>
+                  <td class="px-6 py-4 whitespace-nowrap text-sm font-bold text-[#0071f3] text-right">Rp {{ totalLaborCost.toLocaleString('id-ID') }}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <!-- ✅ SECTION: Total Biaya Keseluruhan -->
+      <div class="mb-8">
+        <div class="bg-gradient-to-br from-blue-600 to-blue-700 text-white rounded-xl sm:rounded-2xl p-6 sm:p-8 shadow-xl">
+          <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+            <div class="flex-1">
+              <p class="text-xs sm:text-sm font-semibold opacity-90 mb-2">TOTAL BIAYA PRODUKSI</p>
+              <h2 class="text-3xl sm:text-5xl font-bold mb-2 sm:mb-0">Rp {{ (totalMaterial + totalLaborCost).toLocaleString('id-ID') }}</h2>
+              <div class="flex flex-col sm:flex-row gap-3 sm:gap-6 mt-3 sm:mt-4 text-sm opacity-90">
+                <div>
+                  <span class="block text-xs mb-1">Material</span>
+                  <span class="font-bold">Rp {{ totalMaterial.toLocaleString('id-ID') }}</span>
+                </div>
+                <div>
+                  <span class="block text-xs mb-1">Tenaga Kerja</span>
+                  <span class="font-bold">Rp {{ totalLaborCost.toLocaleString('id-ID') }}</span>
+                </div>
+              </div>
+            </div>
+            <div class="text-right self-end sm:self-auto">
+              <div class="w-16 h-16 sm:w-20 sm:h-20 bg-white/10 rounded-full flex items-center justify-center text-3xl sm:text-4xl">
+                💰
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
       <footer class="text-center py-10 mt-16 border-t border-gray-200">
         <div class="flex items-center justify-center gap-2 mb-2">
            <span class="w-6 h-6 p-0.5">
@@ -1176,6 +1474,20 @@ const getPhaseColors = (phaseKey) => {
         <p class="text-gray-400 text-xs">© 2025 All Rights Reserved</p>
       </footer>
     </div>
+
+    <!-- Modals -->
+    <ModalView v-if="isOpen" @close="closeModal">
+      <h2 class="text-xl font-bold mb-4">Detail Informasi</h2>
+      <p>Konten modal di sini...</p>
+    </ModalView>
+
+    <DamageRepairModal
+      v-if="isRepairModalOpen"
+      :phase="selectedPhaseForRepair"
+      :batch-id="batchId"
+      @close="closeRepairModal"
+      @success="handleRepairSuccess"
+    />
   </div>
 </template>
 

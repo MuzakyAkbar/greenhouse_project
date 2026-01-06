@@ -22,10 +22,10 @@
               </span>
               Berita Acara Selisih Barang
             </h1>
-            <p class="text-sm text-gray-500 mt-1">
+            <!-- <p class="text-sm text-gray-500 mt-1">
               Movement:
               <span class="font-semibold">{{ header?.code || "-" }}</span>
-            </p>
+            </p> -->
           </div>
         </div>
       </div>
@@ -40,12 +40,10 @@
           <span class="text-amber-500 text-2xl">⚠️</span>
           <div class="flex-1">
             <h4 class="font-bold text-amber-800 text-sm">
-              Data Penerimaan Belum Tersimpan ke Database
+              Data Penerimaan Belum Tersimpan
             </h4>
             <p class="text-amber-700 text-xs mt-2">
-              Data penerimaan barang yang Anda input sebelumnya 
-              <strong>BELUM masuk ke database</strong>.<br>
-              Data akan tersimpan ke database setelah Anda mengisi alasan kekurangan 
+              Data akan tersimpan setelah Anda mengisi alasan kekurangan 
               dan menekan tombol <strong>"Simpan Data"</strong> di bawah.
             </p>
             <p class="text-amber-600 text-xs mt-2 font-semibold">
@@ -54,17 +52,6 @@
             </p>
           </div>
         </div>
-      </div>
-
-      <!-- INFO BANNER -->
-      <div
-        class="bg-white rounded-2xl shadow-sm border border-gray-100 p-4 text-sm"
-      >
-        <p class="text-gray-600">
-          📋 Untuk setiap barang yang mengalami kekurangan, 
-          <strong>wajib mengisi alasan</strong>. Barang yang diterima lengkap 
-          tidak perlu diisi alasan.
-        </p>
       </div>
 
       <!-- FORM BERITA ACARA -->
@@ -164,42 +151,6 @@
           </div>
         </div>
 
-        <!-- VALIDATION WARNING -->
-        <div
-          v-if="!isFormValid"
-          class="bg-red-50 border-l-4 border-red-500 p-4 rounded-xl"
-        >
-          <div class="flex items-start gap-3">
-            <span class="text-red-500 text-xl">❌</span>
-            <div>
-              <p class="font-semibold text-red-800 text-sm">
-                Harap Lengkapi Data
-              </p>
-              <p class="text-red-700 text-xs mt-1">
-                Semua item dengan selisih wajib diisi alasan kekurangannya.
-              </p>
-            </div>
-          </div>
-        </div>
-
-        <!-- INFO: Apa yang Akan Disimpan -->
-        <div class="bg-blue-50 border-l-4 border-blue-500 p-4 rounded-xl">
-          <div class="flex items-start gap-3">
-            <span class="text-blue-500 text-xl">💾</span>
-            <div class="flex-1">
-              <p class="font-semibold text-blue-800 text-sm mb-2">
-                Data yang Akan Disimpan ke Database:
-              </p>
-              <ul class="text-blue-700 text-xs space-y-1 list-disc list-inside">
-                <li>Header Penerimaan → Tabel: <code>gh_movement_receiving</code></li>
-                <li>Detail {{ formRows.length }} Item → Tabel: <code>gh_movement_receiving_item</code></li>
-                <li>Berita Acara untuk {{ itemsWithShortage }} Item → Tabel: <code>gh_berita_acara</code></li>
-                <li>Update Status Movement → Status: <strong>Partially Received</strong></li>
-              </ul>
-            </div>
-          </div>
-        </div>
-
         <!-- FOOTER ACTIONS -->
         <div
           class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 pt-2"
@@ -208,7 +159,7 @@
             <label class="flex items-center gap-2">
               <input type="checkbox" v-model="isChecked" class="w-4 h-4" />
               <span>
-                <strong>Saya telah memastikan semua data dengan benar dan siap menyimpan ke database!</strong>
+                <strong>Saya telah memastikan semua data dengan benar</strong>
               </span>
             </label>
           </div>
@@ -228,26 +179,28 @@
             >
               <span v-if="processing" class="flex items-center gap-2">
                 <span class="animate-spin rounded-full h-4 w-4 border-2 border-white border-t-transparent"></span>
-                Menyimpan ke Database...
+                Data Disimpan
               </span>
               <span v-else class="flex items-center gap-2">
                 <span>💾</span>
-                Simpan ke Database
+                Simpan
               </span>
             </button>
           </div>
         </div>
       </form>
-    </div>
-    <footer class="text-center py-10 mt-16 border-t border-gray-200">
+
+      <footer class="text-center py-10 mt-16 border-t border-gray-200">
         <div class="flex items-center justify-center gap-2 mb-2">
-           <span class="w-6 h-6 p-0.5">
-             <img :src="logoPG" alt="Potato Grow Logo" class="w-full h-full object-contain" />
+          <span class="w-6 h-6 p-0.5">
+            <img :src="logoPG" alt="Logo Potato Grow" class="w-full h-full object-contain" />
           </span>
           <p class="text-gray-400 font-bold text-sm">POTATO GROW</p>
         </div>
-        <p class="text-gray-400 text-xs">© 2025 All Rights Reserved</p>
+        <p class="text-gray-400 text-xs">© 2025 Hak Cipta Dilindungi</p>
       </footer>
+
+    </div>
   </div>
 </template>
 
@@ -256,7 +209,7 @@ import { ref, computed, onMounted } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { supabase } from "@/lib/supabase";
 import { useAuthStore } from "@/stores/auth";
-import logoPG from '../assets/logoPG.svg'
+import logoPG from "@/assets/logoPG.svg";
 
 const auth = useAuthStore();
 const route = useRoute();
@@ -408,21 +361,50 @@ const handleSubmit = async () => {
 
     console.log("✅ Receiving header saved, ID:", receiving.receiving_id);
 
-    // ==========================================
+   // ==========================================
     // STEP 2: INSERT KE gh_movement_receiving_item
     // ==========================================
     console.log("2️⃣ Inserting receiving items...");
 
-    const receivingItems = receivingData.items.map((item) => ({
-      receiving_id: receiving.receiving_id,
-      movement_item_id: item.movement_item_id,
-      material_used_id: item.material_used_id,
-      qty_requested: item.qty_request,
-      qty_received: item.qty_received,
-      qty_shortage: item.qty_shortage,
-      notes: item.notes || null,
-      openbravo_synced: false,
-    }));
+    const receivingItems = receivingData.items.map((item) => {
+      // 1. Cari data inputan user di halaman ini (formRows) berdasarkan ID item
+      const currentRow = formRows.value.find(
+        (row) => row.movement_item_id === item.movement_item_id
+      );
+
+      // 2. Ambil notes lama dari halaman sebelumnya (jika ada)
+      let finalNotes = item.notes ? item.notes : "";
+
+      // 3. Jika item ini punya selisih (qty_lost > 0), tambahkan alasannya ke notes
+      if (currentRow && currentRow.qty_lost > 0) {
+        // Tentukan teks alasan (apakah dari dropdown atau custom text)
+        let reasonText = currentRow.selected_reason;
+        if (reasonText === "Lainnya") {
+          reasonText = currentRow.custom_reason;
+        }
+
+        // Format tambahan note: "Alasan Selisih: ..."
+        const reasonString = `(Selisih ${currentRow.qty_lost}: ${reasonText})`;
+
+        // Gabungkan dengan notes lama
+        if (finalNotes) {
+          finalNotes += ` | ${reasonString}`;
+        } else {
+          finalNotes = reasonString;
+        }
+      }
+
+      return {
+        receiving_id: receiving.receiving_id,
+        movement_item_id: item.movement_item_id,
+        material_used_id: item.material_used_id,
+        qty_requested: item.qty_request,
+        qty_received: item.qty_received,
+        qty_shortage: item.qty_shortage,
+        notes: finalNotes || null, // <--- Notes yang sudah update dimasukkan ke sini
+        openbravo_synced: false,
+      };
+    });
 
     const { error: itemsError } = await supabase
       .from("gh_movement_receiving_item")
@@ -499,6 +481,7 @@ const handleSubmit = async () => {
     const { error: movementError } = await supabase
       .from("gh_movement")
       .update({
+        status: "Approved",
         receive_status: "Partially Received",
         received_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
@@ -533,7 +516,12 @@ const handleSubmit = async () => {
       `✅ Status Movement: Partially Received`
     );
 
-    router.push({ name: "goodmovement" });
+    router.push({
+        path: `/detailmovement/${movementId.value}`,
+        query: { refresh: Date.now() }
+    });
+
+    return; 
 
   } catch (err) {
     console.error("❌ Error submit berita acara:", err);

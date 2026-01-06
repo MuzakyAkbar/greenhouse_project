@@ -982,9 +982,7 @@ const submitAll = async () => {
 
     if (lineRes?.data?.response?.status !== 0) {
       throw new Error("Gagal membuat line Openbravo");
-    }
-
-    alert("Dokumen berhasil dibuat di Supabase & Openbravo!");
+    };
     clearForm();
   } catch (err) {
     console.error("Submit error:", err);

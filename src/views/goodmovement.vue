@@ -28,7 +28,7 @@
                 >
                   🚚
                 </span>
-                Good Movement
+                Perpindahan Barang
               </h1>
               <p class="text-sm text-gray-500 mt-1 ml-13">
                 Manajemen Perpindahan Barang
@@ -136,12 +136,20 @@
                     <div
                       class="w-10 h-10 rounded-lg flex items-center justify-center text-white text-lg flex-shrink-0"
                       :class="
-                        mv.status === 'Approved'
+                        mv.status === STATUS.APPROVED
                           ? 'bg-gradient-to-br from-green-400 to-green-500'
+                          : mv.status === STATUS.WAITING_RECEIVE
+                          ? 'bg-gradient-to-br from-blue-400 to-blue-500'
                           : 'bg-gradient-to-br from-yellow-400 to-yellow-500'
                       "
-                    >
-                      {{ mv.status === "Approved" ? "✅" : "⏳" }}
+                      >
+                      {{ 
+                        mv.status === STATUS.APPROVED
+                          ? '✅'
+                          : mv.status === STATUS.WAITING_RECEIVE
+                          ? '📦'
+                          : '⏳'
+                      }}
                     </div>
                     <div>
                       <p class="font-bold text-gray-900 text-lg">
@@ -201,19 +209,23 @@
                   <span
                     class="text-xs font-bold px-4 py-2 rounded-lg whitespace-nowrap"
                     :class="
-                      mv.status === 'Approved'
+                      mv.status === STATUS.APPROVED
                         ? 'bg-green-100 text-green-800'
-                        : mv.status === 'Need Revision'
+                        : mv.status === STATUS.WAITING_RECEIVE
+                        ? 'bg-blue-100 text-blue-800'
+                        : mv.status === STATUS.NEED_REVISION
                         ? 'bg-red-100 text-red-800'
                         : 'bg-yellow-100 text-yellow-800'
                     "
                   >
                     {{
-                      mv.status === "Approved"
-                        ? "✅ Approved"
-                        : mv.status === "Need Revision"
-                        ? "❌ Need Revision"
-                        : "⏳ On Review"
+                      mv.status === STATUS.APPROVED
+                        ? '✅ Approved'
+                        : mv.status === STATUS.WAITING_RECEIVE
+                        ? '📦 Menunggu Penerimaan'
+                        : mv.status === STATUS.NEED_REVISION
+                        ? '❌ Need Revision'
+                        : '⏳ On Review'
                     }}
                   </span>
                   <svg
@@ -292,12 +304,13 @@
       <footer class="text-center py-10 mt-16 border-t border-gray-200">
         <div class="flex items-center justify-center gap-2 mb-2">
            <span class="w-6 h-6 p-0.5">
-             <img :src="logoPG" alt="Potato Grow Logo" class="w-full h-full object-contain" />
+             <img :src="logoPG" alt="Logo Potato Grow" class="w-full h-full object-contain" />
           </span>
           <p class="text-gray-400 font-bold text-sm">POTATO GROW</p>
         </div>
-        <p class="text-gray-400 text-xs">© 2025 All Rights Reserved</p>
+        <p class="text-gray-400 text-xs">© 2025 Hak Cipta Dilindungi</p>
       </footer>
+
     </div>
   </div>
 </template>
@@ -305,7 +318,15 @@
 <script setup>
 import { ref, onMounted, onBeforeUnmount, computed } from "vue";
 import { supabase } from "@/lib/supabase";
-import logoPG from '../assets/logoPG.svg'
+import logoPG from "@/assets/logoPG.svg";
+
+const STATUS = {
+  ON_REVIEW: 'On Review',
+  WAITING_RECEIVE: 'Menunggu Penerimaan',
+  APPROVED: 'Approved',
+  NEED_REVISION: 'Need Revision',
+  REJECTED: 'Rejected'
+}
 
 // ===== State Management =====
 const loading = ref(false);
@@ -564,6 +585,11 @@ const showStatusChangeNotification = (movement, oldStatus) => {
       icon = "⏳";
       bgColor = "bg-blue-100 text-blue-800 border-blue-300";
       break;
+      case STATUS.WAITING_RECEIVE:
+      message = `Movement ${movement.documentNo} menunggu penerimaan barang`;
+      icon = "📦";
+      bgColor = "bg-blue-100 text-blue-800 border-blue-300";
+      break;
     default:
       return; // No notification for other statuses
   }
@@ -657,7 +683,9 @@ const startPollingFallback = () => {
     
     // Get movements that are in review
     const reviewMovements = movements.value.filter(
-      m => m.status === "On Review" || m.status === "Waiting"
+      m =>
+        m.status === STATUS.ON_REVIEW ||
+        m.status === STATUS.WAITING_RECEIVE
     );
     
     if (reviewMovements.length > 0) {
